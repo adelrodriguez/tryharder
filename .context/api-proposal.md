@@ -20,6 +20,54 @@ const value = try$
 const result = try$.run(() => myFn())
 ```
 
+Sync example with multiple error variants:
+
+```ts
+class InvalidInputError extends Error {}
+class PermissionDeniedError extends Error {}
+
+const syncResult = try$.run({
+  try: () => readLocalConfig(),
+  catch: (error): InvalidInputError | PermissionDeniedError => {
+    if (error instanceof SyntaxError) {
+      return new InvalidInputError("Config file is malformed")
+    }
+
+    return new PermissionDeniedError("Config file is not readable")
+  },
+})
+
+// syncResult is Config | InvalidInputError | PermissionDeniedError
+```
+
+Async example with multiple error variants:
+
+```ts
+class NetworkError extends Error {}
+class RemoteServiceError extends Error {}
+
+const asyncResult = await try$.run({
+  try: async (ctx) => {
+    const res = await fetch("/api/profile", { signal: ctx.signal })
+
+    if (!res.ok) {
+      throw new Error(`Request failed: ${res.status}`)
+    }
+
+    return (await res.json()) as Profile
+  },
+  catch: async (error): Promise<NetworkError | RemoteServiceError> => {
+    if (error instanceof TypeError) {
+      return new NetworkError("Network request failed")
+    }
+
+    return new RemoteServiceError("Profile service returned an error")
+  },
+})
+
+// asyncResult is Profile | NetworkError | RemoteServiceError
+```
+
 Retries can be very specific:
 
 ```ts

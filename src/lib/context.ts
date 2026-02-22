@@ -1,4 +1,5 @@
-import type { BuilderConfig, TryCtx } from "./types"
+import type { BuilderConfig } from "./types/builder"
+import type { TryCtx } from "./types/core"
 
 export function createContext(config: BuilderConfig): TryCtx {
   return {
