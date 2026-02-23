@@ -26,7 +26,7 @@ export type TimeoutOptions = number | TimeoutPolicy
  * This keeps middleware signatures stable while run()/runAsync() input
  * contexts are feature-narrowed.
  */
-export type WrapFn = (ctx: TryCtx, next: RunTryFn<unknown>) => unknown
+export type WrapFn = (ctx: TryCtx, next: RunTryFn<unknown, TryCtx>) => unknown
 
 export interface BuilderConfig {
   /**

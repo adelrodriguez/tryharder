@@ -7,6 +7,7 @@ import type {
   AsyncRunInput,
   AsyncRunTryFn,
   RunCatchFn,
+  RunTryFn,
   SyncRunInput,
   SyncRunTryFn,
 } from "./types/run"
@@ -107,7 +108,7 @@ class RunExecution<T, E, Ctx extends BaseTryCtx> {
 
   execute(): T | E | RunnerError | Promise<T | E | RunnerError> {
     try {
-      const result = this.#executeAttemptSync(1)
+      const result = this.#executeWrappedRun()
 
       if (checkIsPromiseLike(result)) {
         return Promise.resolve(result).finally(() => {
@@ -126,6 +127,24 @@ class RunExecution<T, E, Ctx extends BaseTryCtx> {
   #dispose(): void {
     this.#signal.dispose()
     this.#timeout.dispose()
+  }
+
+  #executeWrappedRun(): T | E | RunnerError | Promise<T | E | RunnerError> {
+    const wraps = this.#config.wraps
+
+    if (!wraps || wraps.length === 0) {
+      return this.#executeAttemptSync(1)
+    }
+
+    let next: RunTryFn<unknown, TryCtx> = (_ctx) => this.#executeAttemptSync(1)
+
+    for (const wrap of wraps.toReversed()) {
+      const previous: RunTryFn<unknown, TryCtx> = next
+
+      next = (ctx) => wrap(ctx, previous)
+    }
+
+    return next(this.#ctx) as T | E | RunnerError | Promise<T | E | RunnerError>
   }
 
   #checkDidControlFail(cause?: unknown): CancellationError | TimeoutError | undefined {

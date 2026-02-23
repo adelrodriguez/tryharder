@@ -28,7 +28,7 @@ describe("context feature typing", () => {
         return 1
       })
 
-      wrap(() => null).run((ctx) => {
+      wrap((context, next) => next(context)).run((ctx) => {
         // @ts-expect-error retry metadata is only available after retry()
         void ctx.retry.attempt
         return 1
@@ -45,7 +45,7 @@ describe("context feature typing", () => {
     retry(3)
       .timeout(100)
       .signal(new AbortController().signal)
-      .wrap(() => null)
+      .wrap((context, next) => next(context))
       .run((ctx) => ctx.retry.attempt)
   })
 })

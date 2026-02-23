@@ -11,7 +11,7 @@ Goal: implement `hardtry` incrementally with behavior locked by
 - [x] Phase 3 - `retryOptions` + `retry`
 - [x] Phase 4 - `timeout` (v1 total scope only)
 - [x] Phase 5 - `.signal(...)` cancellation
-- [ ] Phase 6 - `wrap` middleware (full-run scope)
+- [x] Phase 6 - `wrap` middleware (full-run scope)
 - [ ] Phase 7 - Builder API + root namespace exports
 - [ ] Phase 8 - `dispose` with `AsyncDisposableStack`
 - [ ] Phase 9 - `gen`

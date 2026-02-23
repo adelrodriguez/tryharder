@@ -97,6 +97,53 @@ describe("executeRunSync / executeRunAsync", () => {
 
       expect(result).toBeInstanceOf(CancellationError)
     })
+
+    it("applies wraps in registration order around full run", () => {
+      const events: string[] = []
+      let attempts = 0
+
+      const result = executeRunSync(
+        {
+          retry: { backoff: "constant", limit: 3 },
+          wraps: [
+            (ctx, next) => {
+              events.push(`outer:before:${ctx.retry.attempt}`)
+              const value = next(ctx)
+              events.push(`outer:after:${ctx.retry.attempt}`)
+              return value
+            },
+            (ctx, next) => {
+              events.push(`inner:before:${ctx.retry.attempt}`)
+              const value = next(ctx)
+              events.push(`inner:after:${ctx.retry.attempt}`)
+              return value
+            },
+          ],
+        },
+        (ctx: TryCtx) => {
+          attempts += 1
+          events.push(`try:${ctx.retry.attempt}`)
+
+          if (attempts < 3) {
+            throw new Error("boom")
+          }
+
+          return "ok"
+        }
+      )
+
+      expect(result).toBe("ok")
+      expect(attempts).toBe(3)
+      expect(events).toEqual([
+        "outer:before:1",
+        "inner:before:1",
+        "try:1",
+        "try:2",
+        "try:3",
+        "inner:after:3",
+        "outer:after:3",
+      ])
+    })
   })
 
   describe("async", () => {
@@ -248,6 +295,62 @@ describe("executeRunSync / executeRunAsync", () => {
       const result = await pending
 
       expect(result).toBeInstanceOf(CancellationError)
+    })
+
+    it("runs wraps once when retries are handled asynchronously", async () => {
+      let wrapCalls = 0
+      let attempts = 0
+
+      const result = await executeRunAsync(
+        {
+          retry: { backoff: "constant", delayMs: 1, limit: 3 },
+          wraps: [
+            (ctx, next) => {
+              wrapCalls += 1
+              return next(ctx)
+            },
+          ],
+        },
+        async (ctx: TryCtx) => {
+          attempts += 1
+
+          if (attempts === 1) {
+            throw new Error("boom")
+          }
+
+          await Promise.resolve()
+          return ctx.retry.attempt
+        }
+      )
+
+      expect(result).toBe(2)
+      expect(wrapCalls).toBe(1)
+      expect(attempts).toBe(2)
+    })
+
+    it("keeps wrap scope around timeout during async retry backoff", async () => {
+      const events: string[] = []
+
+      const result = await executeRunAsync(
+        {
+          retry: { backoff: "constant", delayMs: 50, limit: 3 },
+          timeout: { ms: 5, scope: "total" },
+          wraps: [
+            async (ctx, next) => {
+              events.push(`before:${ctx.retry.attempt}`)
+              const value = await next(ctx)
+              events.push(`after:${ctx.retry.attempt}`)
+              return value
+            },
+          ],
+        },
+        () => {
+          throw new Error("boom")
+        }
+      )
+
+      expect(result).toBeInstanceOf(TimeoutError)
+      expect(events).toEqual(["before:1", "after:1"])
     })
   })
 })

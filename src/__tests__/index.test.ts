@@ -229,7 +229,7 @@ describe("retry execution flow", () => {
 
 describe("builder helpers", () => {
   it("supports wrap builder step", () => {
-    const result = wrap(() => null).run(() => 42)
+    const result = wrap((ctx, next) => next(ctx)).run(() => 42)
 
     expect(result).toBe(42)
   })
@@ -255,7 +255,7 @@ describe("full builder chain", () => {
     const result = retry(3)
       .timeout(100)
       .signal(ac.signal)
-      .wrap(() => null)
+      .wrap((ctx, next) => next(ctx))
       .run((ctx) => {
         attempts += 1
         expect(ctx.signal).toBeDefined()
@@ -283,7 +283,7 @@ describe("full builder chain", () => {
     })
       .timeout(100)
       .signal(ac.signal)
-      .wrap(() => null)
+      .wrap((ctx, next) => next(ctx))
       .runAsync({
         catch: () => "mapped" as const,
         try: async (ctx) => {
@@ -303,7 +303,7 @@ describe("full builder chain", () => {
     const result = await retry(3)
       .timeout(5)
       .signal(ac.signal)
-      .wrap(() => null)
+      .wrap((ctx, next) => next(ctx))
       .runAsync(async () => {
         await new Promise((resolve) => {
           setTimeout(resolve, 20)
