@@ -405,3 +405,96 @@ describe("full builder chain", () => {
     expect(rootedResult).toBe(7)
   })
 })
+
+describe("gen integration", () => {
+  class UserNotFound extends Error {}
+  class PermissionDenied extends Error {}
+  class ProjectNotFound extends Error {}
+
+  it("short-circuits with error from try$.runSync inside gen", () => {
+    const result = try$.gen(function* (use) {
+      const value = yield* use(
+        try$.runSync((): number => {
+          throw new Error("boom")
+        })
+      )
+
+      return value
+    })
+
+    expect(result).toBeInstanceOf(try$.UnhandledException)
+  })
+
+  it("short-circuits with error from try$.run inside gen", async () => {
+    const result = await try$.gen(function* (use) {
+      const value = yield* use(
+        try$.run(async (): Promise<number> => {
+          await Promise.resolve()
+          throw new Error("boom")
+        })
+      )
+
+      return value
+    })
+
+    expect(result).toBeInstanceOf(try$.UnhandledException)
+  })
+
+  it("composes multiple try$ calls and returns success or mapped errors", async () => {
+    const runFlow = (mode: "ok" | "user-not-found" | "permission-denied" | "project-not-found") => {
+      const getUser = () =>
+        try$.run({
+          catch: (error): UserNotFound | PermissionDenied => {
+            if (error instanceof TypeError) {
+              return new PermissionDenied("denied")
+            }
+
+            return new UserNotFound("missing user")
+          },
+          try: async () => {
+            await Promise.resolve()
+
+            if (mode === "permission-denied") {
+              throw new TypeError("denied")
+            }
+
+            if (mode === "user-not-found") {
+              throw new Error("missing")
+            }
+
+            return { id: "u_1" }
+          },
+        })
+
+      const getProject = (userId: string) =>
+        try$.run({
+          catch: (): ProjectNotFound => new ProjectNotFound("missing project"),
+          try: async () => {
+            await Promise.resolve()
+
+            if (mode === "project-not-found") {
+              throw new Error("missing")
+            }
+
+            return { id: `p_${userId}` }
+          },
+        })
+
+      return try$.gen(function* (use) {
+        const user = yield* use(getUser())
+        const project = yield* use(getProject(user.id))
+        return `${user.id}:${project.id}`
+      })
+    }
+
+    const ok = await runFlow("ok")
+    const userNotFound = await runFlow("user-not-found")
+    const permissionDenied = await runFlow("permission-denied")
+    const projectNotFound = await runFlow("project-not-found")
+
+    expect(ok).toBe("u_1:p_u_1")
+    expect(userNotFound).toBeInstanceOf(UserNotFound)
+    expect(permissionDenied).toBeInstanceOf(PermissionDenied)
+    expect(projectNotFound).toBeInstanceOf(ProjectNotFound)
+  })
+})
