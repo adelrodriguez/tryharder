@@ -1,5 +1,3 @@
-import type { SignalController } from "./signal"
-import type { TimeoutController } from "./timeout"
 import type { BuilderConfig } from "./types/builder"
 import type { BaseTryCtx, TryCtx } from "./types/core"
 import type { RetryPolicy } from "./types/retry"
@@ -11,7 +9,6 @@ import type {
   SyncRunInput,
   SyncRunTryFn,
 } from "./types/run"
-import { createContext } from "./context"
 import {
   CancellationError,
   Panic,
@@ -20,8 +17,8 @@ import {
   UnhandledException,
 } from "./errors"
 import { calculateRetryDelay, checkIsRetryExhausted, checkShouldAttemptRetry } from "./retry"
-import { createSignalController } from "./signal"
-import { createTimeoutController } from "./timeout"
+import { SignalController } from "./signal"
+import { TimeoutController } from "./timeout"
 import { checkIsControlError, checkIsPromiseLike, sleep } from "./utils"
 
 type RunnerError =
@@ -94,13 +91,13 @@ class RunExecution<T, E, Ctx extends BaseTryCtx> {
 
   constructor(config: BuilderConfig, input: AsyncRunInput<T, E, Ctx>) {
     this.#config = config
-    this.#timeout = createTimeoutController(config.timeout)
-    this.#signal = createSignalController(
-      [config.signal, this.#timeout.signal].filter(
+    this.#timeout = new TimeoutController(config.timeout)
+    this.#signal = new SignalController(
+      [...(config.signals ?? []), this.#timeout.signal].filter(
         (value): value is AbortSignal => value !== undefined
       )
     )
-    this.#ctx = createContext(config, this.#signal.signal)
+    this.#ctx = RunExecution.#createContext(config, this.#signal.signal)
 
     this.#catchFn = typeof input === "function" ? undefined : input.catch
     this.#tryFn = typeof input === "function" ? input : input.try
@@ -110,9 +107,20 @@ class RunExecution<T, E, Ctx extends BaseTryCtx> {
     return this.#executeWrappedRun()
   }
 
+  static #createContext(config: BuilderConfig, signal?: AbortSignal): TryCtx {
+    return {
+      retry: {
+        attempt: 1,
+        limit: config.retry?.limit ?? 1,
+      },
+      signal,
+    }
+  }
+
   [Symbol.dispose](): void {
-    this.#signal.dispose()
-    this.#timeout.dispose()
+    using disposer = new DisposableStack()
+    disposer.use(this.#timeout)
+    disposer.use(this.#signal)
   }
 
   #executeWrappedRun(): T | E | RunnerError | Promise<T | E | RunnerError> {
@@ -137,14 +145,11 @@ class RunExecution<T, E, Ctx extends BaseTryCtx> {
     return this.#signal.checkDidCancel(cause) ?? this.#timeout.checkDidTimeout(cause)
   }
 
-  async #raceWithControl<V>(
+  async #race<V>(
     promise: PromiseLike<V>,
     cause?: unknown
   ): Promise<V | CancellationError | TimeoutError> {
-    const raced = await this.#timeout.raceWithTimeout(
-      this.#signal.raceWithSignal(promise, cause),
-      cause
-    )
+    const raced = await this.#timeout.race(this.#signal.race(promise, cause), cause)
 
     if (raced instanceof TimeoutError) {
       const cancelled = this.#signal.checkDidCancel(cause)
@@ -181,7 +186,7 @@ class RunExecution<T, E, Ctx extends BaseTryCtx> {
           }
         })()
 
-        return this.#raceWithControl(mappedWithPanic, error)
+        return this.#race(mappedWithPanic, error)
       }
 
       const controlError = this.#checkDidControlFail(error)
@@ -281,7 +286,7 @@ class RunExecution<T, E, Ctx extends BaseTryCtx> {
 
       if (currentDecision.delay > 0) {
         // oxlint-disable-next-line no-await-in-loop
-        const sleepResult = await this.#raceWithControl(sleep(currentDecision.delay))
+        const sleepResult = await this.#race(sleep(currentDecision.delay))
         const sleepControlResult = extractControlResult(sleepResult)
 
         if (sleepControlResult) {
@@ -296,7 +301,7 @@ class RunExecution<T, E, Ctx extends BaseTryCtx> {
 
         if (checkIsPromiseLike(result)) {
           // oxlint-disable-next-line no-await-in-loop
-          const asyncResult = await this.#raceWithControl(Promise.resolve(result))
+          const asyncResult = await this.#race(Promise.resolve(result))
           const asyncControlResult = extractControlResult(asyncResult)
 
           if (asyncControlResult) {
@@ -344,7 +349,7 @@ class RunExecution<T, E, Ctx extends BaseTryCtx> {
         const result = this.#tryFn(this.#ctx as unknown as Ctx)
 
         if (checkIsPromiseLike(result)) {
-          return this.#raceWithControl(Promise.resolve(result))
+          return this.#race(Promise.resolve(result))
             .then((resolved) => {
               const controlResult = extractControlResult(resolved)
 
@@ -416,12 +421,10 @@ export function executeRunAsync<T, E, Ctx extends BaseTryCtx>(
   config: BuilderConfig,
   input: AsyncRunInput<T, E, Ctx>
 ): Promise<T | E | RunnerError>
-export function executeRunAsync<T, E, Ctx extends BaseTryCtx>(
+export async function executeRunAsync<T, E, Ctx extends BaseTryCtx>(
   config: BuilderConfig,
   input: AsyncRunInput<T, E, Ctx>
 ): Promise<T | E | RunnerError> {
-  return Promise.resolve().then(async () => {
-    using execution = new RunExecution<T, E, Ctx>(config, input)
-    return await execution.execute()
-  })
+  using execution = new RunExecution<T, E, Ctx>(config, input)
+  return await execution.execute()
 }

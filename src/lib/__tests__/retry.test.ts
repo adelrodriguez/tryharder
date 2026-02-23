@@ -17,7 +17,7 @@ function createTestCtx(attempt: number, config: BuilderConfig): TryCtx {
       attempt,
       limit: config.retry?.limit ?? 1,
     },
-    signal: config.signal,
+    signal: config.signals?.[0],
   }
 }
 

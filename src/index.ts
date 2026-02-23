@@ -45,7 +45,7 @@ export const all: TryBuilder["all"] = root.all.bind(root)
 export const allSettled: TryBuilder["allSettled"] = root.allSettled.bind(root)
 export const flow: TryBuilder["flow"] = root.flow.bind(root)
 
-export { createDisposer as dispose } from "./lib/dispose"
+export { dispose } from "./lib/dispose"
 export { executeGen as gen } from "./lib/gen"
 
 export { retryOptions }

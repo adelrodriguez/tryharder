@@ -1,140 +1,118 @@
 import type { TimeoutPolicy } from "./types/builder"
 import { TimeoutError } from "./errors"
 
-export interface TimeoutController {
-  signal?: AbortSignal
-  checkDidTimeout(cause?: unknown): TimeoutError | undefined
-  raceWithTimeout<V>(promise: PromiseLike<V>, cause?: unknown): Promise<V | TimeoutError>
-  [Symbol.dispose](): void
-  dispose(): void
-}
-
-function returnUndefinedTimeout(): TimeoutError | undefined {
-  return undefined
-}
-
-function disposeNoop(): void {
-  void 0
-}
-
-function passthroughPromise<V>(promise: PromiseLike<V>): Promise<V> {
-  return Promise.resolve(promise)
-}
-
 function createTimeoutCause(timeoutMs: number): Error {
   return new Error(`Execution exceeded timeout of ${timeoutMs}ms`)
 }
 
-export function createTimeoutController(timeoutPolicy?: TimeoutPolicy): TimeoutController {
-  if (!timeoutPolicy) {
-    return {
-      checkDidTimeout: returnUndefinedTimeout,
-      dispose: disposeNoop,
-      raceWithTimeout: passthroughPromise,
-      [Symbol.dispose]: disposeNoop,
+export class TimeoutController {
+  readonly signal?: AbortSignal
+  readonly #controller?: AbortController
+  readonly #startedAt = Date.now()
+  readonly #timeoutMs: number
+  #timeoutId: ReturnType<typeof setTimeout> | undefined
+
+  constructor(timeoutPolicy?: TimeoutPolicy) {
+    this.#timeoutMs = timeoutPolicy?.ms ?? -1
+
+    if (!timeoutPolicy) {
+      return
     }
+
+    this.#controller = new AbortController()
+    this.signal = this.#controller.signal
+
+    if (this.#timeoutMs <= 0) {
+      this.#abort()
+      return
+    }
+
+    this.#timeoutId = setTimeout(() => {
+      this.#abort()
+    }, this.#timeoutMs)
   }
 
-  const timeoutMs = timeoutPolicy.ms
-  const startedAt = Date.now()
-  const controller = new AbortController()
-  let timeoutId: ReturnType<typeof setTimeout> | undefined
+  #createTimeoutError(cause?: unknown): TimeoutError {
+    return new TimeoutError({ cause: cause ?? createTimeoutCause(this.#timeoutMs) })
+  }
 
-  function abortWithTimeout(cause?: unknown): TimeoutError {
-    const timeoutError = new TimeoutError({ cause: cause ?? createTimeoutCause(timeoutMs) })
+  #abort(cause?: unknown): TimeoutError {
+    const timeoutError = this.#createTimeoutError(cause)
 
-    if (!controller.signal.aborted) {
-      controller.abort(timeoutError)
+    if (!this.signal?.aborted) {
+      this.#controller?.abort(timeoutError)
     }
 
     return timeoutError
   }
 
-  if (timeoutMs <= 0) {
-    abortWithTimeout()
-  } else {
-    timeoutId = setTimeout(() => {
-      abortWithTimeout()
-    }, timeoutMs)
+  #getRemaining(): number {
+    const elapsed = Date.now() - this.#startedAt
+
+    return this.#timeoutMs - elapsed
   }
 
-  function createTimeoutError(cause?: unknown): TimeoutError {
-    return new TimeoutError({ cause: cause ?? createTimeoutCause(timeoutMs) })
-  }
+  checkDidTimeout(cause?: unknown): TimeoutError | undefined {
+    if (!this.signal) {
+      return undefined
+    }
 
-  function getRemainingTimeoutMs(): number {
-    const elapsed = Date.now() - startedAt
-
-    return timeoutMs - elapsed
-  }
-
-  function checkDidTimeout(cause?: unknown): TimeoutError | undefined {
-    if (controller.signal.aborted) {
-      const reason = controller.signal.reason
+    if (this.signal.aborted) {
+      const reason = this.signal.reason
 
       if (reason instanceof TimeoutError) {
         return reason
       }
 
-      return createTimeoutError(cause ?? reason)
+      return this.#createTimeoutError(cause ?? reason)
     }
 
-    const remaining = getRemainingTimeoutMs()
+    const remaining = this.#getRemaining()
 
     if (remaining > 0) {
       return undefined
     }
 
-    return abortWithTimeout(cause)
+    return this.#abort(cause)
   }
 
-  async function raceWithTimeout<V>(
-    promise: PromiseLike<V>,
-    cause?: unknown
-  ): Promise<V | TimeoutError> {
-    const remaining = getRemainingTimeoutMs()
-
-    if (remaining <= 0) {
-      return abortWithTimeout(cause)
+  async race<V>(promise: PromiseLike<V>, cause?: unknown): Promise<V | TimeoutError> {
+    if (!this.signal) {
+      return promise
     }
 
-    const timedOut = checkDidTimeout(cause)
+    const remaining = this.#getRemaining()
+
+    if (remaining <= 0) {
+      return this.#abort(cause)
+    }
+
+    const timedOut = this.checkDidTimeout(cause)
 
     if (timedOut) {
       return timedOut
     }
 
-    let removeAbortListener: (() => void) | undefined
+    const signal = this.signal
+    using disposer = new DisposableStack()
 
     const timeoutPromise = new Promise<TimeoutError>((resolve) => {
       const onAbort = () => {
-        resolve(checkDidTimeout(cause) ?? createTimeoutError(cause))
+        resolve(this.checkDidTimeout(cause) ?? this.#createTimeoutError(cause))
       }
 
-      controller.signal.addEventListener("abort", onAbort, { once: true })
-      removeAbortListener = () => {
-        controller.signal.removeEventListener("abort", onAbort)
-      }
+      signal.addEventListener("abort", onAbort, { once: true })
+      disposer.defer(() => {
+        signal.removeEventListener("abort", onAbort)
+      })
     })
 
-    try {
-      return await Promise.race([Promise.resolve(promise), timeoutPromise])
-    } finally {
-      removeAbortListener?.()
-    }
+    return await Promise.race([Promise.resolve(promise), timeoutPromise])
   }
 
-  function dispose(): void {
-    if (timeoutId !== undefined) {
-      clearTimeout(timeoutId)
+  [Symbol.dispose](): void {
+    if (this.#timeoutId !== undefined) {
+      clearTimeout(this.#timeoutId)
     }
-  }
-
-  return {
-    checkDidTimeout,
-    dispose,
-    raceWithTimeout,
-    signal: controller.signal,
-    [Symbol.dispose]: dispose,
   }
 }

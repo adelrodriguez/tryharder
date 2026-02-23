@@ -65,7 +65,10 @@ export class TryBuilder<
   }
 
   signal(signal: AbortSignal): TryBuilder<E | CancellationError, CanRunSync, CtxFeatures> {
-    return new TryBuilder({ ...this.#config, signal })
+    return new TryBuilder({
+      ...this.#config,
+      signals: [...(this.#config.signals ?? []), signal],
+    })
   }
 
   wrap(fn: WrapFn): TryBuilder<E, CanRunSync, CtxFeatures> {

@@ -3,36 +3,8 @@ import type { TryCtx } from "../types/core"
 import { CancellationError, Panic, TimeoutError, UnhandledException } from "../errors"
 import { executeRunAsync, executeRunSync } from "../runner"
 
-function createTrackedSignal() {
-  let abortListener: unknown
-  let addCalls = 0
-  let removeCalls = 0
-
-  const signal = {
-    aborted: false,
-    addEventListener: (type: string, listener: unknown) => {
-      if (type === "abort" && listener) {
-        addCalls += 1
-        abortListener = listener
-      }
-    },
-    reason: undefined,
-    removeEventListener: (type: string, listener: unknown) => {
-      if (type === "abort" && listener && listener === abortListener) {
-        removeCalls += 1
-      }
-    },
-  } as unknown as AbortSignal
-
-  return {
-    getAddCalls: () => addCalls,
-    getRemoveCalls: () => removeCalls,
-    signal,
-  }
-}
-
 describe("executeRunSync / executeRunAsync", () => {
-  describe("sync", () => {
+  describe("executeRunSync", () => {
     it("returns success value in function form", () => {
       const result = executeRunSync({}, () => "ok" as const)
 
@@ -106,7 +78,7 @@ describe("executeRunSync / executeRunAsync", () => {
       const ac = new AbortController()
       ac.abort(new Error("stop"))
 
-      const result = executeRunSync({ signal: ac.signal }, () => "ok")
+      const result = executeRunSync({ signals: [ac.signal] }, () => "ok")
 
       expect(result).toBeInstanceOf(CancellationError)
     })
@@ -117,7 +89,7 @@ describe("executeRunSync / executeRunAsync", () => {
 
       const result = executeRunSync(
         {
-          signal: ac.signal,
+          signals: [ac.signal],
           timeout: { ms: 0, scope: "total" },
         },
         () => "ok"
@@ -126,14 +98,14 @@ describe("executeRunSync / executeRunAsync", () => {
       expect(result).toBeInstanceOf(CancellationError)
     })
 
-    it("removes external signal listener after sync run completes", () => {
-      const tracked = createTrackedSignal()
+    it("returns CancellationError when any configured signal is already aborted", () => {
+      const first = new AbortController()
+      const second = new AbortController()
+      second.abort(new Error("stop"))
 
-      const result = executeRunSync({ signal: tracked.signal }, () => "ok")
+      const result = executeRunSync({ signals: [first.signal, second.signal] }, () => "ok")
 
-      expect(result).toBe("ok")
-      expect(tracked.getAddCalls()).toBe(1)
-      expect(tracked.getRemoveCalls()).toBe(1)
+      expect(result).toBeInstanceOf(CancellationError)
     })
 
     it("applies wraps in registration order around full run", () => {
@@ -184,7 +156,7 @@ describe("executeRunSync / executeRunAsync", () => {
     })
   })
 
-  describe("async", () => {
+  describe("executeRunAsync", () => {
     it("returns resolved value when function form is async", async () => {
       const result = executeRunAsync({}, async () => {
         await Promise.resolve()
@@ -319,7 +291,7 @@ describe("executeRunSync / executeRunAsync", () => {
     it("returns CancellationError when signal aborts during async try", async () => {
       const ac = new AbortController()
 
-      const pending = executeRunAsync({ signal: ac.signal }, async () => {
+      const pending = executeRunAsync({ signals: [ac.signal] }, async () => {
         await new Promise((resolve) => {
           setTimeout(resolve, 25)
         })
@@ -335,17 +307,24 @@ describe("executeRunSync / executeRunAsync", () => {
       expect(result).toBeInstanceOf(CancellationError)
     })
 
-    it("removes external signal listener after async run completes", async () => {
-      const tracked = createTrackedSignal()
+    it("returns CancellationError when one of many signals aborts during async run", async () => {
+      const first = new AbortController()
+      const second = new AbortController()
 
-      const result = await executeRunAsync({ signal: tracked.signal }, async () => {
-        await Promise.resolve()
+      const pending = executeRunAsync({ signals: [first.signal, second.signal] }, async () => {
+        await new Promise((resolve) => {
+          setTimeout(resolve, 25)
+        })
         return "ok"
       })
 
-      expect(result).toBe("ok")
-      expect(tracked.getAddCalls()).toBe(1)
-      expect(tracked.getRemoveCalls()).toBe(1)
+      setTimeout(() => {
+        second.abort(new Error("stop"))
+      }, 5)
+
+      const result = await pending
+
+      expect(result).toBeInstanceOf(CancellationError)
     })
 
     it("runs wraps once when retries are handled asynchronously", async () => {

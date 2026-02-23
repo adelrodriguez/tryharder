@@ -1,19 +1,19 @@
 import { describe, expect, it } from "bun:test"
 import { TimeoutError } from "../errors"
-import { createTimeoutController } from "../timeout"
+import { TimeoutController } from "../timeout"
 
-describe("createTimeoutController", () => {
+describe("TimeoutController", () => {
   it("returns non-timing behavior when timeout is not configured", async () => {
-    const controller = createTimeoutController()
+    const controller = new TimeoutController()
 
-    const result = await controller.raceWithTimeout(Promise.resolve("ok"))
+    const result = await controller.race(Promise.resolve("ok"))
 
     expect(result).toBe("ok")
     expect(controller.checkDidTimeout()).toBeUndefined()
   })
 
   it("reports timeout immediately for zero milliseconds", () => {
-    const controller = createTimeoutController({ ms: 0, scope: "total" })
+    const controller = new TimeoutController({ ms: 0, scope: "total" })
 
     const timeout = controller.checkDidTimeout()
 
@@ -21,19 +21,19 @@ describe("createTimeoutController", () => {
   })
 
   it("races pending promise to TimeoutError", async () => {
-    const controller = createTimeoutController({ ms: 5, scope: "total" })
+    const controller = new TimeoutController({ ms: 5, scope: "total" })
 
     const pending = new Promise<string>((resolve) => {
       void resolve
     })
 
-    const result = await controller.raceWithTimeout(pending)
+    const result = await controller.race(pending)
 
     expect(result).toBeInstanceOf(TimeoutError)
   })
 
   it("aborts timeout signal with TimeoutError reason", async () => {
-    const controller = createTimeoutController({ ms: 5, scope: "total" })
+    const controller = new TimeoutController({ ms: 5, scope: "total" })
 
     await new Promise((resolve) => {
       setTimeout(resolve, 20)
@@ -45,14 +45,14 @@ describe("createTimeoutController", () => {
   })
 
   it("returns TimeoutError when timing out during race with cause", async () => {
-    const controller = createTimeoutController({ ms: 5, scope: "total" })
+    const controller = new TimeoutController({ ms: 5, scope: "total" })
     const cause = new Error("during catch")
 
     const pending = new Promise<string>((resolve) => {
       void resolve
     })
 
-    const result = await controller.raceWithTimeout(pending, cause)
+    const result = await controller.race(pending, cause)
 
     expect(result).toBeInstanceOf(TimeoutError)
   })

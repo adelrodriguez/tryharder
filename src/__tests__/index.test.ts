@@ -328,6 +328,34 @@ describe("full builder chain", () => {
     expect(result).toBe("mapped")
   })
 
+  it("combines chained signal calls into a compound ctx.signal", async () => {
+    const first = new AbortController()
+    const second = new AbortController()
+
+    const pending = try$
+      .signal(first.signal)
+      .signal(second.signal)
+      .runAsync(async (ctx) => {
+        expect(ctx.signal).toBeDefined()
+        expect(ctx.signal).not.toBe(first.signal)
+        expect(ctx.signal).not.toBe(second.signal)
+
+        await new Promise((resolve) => {
+          setTimeout(resolve, 25)
+        })
+
+        return 42
+      })
+
+    setTimeout(() => {
+      second.abort(new Error("stop"))
+    }, 5)
+
+    const result = await pending
+
+    expect(result).toBeInstanceOf(try$.CancellationError)
+  })
+
   it("returns TimeoutError from full chain when deadline is exceeded", async () => {
     const ac = new AbortController()
 

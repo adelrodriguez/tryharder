@@ -38,9 +38,9 @@ export interface BuilderConfig {
    */
   timeout?: TimeoutPolicy
   /**
-   * Abort signal used to cancel execution.
+   * Abort signals used to cancel execution.
    */
-  signal?: AbortSignal
+  signals?: AbortSignal[]
   /**
    * Wrapper middleware chain around execution.
    */

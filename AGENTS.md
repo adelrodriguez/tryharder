@@ -16,6 +16,12 @@ This project was built with [`pastry`](https://github.com/adelrodriguez/pastry) 
 - Never make a major version bump unless the user requests it.
 - If a breaking change is being made, and we are on v1.0.0 or higher, alert the user.
 
+## Version Policy
+
+- We are currently in v0.
+- Backwards compatibility is not required right now.
+- Breaking changes are acceptable when they simplify or improve the API.
+
 ## TypeScript Style
 
 - Prefer type inference whenever possible.

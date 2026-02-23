@@ -1,3 +1,3 @@
-export function createDisposer(): AsyncDisposableStack {
+export function dispose(): AsyncDisposableStack {
   return new AsyncDisposableStack()
 }

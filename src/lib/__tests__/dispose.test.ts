@@ -1,10 +1,10 @@
 import { describe, expect, it } from "bun:test"
-import { createDisposer } from "../dispose"
+import { dispose } from "../dispose"
 
-describe("createDisposer", () => {
+describe("dispose", () => {
   it("disposes registered cleanups in reverse order", async () => {
     const calls: string[] = []
-    const disposer = createDisposer()
+    const disposer = dispose()
 
     disposer.defer(() => {
       calls.push("defer:first")
@@ -28,7 +28,7 @@ describe("createDisposer", () => {
 
   it("continues cleanup when one deferred cleanup throws", async () => {
     const calls: string[] = []
-    const disposer = createDisposer()
+    const disposer = dispose()
 
     disposer.defer(() => {
       calls.push("first")
