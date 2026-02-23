@@ -260,7 +260,8 @@ describe("full builder chain", () => {
       .wrap(() => null)
       .run((ctx) => {
         attempts += 1
-        expect(ctx.signal).toBe(ac.signal)
+        expect(ctx.signal).toBeDefined()
+        expect(ctx.signal).not.toBe(ac.signal)
         expect(ctx.retry.limit).toBe(3)
 
         if (attempts === 1) {
@@ -288,7 +289,8 @@ describe("full builder chain", () => {
       .runAsync({
         catch: () => "mapped" as const,
         try: async (ctx) => {
-          expect(ctx.signal).toBe(ac.signal)
+          expect(ctx.signal).toBeDefined()
+          expect(ctx.signal).not.toBe(ac.signal)
           await Promise.resolve()
           throw new Error("boom")
         },
@@ -320,14 +322,16 @@ describe("full builder chain", () => {
     const directResult = timeout(50)
       .signal(ac.signal)
       .run((ctx) => {
-        expect(ctx.signal).toBe(ac.signal)
+        expect(ctx.signal).toBeDefined()
+        expect(ctx.signal).not.toBe(ac.signal)
         return 7
       })
 
     const rootedResult = signal(ac.signal)
       .timeout(50)
       .run((ctx) => {
-        expect(ctx.signal).toBe(ac.signal)
+        expect(ctx.signal).toBeDefined()
+        expect(ctx.signal).not.toBe(ac.signal)
         return 7
       })
 
