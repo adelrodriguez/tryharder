@@ -7,7 +7,7 @@ const signal = new AbortController().signal
 const myFn = () => "value"
 class MyErr extends Error {}
 
-const value = try$
+const value = await try$
   .retry(3) // provide a retry policy
   .timeout(1000) // timeout for full execution scope
   .signal(signal) // cancel with an abort signal
@@ -17,16 +17,19 @@ const value = try$
   })
 
 // You can also do
-const result = try$.run(() => myFn())
+const result = await try$.run(() => myFn())
+
+// Or run synchronously inside a wrap chain
+const wrappedSync = try$.wrap((ctx, next) => next(ctx)).runSync(() => myFn())
 ```
 
-Sync example with multiple error variants:
+Sync example with multiple error variants (no builder features):
 
 ```ts
 class InvalidInputError extends Error {}
 class PermissionDeniedError extends Error {}
 
-const syncResult = try$.run({
+const syncResult = try$.runSync({
   try: () => readLocalConfig(),
   catch: (error): InvalidInputError | PermissionDeniedError => {
     if (error instanceof SyntaxError) {
@@ -88,7 +91,7 @@ const retryPolicy = try$.retryOptions({
   backoff: "exponential",
 })
 
-const value = try$.retry(retryPolicy).run({
+const value = await try$.retry(retryPolicy).run({
   try: () => myFn(),
   catch: (_e) => new MyErr(),
 })
@@ -106,7 +109,7 @@ Provide an abort controller signal to the execution:
 ```ts
 const abortController = new AbortController()
 
-try$.signal(abortController.signal).run({
+await try$.signal(abortController.signal).run({
   try: (ctx) => fetchUser(user.id),
   catch: (error) => error,
 })
@@ -115,7 +118,7 @@ try$.signal(abortController.signal).run({
 Or pass the abort signal from the internal function:
 
 ```ts
-try$.timeout(3000).run({
+await try$.timeout(3000).run({
   try: (ctx) => fetchUser(user.id, { signal: ctx.signal }),
   catch: (error) => error,
 })

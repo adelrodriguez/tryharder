@@ -18,8 +18,8 @@ import * as try$ from "hardtry"
 This section is the single source of truth for v1 behavior. If examples in
 other docs differ, this section wins.
 
-- API surface is `retry`, `timeout`, `signal`, `wrap`, `run`, `all`,
-  `allSettled`, `flow`, `gen`, `dispose`, and `retryOptions`.
+- API surface is `retry`, `timeout`, `signal`, `wrap`, `run`, `runSync`,
+  `all`, `allSettled`, `flow`, `gen`, `dispose`, and `retryOptions`.
 - v1 exposes `run` only (no `runPromise`).
 - Naming in docs and examples is always `try$`.
 - `run` supports sync and async user functions. If `try` and `catch` are sync,
@@ -70,12 +70,12 @@ src/
   lib/
     types.ts             # Shared TypeScript types and interfaces
     errors.ts            # Custom error classes
-    context.ts           # TryCtx implementation (signal, retry info)
+    run-sync.ts          # sync execution APIs: top-level runSync() + executeRunSync()
     builder.ts           # Fluent builder chain
     retry.ts             # Retry logic, backoff strategies, retryOptions()
     timeout.ts           # Timeout scoping (total)
     signal.ts            # External AbortSignal integration
-    runner.ts            # run() terminal execution with try/catch mapping
+    run.ts               # run() terminal execution with try/catch mapping
     gen.ts               # Generator-based composition
     dispose.ts           # Disposer with Symbol.asyncDispose
     all.ts               # all() / allSettled() parallel execution
@@ -86,7 +86,7 @@ src/
     retry.test.ts
     timeout.test.ts
     signal.test.ts
-    runner.test.ts
+    run.test.ts
     gen.test.ts
     dispose.test.ts
     all.test.ts
@@ -103,10 +103,11 @@ graph TD
   Builder --> Timeout["lib/timeout.ts"]
   Builder --> Signal["lib/signal.ts"]
   Builder --> Wrap["lib/wrap.ts"]
-  Builder --> Runner["lib/runner.ts"]
+  Builder --> Runner["lib/run.ts"]
+  Builder --> RunSync["lib/run-sync.ts"]
   Builder --> All["lib/all.ts"]
   Builder --> Flow["lib/flow.ts"]
-  Runner --> Context["lib/context.ts"]
+  Entry --> RunSync["lib/run-sync.ts"]
   All --> Context
   Flow --> Context
   Entry --> Gen["lib/gen.ts"]
@@ -126,8 +127,7 @@ sequenceDiagram
   participant User
   participant Index as src/index.ts
   participant Builder as TryBuilder
-  participant Runner as runner.ts
-  participant Ctx as context.ts
+  participant Runner as run.ts
 
   User->>Index: try$.retry(3)
   Index->>Builder: new TryBuilder().retry(3)
@@ -138,8 +138,7 @@ sequenceDiagram
 
   User->>Builder: .run({try, catch})
   Builder->>Runner: executeRun(config, options)
-  Runner->>Ctx: createContext(config)
-  Ctx-->>Runner: TryCtx{signal, retry metadata}
+  Runner->>Runner: createContext(config)
   Runner->>Runner: retry loop w/ timeout
   Runner-->>User: T | E
 ```
@@ -154,7 +153,7 @@ The builder accumulates an immutable configuration object:
 interface BuilderConfig {
   retry?: RetryPolicy
   timeout?: TimeoutPolicy
-  signal?: AbortSignal
+  signals?: AbortSignal[]
   wraps?: WrapFn[]
 }
 ```
@@ -189,7 +188,10 @@ class TryBuilder {
   }
 
   signal(signal: AbortSignal): TryBuilder {
-    return new TryBuilder({ ...this.#config, signal })
+    return new TryBuilder({
+      ...this.#config,
+      signals: [...(this.#config.signals ?? []), signal],
+    })
   }
 
   wrap(fn: WrapFn): TryBuilder {
@@ -231,7 +233,7 @@ mirror the builder:
 ```ts
 import { TryBuilder } from "./lib/builder"
 import { executeGen } from "./lib/gen"
-import { createDisposer } from "./lib/dispose"
+import { dispose } from "./lib/dispose"
 
 export { retryOptions } from "./lib/retry"
 
@@ -251,7 +253,7 @@ export const flow: TryBuilder["flow"] = root.flow.bind(root)
 
 // Standalone functions (not part of builder chain)
 export const gen = executeGen
-export const dispose = createDisposer
+export { dispose }
 ```
 
 This enables both usage styles:
@@ -264,6 +266,22 @@ try$.run({ ... })
 try$.gen(function* (use) { ... })
 try$.dispose()
 ```
+
+`runSync` is intentionally exposed in two forms:
+
+- Top-level `try$.runSync(...)` (from `lib/run-sync.ts`): no builder config,
+  no `TryCtx`, and no retry/timeout/signal/wrap features.
+- Chainable `try$.wrap(...).runSync(...)` (via `WrappedRunBuilder`): executes
+  with accumulated wraps and uses `executeRunSync(config, input)`.
+
+Chainable `runSync` limitations:
+
+- It is only available on the sync-capable wrapped branch.
+- Once the chain enters async-only mode (for example after
+  `.retry(...)`, `.timeout(...)`, or `.signal(...)`), only `.run(...)` is
+  available.
+- It throws `Panic` when the `try` function (or mapped `catch`) returns a
+  promise, and when the configured retry policy requires async behavior.
 
 ## Error Model
 
@@ -315,11 +333,22 @@ All shared TypeScript types and interfaces:
 
 Custom error classes as described in the error model above.
 
-### lib/context.ts
+### lib/run-sync.ts
 
-Creates the `TryCtx` object passed into user functions. Manages the internal
-`AbortController` that composes external signals with timeout signals. Carries
-retry attempt metadata (current attempt number, total limit).
+Sync execution entry points:
+
+- `runSync(...)`: top-level sync helper with no builder config.
+- `executeRunSync(config, input)`: internal sync terminal used by
+  chainable `runSync` on wrapped builders.
+
+Behavior differences:
+
+- Top-level `runSync` is context-free and returns `T | E | UnhandledException`.
+- Chainable `runSync` runs against builder config and can return configured
+  control errors (`CancellationError`, `TimeoutError`, `RetryExhaustedError`)
+  in addition to mapped/unhandled results.
+- Both forms enforce sync-only semantics and throw `Panic` if promise-like
+  values are returned where sync values are required.
 
 ### lib/retry.ts
 
@@ -344,7 +373,7 @@ retry attempt metadata (current attempt number, total limit).
 - Propagates abort to all child operations
 - Cleans up listeners when execution completes
 
-### lib/runner.ts
+### lib/run.ts
 
 The core execution engine behind `run()`:
 
@@ -445,8 +474,8 @@ try$
 Building bottom-up to minimize rework:
 
 1. `lib/types.ts` + `lib/errors.ts` -- foundation types
-2. `lib/context.ts` -- TryCtx
-3. `lib/runner.ts` -- basic `run()` without retry/timeout
+2. `lib/run-sync.ts` -- sync execution (`runSync` + `executeRunSync`)
+3. `lib/run.ts` -- basic `run()` without retry/timeout
 4. `lib/retry.ts` -- retry logic + `retryOptions()`
 5. `lib/timeout.ts` -- timeout logic
 6. `lib/signal.ts` -- abort signal wiring

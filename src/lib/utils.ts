@@ -29,3 +29,29 @@ export function checkIsPromiseLike(value: unknown): value is PromiseLike<unknown
     typeof (value as { then?: unknown }).then === "function"
   )
 }
+
+export async function raceWithAbortSignal<V, E>(
+  signal: AbortSignal,
+  promise: PromiseLike<V>,
+  createAbortResult: () => E
+): Promise<V | E> {
+  using disposer = new DisposableStack()
+
+  const abortPromise = new Promise<E>((resolve) => {
+    const onAbort = () => {
+      resolve(createAbortResult())
+    }
+
+    if (signal.aborted) {
+      onAbort()
+      return
+    }
+
+    signal.addEventListener("abort", onAbort, { once: true })
+    disposer.defer(() => {
+      signal.removeEventListener("abort", onAbort)
+    })
+  })
+
+  return await Promise.race([Promise.resolve(promise), abortPromise])
+}

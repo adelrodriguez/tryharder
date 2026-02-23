@@ -31,8 +31,8 @@ Goal: implement `hardtry` incrementally with behavior locked by
 1. Create base files and exports
    - `src/lib/types.ts`
    - `src/lib/errors.ts`
-   - `src/lib/context.ts`
-   - `src/lib/runner.ts`
+   - `src/lib/run-sync.ts`
+   - `src/lib/run.ts`
    - `src/lib/builder.ts`
    - wire minimal `src/index.ts`
 2. Define core types

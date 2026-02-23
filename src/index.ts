@@ -1,12 +1,6 @@
-import type {
-  AsyncRunInput,
-  AsyncRunTryFn,
-  RunAsyncOptions,
-  RunOptions,
-  SyncRunInput,
-  SyncRunTryFn,
-} from "./lib/types/run"
-import { TryBuilder } from "./lib/builder"
+import type { WrappedRunBuilder } from "./lib/builder"
+import type { WrapFn } from "./lib/types/builder"
+import { RunBuilder } from "./lib/builder"
 import {
   CancellationError,
   Panic,
@@ -16,34 +10,18 @@ import {
 } from "./lib/errors"
 import { retryOptions } from "./lib/retry"
 
-const root = new TryBuilder()
+const root = new RunBuilder()
 
-export const retry: TryBuilder["retry"] = root.retry.bind(root)
-export const timeout: TryBuilder["timeout"] = root.timeout.bind(root)
-export const signal: TryBuilder["signal"] = root.signal.bind(root)
-export const wrap: TryBuilder["wrap"] = root.wrap.bind(root)
+export const retry: RunBuilder["retry"] = root.retry.bind(root)
+export const timeout: RunBuilder["timeout"] = root.timeout.bind(root)
+export const signal: RunBuilder["signal"] = root.signal.bind(root)
+export const wrap = (fn: WrapFn): WrappedRunBuilder => root.wrap(fn)
+export const run: RunBuilder["run"] = root.run.bind(root)
+export { runSync } from "./lib/run-sync"
 
-export function run<T>(tryFn: SyncRunTryFn<T>): T | UnhandledException
-export function run<T, C>(options: RunOptions<T, C>): T | C
-export function run<T, C>(input: SyncRunInput<T, C>) {
-  // Overloads define the public API; this cast funnels to TryBuilder.run's union input implementation.
-  // Keep this in sync with `TryBuilder.run` signatures to avoid hiding drift.
-  return root.run(input as never)
-}
-
-export function runAsync<T>(
-  tryFn: SyncRunTryFn<T> | AsyncRunTryFn<T>
-): Promise<T | UnhandledException>
-export function runAsync<T, C>(options: RunAsyncOptions<T, C>): Promise<T | C>
-export function runAsync<T, C>(input: AsyncRunInput<T, C>) {
-  // Overloads define the public API; this implementation forwards the same union input to TryBuilder.runAsync.
-  // Keep this in sync with `TryBuilder.runAsync` signatures to avoid overload drift.
-  return root.runAsync(input)
-}
-
-export const all: TryBuilder["all"] = root.all.bind(root)
-export const allSettled: TryBuilder["allSettled"] = root.allSettled.bind(root)
-export const flow: TryBuilder["flow"] = root.flow.bind(root)
+export const all: RunBuilder["all"] = root.all.bind(root)
+export const allSettled: RunBuilder["allSettled"] = root.allSettled.bind(root)
+export const flow: RunBuilder["flow"] = root.flow.bind(root)
 
 export { dispose } from "./lib/dispose"
 export { executeGen as gen } from "./lib/gen"

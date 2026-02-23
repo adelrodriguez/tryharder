@@ -1,5 +1,14 @@
-import type { TimeoutPolicy } from "./types/builder"
+import type { TimeoutOptions, TimeoutPolicy } from "./types/builder"
 import { TimeoutError } from "./errors"
+import { raceWithAbortSignal } from "./utils"
+
+export function normalizeTimeoutOptions(options: TimeoutOptions): TimeoutPolicy {
+  if (typeof options === "number") {
+    return { ms: options, scope: "total" }
+  }
+
+  return { ...options }
+}
 
 function createTimeoutCause(timeoutMs: number): Error {
   return new Error(`Execution exceeded timeout of ${timeoutMs}ms`)
@@ -93,21 +102,11 @@ export class TimeoutController {
       return timedOut
     }
 
-    const signal = this.signal
-    using disposer = new DisposableStack()
-
-    const timeoutPromise = new Promise<TimeoutError>((resolve) => {
-      const onAbort = () => {
-        resolve(this.checkDidTimeout(cause) ?? this.#createTimeoutError(cause))
-      }
-
-      signal.addEventListener("abort", onAbort, { once: true })
-      disposer.defer(() => {
-        signal.removeEventListener("abort", onAbort)
-      })
-    })
-
-    return await Promise.race([Promise.resolve(promise), timeoutPromise])
+    return await raceWithAbortSignal(
+      this.signal,
+      promise,
+      () => this.checkDidTimeout(cause) ?? this.#createTimeoutError(cause)
+    )
   }
 
   [Symbol.dispose](): void {

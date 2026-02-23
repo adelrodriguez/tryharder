@@ -6,15 +6,15 @@ class PermissionDeniedError extends Error {}
 class NetworkError extends Error {}
 class RemoteServiceError extends Error {}
 
-describe("run sync", () => {
+describe("runSync", () => {
   it("returns value when tryFn succeeds", () => {
-    const value = try$.run(() => 42)
+    const value = try$.runSync(() => 42)
 
     expect(value).toBe(42)
   })
 
   it("returns UnhandledException in function form", () => {
-    const result = try$.run(() => {
+    const result = try$.runSync(() => {
       throw new Error("boom")
     })
 
@@ -22,7 +22,7 @@ describe("run sync", () => {
   })
 
   it("maps error when object form includes try and catch", () => {
-    const result = try$.run({
+    const result = try$.runSync({
       catch: () => "mapped",
       try: () => {
         throw new Error("boom")
@@ -34,7 +34,7 @@ describe("run sync", () => {
 
   it("throws Panic when catch throws", () => {
     expect(() =>
-      try$.run({
+      try$.runSync({
         catch: () => {
           throw new Error("catch failed")
         },
@@ -46,14 +46,14 @@ describe("run sync", () => {
   })
 
   it("throws Panic when sync run receives a Promise-returning function via unsafe cast", () => {
-    const unsafeRun = try$.run as unknown as (tryFn: () => number) => number
+    const unsafeRun = try$.runSync as unknown as (tryFn: () => number) => number
     const unsafeTry = (() => Promise.resolve(42)) as unknown as () => number
 
     expect(() => unsafeRun(unsafeTry)).toThrow(try$.Panic)
   })
 
   it("supports multiple mapped error variants in sync object form", () => {
-    const invalidInput = try$.run({
+    const invalidInput = try$.runSync({
       catch: (error) => {
         if (error instanceof SyntaxError) {
           return new InvalidInputError("invalid")
@@ -66,7 +66,7 @@ describe("run sync", () => {
       },
     })
 
-    const permissionDenied = try$.run({
+    const permissionDenied = try$.runSync({
       catch: (error) => {
         if (error instanceof SyntaxError) {
           return new InvalidInputError("invalid")
@@ -84,9 +84,9 @@ describe("run sync", () => {
   })
 })
 
-describe("runAsync", () => {
+describe("run", () => {
   it("returns promise value when tryFn is async", async () => {
-    const result = try$.runAsync(async () => {
+    const result = try$.run(async () => {
       await Promise.resolve()
 
       return 42
@@ -96,7 +96,7 @@ describe("runAsync", () => {
   })
 
   it("returns UnhandledException when async function form rejects", async () => {
-    const result = try$.runAsync(async () => {
+    const result = try$.run(async () => {
       await Promise.resolve()
       throw new Error("boom")
     })
@@ -105,7 +105,7 @@ describe("runAsync", () => {
   })
 
   it("returns UnhandledException when sync function form throws", async () => {
-    const result = try$.runAsync(() => {
+    const result = try$.run(() => {
       throw new Error("boom")
     })
 
@@ -113,7 +113,7 @@ describe("runAsync", () => {
   })
 
   it("maps async object form rejections through catch", async () => {
-    const result = try$.runAsync({
+    const result = try$.run({
       catch: () => "mapped",
       try: async () => {
         await Promise.resolve()
@@ -125,7 +125,7 @@ describe("runAsync", () => {
   })
 
   it("throws Panic when async catch rejects", async () => {
-    const result = try$.runAsync({
+    const result = try$.run({
       catch: async () => {
         await Promise.resolve()
         throw new Error("catch failed")
@@ -145,7 +145,7 @@ describe("runAsync", () => {
   })
 
   it("supports multiple mapped error variants in async object form", async () => {
-    const networkError = await try$.runAsync({
+    const networkError = await try$.run({
       catch: (error): NetworkError | RemoteServiceError => {
         if (error instanceof TypeError) {
           return new NetworkError("network")
@@ -159,7 +159,7 @@ describe("runAsync", () => {
       },
     })
 
-    const remoteServiceError = await try$.runAsync({
+    const remoteServiceError = await try$.run({
       catch: (error) => {
         if (error instanceof TypeError) {
           return new NetworkError("network")
@@ -179,10 +179,10 @@ describe("runAsync", () => {
 })
 
 describe("retry execution flow", () => {
-  it("handles many zero-delay sync retries without stack overflow", () => {
+  it("handles many zero-delay sync retries without stack overflow", async () => {
     const limit = 20_000
 
-    const result = try$.retry(limit).run((ctx) => {
+    const result = await try$.retry(limit).run((ctx) => {
       if (ctx.retry.attempt < limit) {
         throw new Error("retry")
       }
@@ -206,7 +206,7 @@ describe("retry execution flow", () => {
           return true
         },
       })
-      .runAsync(() => {
+      .run(() => {
         throw new Error("boom")
       })
 
@@ -216,8 +216,14 @@ describe("retry execution flow", () => {
 })
 
 describe("builder helpers", () => {
-  it("supports wrap builder step", () => {
-    const result = try$.wrap((ctx, next) => next(ctx)).run(() => 42)
+  it("supports wrap builder step", async () => {
+    const result = await try$.wrap((ctx, next) => next(ctx)).run(() => 42)
+
+    expect(result).toBe(42)
+  })
+
+  it("supports wrap builder runSync", () => {
+    const result = try$.wrap((ctx, next) => next(ctx)).runSync(() => 42)
 
     expect(result).toBe(42)
   })
@@ -234,12 +240,12 @@ describe("builder helpers", () => {
     expect(() => try$.flow({})).toThrow("flow is not implemented yet")
   })
 
-  it("keeps root run isolated from retry chains", () => {
-    const retried = try$.retry(2).run(() => {
+  it("keeps root run isolated from retry chains", async () => {
+    const retried = await try$.retry(2).run(() => {
       throw new Error("boom")
     })
 
-    const rooted = try$.run(() => {
+    const rooted = await try$.run(() => {
       throw new Error("boom")
     })
 
@@ -247,17 +253,17 @@ describe("builder helpers", () => {
     expect(rooted).toBeInstanceOf(try$.UnhandledException)
   })
 
-  it("keeps root run isolated from wrap chains", () => {
+  it("keeps root run isolated from wrap chains", async () => {
     let wrapCalls = 0
 
-    void try$
+    await try$
       .wrap((ctx, next) => {
         wrapCalls += 1
         return next(ctx)
       })
       .run(() => 1)
 
-    void try$.run(() => 2)
+    await try$.run(() => 2)
 
     expect(wrapCalls).toBe(1)
   })
@@ -277,11 +283,11 @@ describe("builder helpers", () => {
 })
 
 describe("full builder chain", () => {
-  it("supports retry + timeout + signal + wrap in sync run", () => {
+  it("supports retry + timeout + signal + wrap in sync run", async () => {
     const ac = new AbortController()
     let attempts = 0
 
-    const result = try$
+    const result = await try$
       .retry(3)
       .timeout(100)
       .signal(ac.signal)
@@ -315,7 +321,7 @@ describe("full builder chain", () => {
       .timeout(100)
       .signal(ac.signal)
       .wrap((ctx, next) => next(ctx))
-      .runAsync({
+      .run({
         catch: () => "mapped" as const,
         try: async (ctx) => {
           expect(ctx.signal).toBeDefined()
@@ -335,7 +341,7 @@ describe("full builder chain", () => {
     const pending = try$
       .signal(first.signal)
       .signal(second.signal)
-      .runAsync(async (ctx) => {
+      .run(async (ctx) => {
         expect(ctx.signal).toBeDefined()
         expect(ctx.signal).not.toBe(first.signal)
         expect(ctx.signal).not.toBe(second.signal)
@@ -364,7 +370,7 @@ describe("full builder chain", () => {
       .timeout(5)
       .signal(ac.signal)
       .wrap((ctx, next) => next(ctx))
-      .runAsync(async () => {
+      .run(async () => {
         await new Promise((resolve) => {
           setTimeout(resolve, 20)
         })
@@ -374,10 +380,10 @@ describe("full builder chain", () => {
     expect(result).toBeInstanceOf(try$.TimeoutError)
   })
 
-  it("matches root helpers and chained timeout/signal API", () => {
+  it("matches root helpers and chained timeout/signal API", async () => {
     const ac = new AbortController()
 
-    const directResult = try$
+    const directResult = await try$
       .timeout(50)
       .signal(ac.signal)
       .run((ctx) => {
@@ -386,7 +392,7 @@ describe("full builder chain", () => {
         return 7
       })
 
-    const rootedResult = try$
+    const rootedResult = await try$
       .signal(ac.signal)
       .timeout(50)
       .run((ctx) => {
