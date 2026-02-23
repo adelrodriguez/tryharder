@@ -6,7 +6,7 @@ import type {
   TimeoutError,
   UnhandledException,
 } from "../index"
-import { retry, run, runAsync, signal, timeout } from "../index"
+import { gen, retry, run, runAsync, signal, timeout } from "../index"
 
 type Expect<T extends true> = T
 type Equal<X, Y> =
@@ -168,6 +168,34 @@ describe("type inference", () => {
           Promise<number | "err" | RetryExhaustedError | TimeoutError | CancellationError>
         >
       >
+    })
+  })
+
+  describe("gen", () => {
+    class UserNotFound extends Error {}
+    class ProjectNotFound extends Error {}
+
+    it("returns sync union for sync yielded values", () => {
+      const result = gen(function* (use) {
+        const value = yield* use(Math.random() > 0.5 ? 1 : new UserNotFound("missing"))
+        return value
+      })
+
+      type _assert = Expect<Equal<typeof result, number | UserNotFound>>
+    })
+
+    it("returns Promise union when yielded values include Promise", () => {
+      const result = gen(function* (use) {
+        const userId = yield* use(Promise.resolve(Math.random() > 0.5 ? 1 : new UserNotFound("u")))
+        void userId
+        const project = yield* use(
+          Promise.resolve(Math.random() > 0.5 ? "project" : new ProjectNotFound("p"))
+        )
+
+        return project
+      })
+
+      type _assert = Expect<Equal<typeof result, Promise<string | UserNotFound | ProjectNotFound>>>
     })
   })
 })

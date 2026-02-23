@@ -4,6 +4,7 @@ export interface SignalController {
   signal?: AbortSignal
   checkDidCancel(cause?: unknown): CancellationError | undefined
   raceWithSignal<V>(promise: PromiseLike<V>, cause?: unknown): Promise<V | CancellationError>
+  [Symbol.dispose](): void
   dispose(): void
 }
 
@@ -47,6 +48,7 @@ export function createSignalController(
       checkDidCancel: returnUndefinedCancellation,
       dispose: disposeNoop,
       raceWithSignal: passthroughPromise,
+      [Symbol.dispose]: disposeNoop,
     }
   }
 
@@ -126,5 +128,6 @@ export function createSignalController(
     dispose,
     raceWithSignal,
     signal: internalController.signal,
+    [Symbol.dispose]: dispose,
   }
 }

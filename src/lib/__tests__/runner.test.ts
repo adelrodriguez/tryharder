@@ -3,6 +3,34 @@ import type { TryCtx } from "../types/core"
 import { CancellationError, Panic, TimeoutError, UnhandledException } from "../errors"
 import { executeRunAsync, executeRunSync } from "../runner"
 
+function createTrackedSignal() {
+  let abortListener: unknown
+  let addCalls = 0
+  let removeCalls = 0
+
+  const signal = {
+    aborted: false,
+    addEventListener: (type: string, listener: unknown) => {
+      if (type === "abort" && listener) {
+        addCalls += 1
+        abortListener = listener
+      }
+    },
+    reason: undefined,
+    removeEventListener: (type: string, listener: unknown) => {
+      if (type === "abort" && listener && listener === abortListener) {
+        removeCalls += 1
+      }
+    },
+  } as unknown as AbortSignal
+
+  return {
+    getAddCalls: () => addCalls,
+    getRemoveCalls: () => removeCalls,
+    signal,
+  }
+}
+
 describe("executeRunSync / executeRunAsync", () => {
   describe("sync", () => {
     it("returns success value in function form", () => {
@@ -96,6 +124,16 @@ describe("executeRunSync / executeRunAsync", () => {
       )
 
       expect(result).toBeInstanceOf(CancellationError)
+    })
+
+    it("removes external signal listener after sync run completes", () => {
+      const tracked = createTrackedSignal()
+
+      const result = executeRunSync({ signal: tracked.signal }, () => "ok")
+
+      expect(result).toBe("ok")
+      expect(tracked.getAddCalls()).toBe(1)
+      expect(tracked.getRemoveCalls()).toBe(1)
     })
 
     it("applies wraps in registration order around full run", () => {
@@ -295,6 +333,19 @@ describe("executeRunSync / executeRunAsync", () => {
       const result = await pending
 
       expect(result).toBeInstanceOf(CancellationError)
+    })
+
+    it("removes external signal listener after async run completes", async () => {
+      const tracked = createTrackedSignal()
+
+      const result = await executeRunAsync({ signal: tracked.signal }, async () => {
+        await Promise.resolve()
+        return "ok"
+      })
+
+      expect(result).toBe("ok")
+      expect(tracked.getAddCalls()).toBe(1)
+      expect(tracked.getRemoveCalls()).toBe(1)
     })
 
     it("runs wraps once when retries are handled asynchronously", async () => {

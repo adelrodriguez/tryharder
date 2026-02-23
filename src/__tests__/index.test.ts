@@ -261,6 +261,19 @@ describe("builder helpers", () => {
 
     expect(wrapCalls).toBe(1)
   })
+
+  it("exposes dispose from root namespace", async () => {
+    const calls: string[] = []
+    const disposer = try$.dispose()
+
+    disposer.defer(() => {
+      calls.push("cleanup")
+    })
+
+    await disposer[Symbol.asyncDispose]()
+
+    expect(calls).toEqual(["cleanup"])
+  })
 })
 
 describe("full builder chain", () => {

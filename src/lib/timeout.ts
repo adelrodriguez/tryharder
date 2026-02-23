@@ -5,6 +5,7 @@ export interface TimeoutController {
   signal?: AbortSignal
   checkDidTimeout(cause?: unknown): TimeoutError | undefined
   raceWithTimeout<V>(promise: PromiseLike<V>, cause?: unknown): Promise<V | TimeoutError>
+  [Symbol.dispose](): void
   dispose(): void
 }
 
@@ -30,6 +31,7 @@ export function createTimeoutController(timeoutPolicy?: TimeoutPolicy): TimeoutC
       checkDidTimeout: returnUndefinedTimeout,
       dispose: disposeNoop,
       raceWithTimeout: passthroughPromise,
+      [Symbol.dispose]: disposeNoop,
     }
   }
 
@@ -133,5 +135,6 @@ export function createTimeoutController(timeoutPolicy?: TimeoutPolicy): TimeoutC
     dispose,
     raceWithTimeout,
     signal: controller.signal,
+    [Symbol.dispose]: dispose,
   }
 }
