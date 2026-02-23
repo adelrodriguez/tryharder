@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test"
 import {
   Panic,
   RetryExhaustedError,
+  TimeoutError,
   UnhandledException,
   all,
   allSettled,
@@ -9,6 +10,8 @@ import {
   retry,
   run,
   runAsync,
+  signal,
+  timeout,
   wrap,
 } from "../index"
 
@@ -243,5 +246,92 @@ describe("builder helpers", () => {
 
   it("throws for unimplemented flow", () => {
     expect(() => flow({})).toThrow("flow is not implemented yet")
+  })
+})
+
+describe("full builder chain", () => {
+  it("supports retry + timeout + signal + wrap in sync run", () => {
+    const ac = new AbortController()
+    let attempts = 0
+
+    const result = retry(3)
+      .timeout(100)
+      .signal(ac.signal)
+      .wrap(() => null)
+      .run((ctx) => {
+        attempts += 1
+        expect(ctx.signal).toBe(ac.signal)
+        expect(ctx.retry.limit).toBe(3)
+
+        if (attempts === 1) {
+          throw new Error("boom")
+        }
+
+        return ctx.retry.attempt
+      })
+
+    expect(result).toBe(2)
+  })
+
+  it("supports full chain in async run with mapped catch", async () => {
+    const ac = new AbortController()
+
+    const result = await retry({
+      backoff: "constant",
+      delayMs: 1,
+      limit: 3,
+      shouldRetry: () => false,
+    })
+      .timeout(100)
+      .signal(ac.signal)
+      .wrap(() => null)
+      .runAsync({
+        catch: () => "mapped" as const,
+        try: async (ctx) => {
+          expect(ctx.signal).toBe(ac.signal)
+          await Promise.resolve()
+          throw new Error("boom")
+        },
+      })
+
+    expect(result).toBe("mapped")
+  })
+
+  it("returns TimeoutError from full chain when deadline is exceeded", async () => {
+    const ac = new AbortController()
+
+    const result = await retry(3)
+      .timeout(5)
+      .signal(ac.signal)
+      .wrap(() => null)
+      .runAsync(async () => {
+        await new Promise((resolve) => {
+          setTimeout(resolve, 20)
+        })
+        return 42
+      })
+
+    expect(result).toBeInstanceOf(TimeoutError)
+  })
+
+  it("matches root helpers and chained timeout/signal API", () => {
+    const ac = new AbortController()
+
+    const directResult = timeout(50)
+      .signal(ac.signal)
+      .run((ctx) => {
+        expect(ctx.signal).toBe(ac.signal)
+        return 7
+      })
+
+    const rootedResult = signal(ac.signal)
+      .timeout(50)
+      .run((ctx) => {
+        expect(ctx.signal).toBe(ac.signal)
+        return 7
+      })
+
+    expect(directResult).toBe(7)
+    expect(rootedResult).toBe(7)
   })
 })

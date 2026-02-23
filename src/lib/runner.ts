@@ -1,4 +1,4 @@
-import type { CancellationError, TimeoutError } from "./errors"
+import type { CancellationError } from "./errors"
 import type { BuilderConfig } from "./types/builder"
 import type { BaseTryCtx } from "./types/core"
 import type { RetryPolicy } from "./types/retry"
@@ -10,8 +10,9 @@ import type {
   SyncRunTryFn,
 } from "./types/run"
 import { createContext } from "./context"
-import { Panic, RetryExhaustedError, UnhandledException } from "./errors"
+import { Panic, RetryExhaustedError, TimeoutError, UnhandledException } from "./errors"
 import { calculateRetryDelay, checkIsRetryExhausted, checkShouldAttemptRetry } from "./retry"
+import { createTimeoutController } from "./timeout"
 import { checkIsControlError, checkIsPromiseLike, sleep } from "./utils"
 
 /**
@@ -154,6 +155,7 @@ function executeRunCore<T, E, Ctx extends BaseTryCtx>(
   config: BuilderConfig,
   input: AsyncRunInput<T, E, Ctx>
 ) {
+  const timeout = createTimeoutController(config.timeout)
   const ctx = createContext(config)
 
   // Normalize input: accept either a bare function or a { try, catch } object.
@@ -166,13 +168,31 @@ function executeRunCore<T, E, Ctx extends BaseTryCtx>(
    * if no catch was provided. Control errors (Panic, Timeout, Cancellation)
    * always pass through unchanged.
    */
-  const finalizeError = (error: unknown): E | RunnerError | Promise<E> => {
+  const finalizeError = (error: unknown): E | RunnerError | Promise<E | RunnerError> => {
     if (checkIsControlError(error)) {
       return error
     }
 
     if (catchFn) {
-      return executeCatch(catchFn, error)
+      const mapped = executeCatch(catchFn, error)
+
+      if (checkIsPromiseLike(mapped)) {
+        return timeout.raceWithTimeout(mapped, error)
+      }
+
+      const timeoutError = timeout.checkDidTimeout(error)
+
+      if (timeoutError) {
+        return timeoutError
+      }
+
+      return mapped
+    }
+
+    const timeoutError = timeout.checkDidTimeout(error)
+
+    if (timeoutError) {
+      return timeoutError
     }
 
     return new UnhandledException({ cause: error })
@@ -200,9 +220,15 @@ function executeRunCore<T, E, Ctx extends BaseTryCtx>(
   const resolveAttemptError = (
     error: unknown,
     decision?: RetryDecision
-  ): E | RunnerError | Promise<E> | RetryResult => {
+  ): E | RunnerError | Promise<E | RunnerError> | RetryResult => {
     if (checkIsControlError(error)) {
       return error
+    }
+
+    const timeoutError = timeout.checkDidTimeout(error)
+
+    if (timeoutError) {
+      return timeoutError
     }
 
     const retryDecision = decision ?? evaluateRetryDecision(error)
@@ -264,8 +290,18 @@ function executeRunCore<T, E, Ctx extends BaseTryCtx>(
    * attempts.
    */
   const executeAsyncRetry = async (decision: RetryDecision): Promise<T | E | RunnerError> => {
+    const timeoutBeforeDelay = timeout.checkDidTimeout()
+
+    if (timeoutBeforeDelay) {
+      return timeoutBeforeDelay
+    }
+
     if (decision.delay > 0) {
-      await sleep(decision.delay)
+      const sleepResult = await timeout.raceWithTimeout(sleep(decision.delay))
+
+      if (sleepResult instanceof TimeoutError) {
+        return sleepResult
+      }
     }
 
     ctx.retry.attempt += 1
@@ -273,7 +309,25 @@ function executeRunCore<T, E, Ctx extends BaseTryCtx>(
     try {
       // Runtime context always includes retry metadata; when a call site is
       // typed with a narrower BaseTryCtx, passing this wider value is safe.
-      return await tryFn(ctx as unknown as Ctx)
+      const result = tryFn(ctx as unknown as Ctx)
+
+      if (checkIsPromiseLike(result)) {
+        const asyncResult = await timeout.raceWithTimeout(Promise.resolve(result))
+
+        if (asyncResult instanceof TimeoutError) {
+          return asyncResult
+        }
+
+        return asyncResult as T
+      }
+
+      const timeoutAfterSyncResult = timeout.checkDidTimeout()
+
+      if (timeoutAfterSyncResult) {
+        return timeoutAfterSyncResult
+      }
+
+      return result
     } catch (attemptError) {
       return handleAttemptErrorAsync(attemptError)
     }
@@ -292,6 +346,12 @@ function executeRunCore<T, E, Ctx extends BaseTryCtx>(
 
     // oxlint-disable-next-line typescript/no-unnecessary-condition
     while (true) {
+      const timeoutBeforeAttempt = timeout.checkDidTimeout()
+
+      if (timeoutBeforeAttempt) {
+        return timeoutBeforeAttempt
+      }
+
       ctx.retry.attempt = currentAttempt
 
       try {
@@ -301,7 +361,22 @@ function executeRunCore<T, E, Ctx extends BaseTryCtx>(
 
         // The try function returned a promise -- handle rejections asynchronously.
         if (checkIsPromiseLike(result)) {
-          return Promise.resolve(result).catch((error: unknown) => handleAttemptErrorAsync(error))
+          return timeout
+            .raceWithTimeout(Promise.resolve(result))
+            .then((resolved) => {
+              if (resolved instanceof TimeoutError) {
+                return resolved
+              }
+
+              return resolved as T
+            })
+            .catch((error: unknown) => handleAttemptErrorAsync(error))
+        }
+
+        const timeoutAfterSyncResult = timeout.checkDidTimeout()
+
+        if (timeoutAfterSyncResult) {
+          return timeoutAfterSyncResult
         }
 
         return result

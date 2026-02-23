@@ -80,7 +80,6 @@ export class TryBuilder<
   run<T, C>(
     options: CanRunSync extends true ? RunOptions<T, C, TryCtxFor<CtxFeatures>> : never
   ): T | C | E
-
   run<T, C>(input: SyncRunInput<T, C, TryCtxFor<CtxFeatures>>) {
     return executeRunSync(this.#config, input)
   }
@@ -89,7 +88,6 @@ export class TryBuilder<
     tryFn: SyncRunTryFn<T, TryCtxFor<CtxFeatures>> | AsyncRunTryFn<T, TryCtxFor<CtxFeatures>>
   ): Promise<T | UnhandledException | E>
   runAsync<T, C>(options: AsyncRunInput<T, C, TryCtxFor<CtxFeatures>>): Promise<T | C | E>
-
   runAsync<T, C>(input: AsyncRunInput<T, C, TryCtxFor<CtxFeatures>>) {
     return executeRunAsync(this.#config, input)
   }
