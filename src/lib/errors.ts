@@ -1,4 +1,4 @@
-import type { ErrorCode } from "./types"
+import type { ErrorCode } from "./types/core"
 
 export interface ExecutionErrorOptions {
   cause?: unknown
@@ -24,6 +24,8 @@ abstract class ExecutionError extends Error {
 }
 
 export class CancellationError extends ExecutionError {
+  declare readonly code: "EXEC_CANCELLED"
+
   constructor(options: ExecutionErrorOptions = {}) {
     const { cause, message } = options
 
@@ -38,6 +40,8 @@ export class CancellationError extends ExecutionError {
 }
 
 export class TimeoutError extends ExecutionError {
+  declare readonly code: "EXEC_TIMEOUT"
+
   constructor(options: ExecutionErrorOptions = {}) {
     const { cause, message } = options
 
@@ -52,6 +56,8 @@ export class TimeoutError extends ExecutionError {
 }
 
 export class RetryExhaustedError extends ExecutionError {
+  declare readonly code: "EXEC_RETRY_EXHAUSTED"
+
   constructor(options: ExecutionErrorOptions = {}) {
     const { cause, message } = options
 
@@ -66,6 +72,8 @@ export class RetryExhaustedError extends ExecutionError {
 }
 
 export class UnhandledException extends ExecutionError {
+  declare readonly code: "EXEC_UNHANDLED_EXCEPTION"
+
   constructor(options: ExecutionErrorOptions = {}) {
     const { cause, message } = options
 
@@ -80,6 +88,8 @@ export class UnhandledException extends ExecutionError {
 }
 
 export class Panic extends ExecutionError {
+  declare readonly code: "EXEC_PANIC"
+
   constructor(options: ExecutionErrorOptions = {}) {
     const { cause, message } = options
 
