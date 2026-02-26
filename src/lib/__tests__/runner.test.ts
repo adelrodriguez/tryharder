@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
 import type { TryCtx } from "../types/core"
-import { Panic, TimeoutError, UnhandledException } from "../errors"
+import { CancellationError, Panic, TimeoutError, UnhandledException } from "../errors"
 import { executeRunAsync, executeRunSync } from "../runner"
 
 describe("executeRunSync / executeRunAsync", () => {
@@ -74,6 +74,30 @@ describe("executeRunSync / executeRunAsync", () => {
       expect(() => executeRunSync({}, unsafeSyncFn)).toThrow(
         "The try function returned a Promise. Use runAsync() instead of run()."
       )
+    })
+
+    it("returns CancellationError when signal is already aborted", () => {
+      const ac = new AbortController()
+      ac.abort(new Error("stop"))
+
+      const result = executeRunSync({ signal: ac.signal }, () => "ok")
+
+      expect(result).toBeInstanceOf(CancellationError)
+    })
+
+    it("prefers CancellationError over TimeoutError when both are already true", () => {
+      const ac = new AbortController()
+      ac.abort(new Error("stop"))
+
+      const result = executeRunSync(
+        {
+          signal: ac.signal,
+          timeout: { ms: 0, scope: "total" },
+        },
+        () => "ok"
+      )
+
+      expect(result).toBeInstanceOf(CancellationError)
     })
   })
 
@@ -151,6 +175,29 @@ describe("executeRunSync / executeRunAsync", () => {
       expect(result).toBeInstanceOf(TimeoutError)
     })
 
+    it("aborts ctx.signal when timeout expires", async () => {
+      const result = await executeRunAsync(
+        {
+          timeout: { ms: 5, scope: "total" },
+        },
+        async (ctx: TryCtx) => {
+          await new Promise((_resolve, reject) => {
+            ctx.signal?.addEventListener(
+              "abort",
+              () => {
+                reject(new Error("aborted by timeout"))
+              },
+              { once: true }
+            )
+          })
+
+          return "ok"
+        }
+      )
+
+      expect(result).toBeInstanceOf(TimeoutError)
+    })
+
     it("returns TimeoutError when timeout expires during retry backoff", async () => {
       const result = await executeRunAsync(
         {
@@ -184,6 +231,25 @@ describe("executeRunSync / executeRunAsync", () => {
       )
 
       expect(result).toBeInstanceOf(TimeoutError)
+    })
+
+    it("returns CancellationError when signal aborts during async try", async () => {
+      const ac = new AbortController()
+
+      const pending = executeRunAsync({ signal: ac.signal }, async () => {
+        await new Promise((resolve) => {
+          setTimeout(resolve, 25)
+        })
+        return "ok"
+      })
+
+      setTimeout(() => {
+        ac.abort(new Error("stop"))
+      }, 5)
+
+      const result = await pending
+
+      expect(result).toBeInstanceOf(CancellationError)
     })
   })
 })

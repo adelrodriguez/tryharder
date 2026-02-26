@@ -1,4 +1,3 @@
-import type { CancellationError } from "./errors"
 import type { BuilderConfig } from "./types/builder"
 import type { BaseTryCtx } from "./types/core"
 import type { RetryPolicy } from "./types/retry"
@@ -10,8 +9,15 @@ import type {
   SyncRunTryFn,
 } from "./types/run"
 import { createContext } from "./context"
-import { Panic, RetryExhaustedError, TimeoutError, UnhandledException } from "./errors"
+import {
+  CancellationError,
+  Panic,
+  RetryExhaustedError,
+  TimeoutError,
+  UnhandledException,
+} from "./errors"
 import { calculateRetryDelay, checkIsRetryExhausted, checkShouldAttemptRetry } from "./retry"
+import { createSignalController } from "./signal"
 import { createTimeoutController } from "./timeout"
 import { checkIsControlError, checkIsPromiseLike, sleep } from "./utils"
 
@@ -156,11 +162,34 @@ function executeRunCore<T, E, Ctx extends BaseTryCtx>(
   input: AsyncRunInput<T, E, Ctx>
 ) {
   const timeout = createTimeoutController(config.timeout)
-  const ctx = createContext(config)
+  const signal = createSignalController(
+    [config.signal, timeout.signal].filter((value): value is AbortSignal => value !== undefined)
+  )
+  const ctx = createContext(config, signal.signal)
 
   // Normalize input: accept either a bare function or a { try, catch } object.
   const catchFn = typeof input === "function" ? undefined : input.catch
   const tryFn = typeof input === "function" ? input : input.try
+
+  const checkDidControlFail = (cause?: unknown): CancellationError | TimeoutError | undefined =>
+    signal.checkDidCancel(cause) ?? timeout.checkDidTimeout(cause)
+
+  const raceWithControl = async <V>(
+    promise: PromiseLike<V>,
+    cause?: unknown
+  ): Promise<V | CancellationError | TimeoutError> => {
+    const raced = await timeout.raceWithTimeout(signal.raceWithSignal(promise, cause), cause)
+
+    if (raced instanceof TimeoutError) {
+      const cancelled = signal.checkDidCancel(cause)
+
+      if (cancelled) {
+        return cancelled
+      }
+    }
+
+    return raced
+  }
 
   /**
    * Terminal error handler. Called when no more retries will happen.
@@ -177,10 +206,10 @@ function executeRunCore<T, E, Ctx extends BaseTryCtx>(
       const mapped = executeCatch(catchFn, error)
 
       if (checkIsPromiseLike(mapped)) {
-        return timeout.raceWithTimeout(mapped, error)
+        return raceWithControl(mapped, error)
       }
 
-      const timeoutError = timeout.checkDidTimeout(error)
+      const timeoutError = checkDidControlFail(error)
 
       if (timeoutError) {
         return timeoutError
@@ -189,7 +218,7 @@ function executeRunCore<T, E, Ctx extends BaseTryCtx>(
       return mapped
     }
 
-    const timeoutError = timeout.checkDidTimeout(error)
+    const timeoutError = checkDidControlFail(error)
 
     if (timeoutError) {
       return timeoutError
@@ -225,7 +254,7 @@ function executeRunCore<T, E, Ctx extends BaseTryCtx>(
       return error
     }
 
-    const timeoutError = timeout.checkDidTimeout(error)
+    const timeoutError = checkDidControlFail(error)
 
     if (timeoutError) {
       return timeoutError
@@ -290,14 +319,14 @@ function executeRunCore<T, E, Ctx extends BaseTryCtx>(
    * attempts.
    */
   const executeAsyncRetry = async (decision: RetryDecision): Promise<T | E | RunnerError> => {
-    const timeoutBeforeDelay = timeout.checkDidTimeout()
+    const timeoutBeforeDelay = checkDidControlFail()
 
     if (timeoutBeforeDelay) {
       return timeoutBeforeDelay
     }
 
     if (decision.delay > 0) {
-      const sleepResult = await timeout.raceWithTimeout(sleep(decision.delay))
+      const sleepResult = await raceWithControl(sleep(decision.delay))
 
       if (sleepResult instanceof TimeoutError) {
         return sleepResult
@@ -312,16 +341,20 @@ function executeRunCore<T, E, Ctx extends BaseTryCtx>(
       const result = tryFn(ctx as unknown as Ctx)
 
       if (checkIsPromiseLike(result)) {
-        const asyncResult = await timeout.raceWithTimeout(Promise.resolve(result))
+        const asyncResult = await raceWithControl(Promise.resolve(result))
 
         if (asyncResult instanceof TimeoutError) {
+          return asyncResult
+        }
+
+        if (asyncResult instanceof CancellationError) {
           return asyncResult
         }
 
         return asyncResult as T
       }
 
-      const timeoutAfterSyncResult = timeout.checkDidTimeout()
+      const timeoutAfterSyncResult = checkDidControlFail()
 
       if (timeoutAfterSyncResult) {
         return timeoutAfterSyncResult
@@ -346,7 +379,7 @@ function executeRunCore<T, E, Ctx extends BaseTryCtx>(
 
     // oxlint-disable-next-line typescript/no-unnecessary-condition
     while (true) {
-      const timeoutBeforeAttempt = timeout.checkDidTimeout()
+      const timeoutBeforeAttempt = checkDidControlFail()
 
       if (timeoutBeforeAttempt) {
         return timeoutBeforeAttempt
@@ -361,19 +394,26 @@ function executeRunCore<T, E, Ctx extends BaseTryCtx>(
 
         // The try function returned a promise -- handle rejections asynchronously.
         if (checkIsPromiseLike(result)) {
-          return timeout
-            .raceWithTimeout(Promise.resolve(result))
-            .then((resolved) => {
+          return (async (): Promise<T | E | RunnerError> => {
+            try {
+              const resolved = await raceWithControl(Promise.resolve(result))
+
               if (resolved instanceof TimeoutError) {
                 return resolved
               }
 
+              if (resolved instanceof CancellationError) {
+                return resolved
+              }
+
               return resolved as T
-            })
-            .catch((error: unknown) => handleAttemptErrorAsync(error))
+            } catch (error) {
+              return handleAttemptErrorAsync(error)
+            }
+          })()
         }
 
-        const timeoutAfterSyncResult = timeout.checkDidTimeout()
+        const timeoutAfterSyncResult = checkDidControlFail()
 
         if (timeoutAfterSyncResult) {
           return timeoutAfterSyncResult
@@ -393,5 +433,22 @@ function executeRunCore<T, E, Ctx extends BaseTryCtx>(
     }
   }
 
-  return executeAttemptSync(1)
+  try {
+    const result = executeAttemptSync(1)
+
+    if (checkIsPromiseLike(result)) {
+      return Promise.resolve(result).finally(() => {
+        signal.dispose()
+        timeout.dispose()
+      })
+    }
+
+    signal.dispose()
+    timeout.dispose()
+    return result
+  } catch (error) {
+    signal.dispose()
+    timeout.dispose()
+    throw error
+  }
 }
