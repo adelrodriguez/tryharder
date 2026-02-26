@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
 import type { TryCtx } from "../types/core"
-import { Panic, UnhandledException } from "../errors"
+import { Panic, TimeoutError, UnhandledException } from "../errors"
 import { executeRunAsync, executeRunSync } from "../runner"
 
 describe("executeRunSync / executeRunAsync", () => {
@@ -133,6 +133,57 @@ describe("executeRunSync / executeRunAsync", () => {
       } catch (error) {
         expect(error).toBeInstanceOf(Panic)
       }
+    })
+
+    it("returns TimeoutError when timeout expires during try execution", async () => {
+      const result = await executeRunAsync(
+        {
+          timeout: { ms: 5, scope: "total" },
+        },
+        async () => {
+          await new Promise((resolve) => {
+            setTimeout(resolve, 20)
+          })
+          return "never"
+        }
+      )
+
+      expect(result).toBeInstanceOf(TimeoutError)
+    })
+
+    it("returns TimeoutError when timeout expires during retry backoff", async () => {
+      const result = await executeRunAsync(
+        {
+          retry: { backoff: "constant", delayMs: 50, limit: 3 },
+          timeout: { ms: 5, scope: "total" },
+        },
+        () => {
+          throw new Error("boom")
+        }
+      )
+
+      expect(result).toBeInstanceOf(TimeoutError)
+    })
+
+    it("returns TimeoutError when timeout expires during catch execution", async () => {
+      const result = await executeRunAsync(
+        {
+          timeout: { ms: 5, scope: "total" },
+        },
+        {
+          catch: async () => {
+            await new Promise((resolve) => {
+              setTimeout(resolve, 20)
+            })
+            return "mapped"
+          },
+          try: () => {
+            throw new Error("boom")
+          },
+        }
+      )
+
+      expect(result).toBeInstanceOf(TimeoutError)
     })
   })
 })
