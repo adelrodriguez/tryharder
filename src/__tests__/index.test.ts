@@ -1,19 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import {
-  Panic,
-  RetryExhaustedError,
-  TimeoutError,
-  UnhandledException,
-  all,
-  allSettled,
-  flow,
-  retry,
-  run,
-  runAsync,
-  signal,
-  timeout,
-  wrap,
-} from "../index"
+import * as try$ from "../index"
 
 class InvalidInputError extends Error {}
 class PermissionDeniedError extends Error {}
@@ -22,21 +8,21 @@ class RemoteServiceError extends Error {}
 
 describe("run sync", () => {
   it("returns value when tryFn succeeds", () => {
-    const value = run(() => 42)
+    const value = try$.run(() => 42)
 
     expect(value).toBe(42)
   })
 
   it("returns UnhandledException in function form", () => {
-    const result = run(() => {
+    const result = try$.run(() => {
       throw new Error("boom")
     })
 
-    expect(result).toBeInstanceOf(UnhandledException)
+    expect(result).toBeInstanceOf(try$.UnhandledException)
   })
 
   it("maps error when object form includes try and catch", () => {
-    const result = run({
+    const result = try$.run({
       catch: () => "mapped",
       try: () => {
         throw new Error("boom")
@@ -48,7 +34,7 @@ describe("run sync", () => {
 
   it("throws Panic when catch throws", () => {
     expect(() =>
-      run({
+      try$.run({
         catch: () => {
           throw new Error("catch failed")
         },
@@ -56,18 +42,18 @@ describe("run sync", () => {
           throw new Error("boom")
         },
       })
-    ).toThrow(Panic)
+    ).toThrow(try$.Panic)
   })
 
   it("throws Panic when sync run receives a Promise-returning function via unsafe cast", () => {
-    const unsafeRun = run as unknown as (tryFn: () => number) => number
+    const unsafeRun = try$.run as unknown as (tryFn: () => number) => number
     const unsafeTry = (() => Promise.resolve(42)) as unknown as () => number
 
-    expect(() => unsafeRun(unsafeTry)).toThrow(Panic)
+    expect(() => unsafeRun(unsafeTry)).toThrow(try$.Panic)
   })
 
   it("supports multiple mapped error variants in sync object form", () => {
-    const invalidInput = run({
+    const invalidInput = try$.run({
       catch: (error) => {
         if (error instanceof SyntaxError) {
           return new InvalidInputError("invalid")
@@ -80,7 +66,7 @@ describe("run sync", () => {
       },
     })
 
-    const permissionDenied = run({
+    const permissionDenied = try$.run({
       catch: (error) => {
         if (error instanceof SyntaxError) {
           return new InvalidInputError("invalid")
@@ -100,7 +86,7 @@ describe("run sync", () => {
 
 describe("runAsync", () => {
   it("returns promise value when tryFn is async", async () => {
-    const result = runAsync(async () => {
+    const result = try$.runAsync(async () => {
       await Promise.resolve()
 
       return 42
@@ -110,24 +96,24 @@ describe("runAsync", () => {
   })
 
   it("returns UnhandledException when async function form rejects", async () => {
-    const result = runAsync(async () => {
+    const result = try$.runAsync(async () => {
       await Promise.resolve()
       throw new Error("boom")
     })
 
-    expect(await result).toBeInstanceOf(UnhandledException)
+    expect(await result).toBeInstanceOf(try$.UnhandledException)
   })
 
   it("returns UnhandledException when sync function form throws", async () => {
-    const result = runAsync(() => {
+    const result = try$.runAsync(() => {
       throw new Error("boom")
     })
 
-    expect(await result).toBeInstanceOf(UnhandledException)
+    expect(await result).toBeInstanceOf(try$.UnhandledException)
   })
 
   it("maps async object form rejections through catch", async () => {
-    const result = runAsync({
+    const result = try$.runAsync({
       catch: () => "mapped",
       try: async () => {
         await Promise.resolve()
@@ -139,7 +125,7 @@ describe("runAsync", () => {
   })
 
   it("throws Panic when async catch rejects", async () => {
-    const result = runAsync({
+    const result = try$.runAsync({
       catch: async () => {
         await Promise.resolve()
         throw new Error("catch failed")
@@ -154,12 +140,12 @@ describe("runAsync", () => {
       await result
       throw new Error("Expected Panic rejection")
     } catch (error) {
-      expect(error).toBeInstanceOf(Panic)
+      expect(error).toBeInstanceOf(try$.Panic)
     }
   })
 
   it("supports multiple mapped error variants in async object form", async () => {
-    const networkError = await runAsync({
+    const networkError = await try$.runAsync({
       catch: (error): NetworkError | RemoteServiceError => {
         if (error instanceof TypeError) {
           return new NetworkError("network")
@@ -173,7 +159,7 @@ describe("runAsync", () => {
       },
     })
 
-    const remoteServiceError = await runAsync({
+    const remoteServiceError = await try$.runAsync({
       catch: (error) => {
         if (error instanceof TypeError) {
           return new NetworkError("network")
@@ -196,7 +182,7 @@ describe("retry execution flow", () => {
   it("handles many zero-delay sync retries without stack overflow", () => {
     const limit = 20_000
 
-    const result = retry(limit).run((ctx) => {
+    const result = try$.retry(limit).run((ctx) => {
       if (ctx.retry.attempt < limit) {
         throw new Error("retry")
       }
@@ -210,40 +196,70 @@ describe("retry execution flow", () => {
   it("does not double-call shouldRetry when switching from sync to async retry path", async () => {
     let shouldRetryCalls = 0
 
-    const result = await retry({
-      backoff: "constant",
-      delayMs: 1,
-      limit: 3,
-      shouldRetry: () => {
-        shouldRetryCalls += 1
-        return true
-      },
-    }).runAsync(() => {
-      throw new Error("boom")
-    })
+    const result = await try$
+      .retry({
+        backoff: "constant",
+        delayMs: 1,
+        limit: 3,
+        shouldRetry: () => {
+          shouldRetryCalls += 1
+          return true
+        },
+      })
+      .runAsync(() => {
+        throw new Error("boom")
+      })
 
-    expect(result).toBeInstanceOf(RetryExhaustedError)
+    expect(result).toBeInstanceOf(try$.RetryExhaustedError)
     expect(shouldRetryCalls).toBe(2)
   })
 })
 
 describe("builder helpers", () => {
   it("supports wrap builder step", () => {
-    const result = wrap((ctx, next) => next(ctx)).run(() => 42)
+    const result = try$.wrap((ctx, next) => next(ctx)).run(() => 42)
 
     expect(result).toBe(42)
   })
 
   it("throws for unimplemented all", () => {
-    expect(() => all({})).toThrow("all is not implemented yet")
+    expect(() => try$.all({})).toThrow("all is not implemented yet")
   })
 
   it("throws for unimplemented allSettled", () => {
-    expect(() => allSettled({})).toThrow("allSettled is not implemented yet")
+    expect(() => try$.allSettled({})).toThrow("allSettled is not implemented yet")
   })
 
   it("throws for unimplemented flow", () => {
-    expect(() => flow({})).toThrow("flow is not implemented yet")
+    expect(() => try$.flow({})).toThrow("flow is not implemented yet")
+  })
+
+  it("keeps root run isolated from retry chains", () => {
+    const retried = try$.retry(2).run(() => {
+      throw new Error("boom")
+    })
+
+    const rooted = try$.run(() => {
+      throw new Error("boom")
+    })
+
+    expect(retried).toBeInstanceOf(try$.RetryExhaustedError)
+    expect(rooted).toBeInstanceOf(try$.UnhandledException)
+  })
+
+  it("keeps root run isolated from wrap chains", () => {
+    let wrapCalls = 0
+
+    void try$
+      .wrap((ctx, next) => {
+        wrapCalls += 1
+        return next(ctx)
+      })
+      .run(() => 1)
+
+    void try$.run(() => 2)
+
+    expect(wrapCalls).toBe(1)
   })
 })
 
@@ -252,7 +268,8 @@ describe("full builder chain", () => {
     const ac = new AbortController()
     let attempts = 0
 
-    const result = retry(3)
+    const result = try$
+      .retry(3)
       .timeout(100)
       .signal(ac.signal)
       .wrap((ctx, next) => next(ctx))
@@ -275,12 +292,13 @@ describe("full builder chain", () => {
   it("supports full chain in async run with mapped catch", async () => {
     const ac = new AbortController()
 
-    const result = await retry({
-      backoff: "constant",
-      delayMs: 1,
-      limit: 3,
-      shouldRetry: () => false,
-    })
+    const result = await try$
+      .retry({
+        backoff: "constant",
+        delayMs: 1,
+        limit: 3,
+        shouldRetry: () => false,
+      })
       .timeout(100)
       .signal(ac.signal)
       .wrap((ctx, next) => next(ctx))
@@ -300,7 +318,8 @@ describe("full builder chain", () => {
   it("returns TimeoutError from full chain when deadline is exceeded", async () => {
     const ac = new AbortController()
 
-    const result = await retry(3)
+    const result = await try$
+      .retry(3)
       .timeout(5)
       .signal(ac.signal)
       .wrap((ctx, next) => next(ctx))
@@ -311,13 +330,14 @@ describe("full builder chain", () => {
         return 42
       })
 
-    expect(result).toBeInstanceOf(TimeoutError)
+    expect(result).toBeInstanceOf(try$.TimeoutError)
   })
 
   it("matches root helpers and chained timeout/signal API", () => {
     const ac = new AbortController()
 
-    const directResult = timeout(50)
+    const directResult = try$
+      .timeout(50)
       .signal(ac.signal)
       .run((ctx) => {
         expect(ctx.signal).toBeDefined()
@@ -325,7 +345,8 @@ describe("full builder chain", () => {
         return 7
       })
 
-    const rootedResult = signal(ac.signal)
+    const rootedResult = try$
+      .signal(ac.signal)
       .timeout(50)
       .run((ctx) => {
         expect(ctx.signal).toBeDefined()
