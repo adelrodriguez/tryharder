@@ -1,5 +1,3 @@
-import { Panic } from "./errors"
-
-export function createDisposer(): never {
-  throw new Panic({ message: "dispose is not implemented yet" })
+export function createDisposer(): AsyncDisposableStack {
+  return new AsyncDisposableStack()
 }

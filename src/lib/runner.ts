@@ -107,24 +107,10 @@ class RunExecution<T, E, Ctx extends BaseTryCtx> {
   }
 
   execute(): T | E | RunnerError | Promise<T | E | RunnerError> {
-    try {
-      const result = this.#executeWrappedRun()
-
-      if (checkIsPromiseLike(result)) {
-        return Promise.resolve(result).finally(() => {
-          this.#dispose()
-        })
-      }
-
-      this.#dispose()
-      return result
-    } catch (error) {
-      this.#dispose()
-      throw error
-    }
+    return this.#executeWrappedRun()
   }
 
-  #dispose(): void {
+  [Symbol.dispose](): void {
     this.#signal.dispose()
     this.#timeout.dispose()
   }
@@ -410,7 +396,7 @@ export function executeRunSync<T, E, Ctx extends BaseTryCtx>(
     })
   }
 
-  const execution = new RunExecution<T, E, Ctx>(config, input)
+  using execution = new RunExecution<T, E, Ctx>(config, input)
   const result = execution.execute()
 
   if (checkIsPromiseLike(result)) {
@@ -434,8 +420,8 @@ export function executeRunAsync<T, E, Ctx extends BaseTryCtx>(
   config: BuilderConfig,
   input: AsyncRunInput<T, E, Ctx>
 ): Promise<T | E | RunnerError> {
-  return Promise.resolve().then(() => {
-    const execution = new RunExecution<T, E, Ctx>(config, input)
-    return execution.execute()
+  return Promise.resolve().then(async () => {
+    using execution = new RunExecution<T, E, Ctx>(config, input)
+    return await execution.execute()
   })
 }
