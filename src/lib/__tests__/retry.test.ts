@@ -1,15 +1,49 @@
 import { describe, expect, it } from "bun:test"
-import type { BuilderConfig } from "../types"
+import type { BuilderConfig } from "../types/builder"
+import type { TryCtx } from "../types/core"
 import { RetryExhaustedError, TimeoutError } from "../errors"
 import {
   calculateRetryDelay,
   checkIsRetryExhausted,
   checkShouldAttemptRetry,
   normalizeRetryPolicy,
+  retryOptions,
 } from "../retry"
-import { executeRun } from "../runner"
+import { executeRunAsync, executeRunSync } from "../runner"
+
+function createTestCtx(attempt: number, config: BuilderConfig): TryCtx {
+  return {
+    retry: {
+      attempt,
+      limit: config.retry?.limit ?? 1,
+    },
+    signal: config.signal,
+  }
+}
 
 const shouldRetry = () => true
+
+function withMockedSetTimeout() {
+  const originalSetTimeout = globalThis.setTimeout
+  const delays: number[] = []
+
+  globalThis.setTimeout = ((handler: (...args: unknown[]) => void, timeout?: number) => {
+    delays.push(Number(timeout ?? 0))
+
+    if (typeof handler === "function") {
+      handler()
+    }
+
+    return 0 as unknown as ReturnType<typeof setTimeout>
+  }) as typeof setTimeout
+
+  return {
+    delays,
+    restore: () => {
+      globalThis.setTimeout = originalSetTimeout
+    },
+  }
+}
 
 describe("normalizeRetryPolicy", () => {
   it("normalizes number shorthand to constant backoff", () => {
@@ -62,6 +96,16 @@ describe("normalizeRetryPolicy", () => {
       jitter: true,
       limit: 5,
       shouldRetry,
+    })
+  })
+})
+
+describe("retryOptions", () => {
+  it("returns normalized retry policy", () => {
+    expect(retryOptions(2)).toEqual({
+      backoff: "constant",
+      delayMs: 0,
+      limit: 2,
     })
   })
 })
@@ -124,7 +168,8 @@ describe("calculateRetryDelay", () => {
 
 describe("checkShouldAttemptRetry", () => {
   it("returns false when no retry policy is configured", () => {
-    expect(checkShouldAttemptRetry(new Error("boom"), 1, {})).toBe(false)
+    const config: BuilderConfig = {}
+    expect(checkShouldAttemptRetry(new Error("boom"), createTestCtx(1, config), config)).toBe(false)
   })
 
   it("returns true when attempt is below limit", () => {
@@ -132,8 +177,8 @@ describe("checkShouldAttemptRetry", () => {
       retry: { backoff: "constant", limit: 3 },
     }
 
-    expect(checkShouldAttemptRetry(new Error("boom"), 1, config)).toBe(true)
-    expect(checkShouldAttemptRetry(new Error("boom"), 2, config)).toBe(true)
+    expect(checkShouldAttemptRetry(new Error("boom"), createTestCtx(1, config), config)).toBe(true)
+    expect(checkShouldAttemptRetry(new Error("boom"), createTestCtx(2, config), config)).toBe(true)
   })
 
   it("returns false when attempt meets or exceeds limit", () => {
@@ -141,8 +186,8 @@ describe("checkShouldAttemptRetry", () => {
       retry: { backoff: "constant", limit: 3 },
     }
 
-    expect(checkShouldAttemptRetry(new Error("boom"), 3, config)).toBe(false)
-    expect(checkShouldAttemptRetry(new Error("boom"), 4, config)).toBe(false)
+    expect(checkShouldAttemptRetry(new Error("boom"), createTestCtx(3, config), config)).toBe(false)
+    expect(checkShouldAttemptRetry(new Error("boom"), createTestCtx(4, config), config)).toBe(false)
   })
 
   it("delegates to shouldRetry callback when provided", () => {
@@ -154,8 +199,8 @@ describe("checkShouldAttemptRetry", () => {
       },
     }
 
-    expect(checkShouldAttemptRetry(new Error("boom"), 1, config)).toBe(true)
-    expect(checkShouldAttemptRetry(new Error("boom"), 2, config)).toBe(false)
+    expect(checkShouldAttemptRetry(new Error("boom"), createTestCtx(1, config), config)).toBe(true)
+    expect(checkShouldAttemptRetry(new Error("boom"), createTestCtx(2, config), config)).toBe(false)
   })
 })
 
@@ -191,10 +236,10 @@ describe("checkIsRetryExhausted", () => {
 })
 
 describe("executeRun retry", () => {
-  it("retries until success with configured limit", async () => {
+  it("retries until success with configured limit", () => {
     let attempts = 0
 
-    const result = executeRun(
+    const result = executeRunSync(
       {
         retry: { backoff: "constant", limit: 3 },
       },
@@ -209,14 +254,14 @@ describe("executeRun retry", () => {
       }
     )
 
-    expect(await result).toBe("ok")
+    expect(result).toBe("ok")
     expect(attempts).toBe(3)
   })
 
-  it("returns RetryExhaustedError when retry limit is exhausted", async () => {
+  it("returns RetryExhaustedError when retry limit is exhausted", () => {
     let mapped = false
 
-    const result = executeRun(
+    const result = executeRunSync(
       {
         retry: { backoff: "constant", limit: 2 },
       },
@@ -232,14 +277,14 @@ describe("executeRun retry", () => {
       }
     )
 
-    expect(await result).toBeInstanceOf(RetryExhaustedError)
+    expect(result).toBeInstanceOf(RetryExhaustedError)
     expect(mapped).toBe(false)
   })
 
-  it("uses shouldRetry to stop retrying and map with catch", async () => {
+  it("uses shouldRetry to stop retrying and map with catch", () => {
     let attempts = 0
 
-    const result = executeRun(
+    const result = executeRunSync(
       {
         retry: {
           backoff: "constant",
@@ -256,15 +301,66 @@ describe("executeRun retry", () => {
       }
     )
 
-    expect(await result).toBe("mapped")
+    expect(result).toBe("mapped")
     expect(attempts).toBe(2)
   })
 
-  it("does not retry control errors", async () => {
+  it("does not retry when shouldRetry is false on first attempt", () => {
+    let attempts = 0
+
+    const result = executeRunSync(
+      {
+        retry: {
+          backoff: "constant",
+          limit: 5,
+          shouldRetry: () => false,
+        },
+      },
+      {
+        catch: () => "mapped" as const,
+        try: () => {
+          attempts += 1
+          throw new Error("boom")
+        },
+      }
+    )
+
+    expect(result).toBe("mapped")
+    expect(attempts).toBe(1)
+  })
+
+  it("maps with async catch when shouldRetry stops before exhaustion", async () => {
+    let attempts = 0
+
+    const result = await executeRunAsync(
+      {
+        retry: {
+          backoff: "constant",
+          limit: 5,
+          shouldRetry: () => false,
+        },
+      },
+      {
+        catch: async () => {
+          await Promise.resolve()
+          return "mapped" as const
+        },
+        try: () => {
+          attempts += 1
+          throw new Error("boom")
+        },
+      }
+    )
+
+    expect(result).toBe("mapped")
+    expect(attempts).toBe(1)
+  })
+
+  it("does not retry control errors", () => {
     let attempts = 0
     let mapped = false
 
-    const result = executeRun(
+    const result = executeRunSync(
       {
         retry: { backoff: "constant", limit: 3 },
       },
@@ -281,74 +377,74 @@ describe("executeRun retry", () => {
       }
     )
 
-    expect(await result).toBeInstanceOf(TimeoutError)
+    expect(result).toBeInstanceOf(TimeoutError)
     expect(attempts).toBe(1)
     expect(mapped).toBe(false)
   })
 
+  it("throws when sync runner is used with async-required retry policy", () => {
+    expect(() =>
+      executeRunSync(
+        {
+          retry: { backoff: "linear", delayMs: 10, limit: 3 },
+        },
+        () => {
+          throw new Error("boom")
+        }
+      )
+    ).toThrow("Use runAsync() instead of run()")
+  })
+
+  it("throws when sync runner is used with jittered constant retry", () => {
+    expect(() =>
+      executeRunSync(
+        {
+          retry: { backoff: "constant", delayMs: 0, jitter: true, limit: 3 },
+        },
+        () => {
+          throw new Error("boom")
+        }
+      )
+    ).toThrow("Use runAsync() instead of run()")
+  })
+
   it("applies linear backoff delays between retries", async () => {
-    const originalSetTimeout = globalThis.setTimeout
-    const delays: number[] = []
-
-    globalThis.setTimeout = ((handler: (...args: unknown[]) => void, timeout?: number) => {
-      delays.push(Number(timeout ?? 0))
-
-      if (typeof handler === "function") {
-        handler()
-      }
-
-      return 0 as unknown as ReturnType<typeof setTimeout>
-    }) as typeof setTimeout
+    const { delays, restore } = withMockedSetTimeout()
 
     try {
-      const result = await Promise.resolve(
-        executeRun(
-          {
-            retry: { backoff: "linear", delayMs: 10, limit: 4 },
-          },
-          () => {
-            throw new Error("boom")
-          }
-        )
+      const result = await executeRunAsync(
+        {
+          retry: { backoff: "linear", delayMs: 10, limit: 4 },
+        },
+        () => {
+          throw new Error("boom")
+        }
       )
 
       expect(result).toBeInstanceOf(RetryExhaustedError)
       expect(delays).toEqual([10, 20, 30])
     } finally {
-      globalThis.setTimeout = originalSetTimeout
+      restore()
     }
   })
 
   it("applies exponential backoff delays with maxDelayMs cap", async () => {
-    const originalSetTimeout = globalThis.setTimeout
-    const delays: number[] = []
-
-    globalThis.setTimeout = ((handler: (...args: unknown[]) => void, timeout?: number) => {
-      delays.push(Number(timeout ?? 0))
-
-      if (typeof handler === "function") {
-        handler()
-      }
-
-      return 0 as unknown as ReturnType<typeof setTimeout>
-    }) as typeof setTimeout
+    const { delays, restore } = withMockedSetTimeout()
 
     try {
-      const result = await Promise.resolve(
-        executeRun(
-          {
-            retry: { backoff: "exponential", delayMs: 5, limit: 5, maxDelayMs: 12 },
-          },
-          () => {
-            throw new Error("boom")
-          }
-        )
+      const result = await executeRunAsync(
+        {
+          retry: { backoff: "exponential", delayMs: 5, limit: 5, maxDelayMs: 12 },
+        },
+        () => {
+          throw new Error("boom")
+        }
       )
 
       expect(result).toBeInstanceOf(RetryExhaustedError)
       expect(delays).toEqual([5, 10, 12, 12])
     } finally {
-      globalThis.setTimeout = originalSetTimeout
+      restore()
     }
   })
 })

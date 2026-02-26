@@ -1,6 +1,6 @@
 import type { BuilderConfig } from "./types/builder"
+import type { TryCtx } from "./types/core"
 import type { RetryOptions, RetryPolicy } from "./types/retry"
-import { createContext } from "./context"
 import { assertUnreachable } from "./utils"
 
 export function normalizeRetryPolicy(policy: RetryOptions): RetryPolicy {
@@ -12,32 +12,19 @@ export function normalizeRetryPolicy(policy: RetryOptions): RetryPolicy {
     }
   }
 
+  const base = {
+    delayMs: policy.delayMs ?? 0,
+    jitter: policy.jitter,
+    limit: policy.limit,
+    shouldRetry: policy.shouldRetry,
+  }
+
   switch (policy.backoff) {
     case "constant":
-      return {
-        backoff: "constant",
-        delayMs: policy.delayMs ?? 0,
-        jitter: policy.jitter,
-        limit: policy.limit,
-        shouldRetry: policy.shouldRetry,
-      }
     case "linear":
-      return {
-        backoff: "linear",
-        delayMs: policy.delayMs ?? 0,
-        jitter: policy.jitter,
-        limit: policy.limit,
-        shouldRetry: policy.shouldRetry,
-      }
+      return { ...base, backoff: policy.backoff }
     case "exponential":
-      return {
-        backoff: "exponential",
-        delayMs: policy.delayMs ?? 0,
-        jitter: policy.jitter,
-        limit: policy.limit,
-        maxDelayMs: policy.maxDelayMs,
-        shouldRetry: policy.shouldRetry,
-      }
+      return { ...base, backoff: policy.backoff, maxDelayMs: policy.maxDelayMs }
     default:
       return assertUnreachable(policy)
   }
@@ -83,7 +70,7 @@ export function calculateRetryDelay(attempt: number, config: BuilderConfig): num
 
 export function checkShouldAttemptRetry(
   error: unknown,
-  attempt: number,
+  ctx: TryCtx,
   config: BuilderConfig
 ): boolean {
   const policy = config.retry
@@ -92,17 +79,13 @@ export function checkShouldAttemptRetry(
     return false
   }
 
-  if (attempt >= policy.limit) {
+  if (ctx.retry.attempt >= policy.limit) {
     return false
   }
 
   if (!policy.shouldRetry) {
     return true
   }
-
-  const ctx = createContext(config)
-  ctx.retry.attempt = attempt
-  ctx.retry.limit = policy.limit
 
   return policy.shouldRetry(error, ctx)
 }

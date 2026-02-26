@@ -1,11 +1,12 @@
 import type { CancellationError, TimeoutError } from "./errors"
 import type { BuilderConfig } from "./types/builder"
+import type { BaseTryCtx } from "./types/core"
+import type { RetryPolicy } from "./types/retry"
 import type {
-  AsyncRunCatchFn,
+  AsyncRunInput,
   AsyncRunTryFn,
-  RunInput,
   RunCatchFn,
-  SyncRunCatchFn,
+  SyncRunInput,
   SyncRunTryFn,
 } from "./types/run"
 import { createContext } from "./context"
@@ -31,6 +32,17 @@ type RetryDecision = {
   shouldAttemptRetry: boolean
 }
 
+const RETRY_RESULT = Symbol("RETRY_RESULT")
+
+type RetryResult = {
+  [RETRY_RESULT]: true
+  retry: RetryDecision
+}
+
+function checkIsRetryResult(value: unknown): value is RetryResult {
+  return typeof value === "object" && value !== null && RETRY_RESULT in value
+}
+
 const CONTINUE_SYNC = Symbol("CONTINUE_SYNC")
 
 type SyncRetryContinuation = {
@@ -38,7 +50,7 @@ type SyncRetryContinuation = {
   nextAttempt: number
 }
 
-function isSyncRetryContinuation(value: unknown): value is SyncRetryContinuation {
+function checkIsSyncRetryContinuation(value: unknown): value is SyncRetryContinuation {
   return typeof value === "object" && value !== null && CONTINUE_SYNC in value
 }
 
@@ -66,38 +78,82 @@ function executeCatch<E>(catchFn: RunCatchFn<E>, error: unknown): E | Promise<E>
   }
 }
 
+function checkIsSyncSafeRetryPolicy(retryPolicy: RetryPolicy | undefined): boolean {
+  if (!retryPolicy) {
+    return true
+  }
+
+  if (retryPolicy.backoff !== "constant") {
+    return false
+  }
+
+  if (retryPolicy.jitter) {
+    return false
+  }
+
+  return (retryPolicy.delayMs ?? 0) <= 0
+}
+
+function throwSyncRetryPolicyError(): never {
+  throw new Error("This retry policy may run asynchronously. Use runAsync() instead of run().")
+}
+
+function throwSyncPromiseError(): never {
+  throw new Error("The try function returned a Promise. Use runAsync() instead of run().")
+}
+
 // -- Overloads: narrow the return type based on whether the input is sync/async
 // and whether a catch handler is provided. --
 
-export function executeRun<T>(
+export function executeRunSync<T, Ctx extends BaseTryCtx>(
   config: BuilderConfig,
-  input: SyncRunTryFn<T>
-): T | UnhandledException | Promise<T | UnhandledException>
-export function executeRun<T>(
+  input: SyncRunTryFn<T, Ctx>
+): T | UnhandledException | RunnerError
+export function executeRunSync<T, E, Ctx extends BaseTryCtx>(
   config: BuilderConfig,
-  input: AsyncRunTryFn<T>
+  input: SyncRunInput<T, E, Ctx>
+): T | E | RunnerError
+export function executeRunSync<T, E, Ctx extends BaseTryCtx>(
+  config: BuilderConfig,
+  input: SyncRunInput<T, E, Ctx>
+): T | E | RunnerError {
+  if (!checkIsSyncSafeRetryPolicy(config.retry)) {
+    throwSyncRetryPolicyError()
+  }
+
+  const result = executeRunCore(config, input)
+
+  if (checkIsPromiseLike(result)) {
+    throwSyncPromiseError()
+  }
+
+  return result
+}
+
+export function executeRunAsync<T, Ctx extends BaseTryCtx>(
+  config: BuilderConfig,
+  input: SyncRunTryFn<T, Ctx> | AsyncRunTryFn<T, Ctx>
 ): Promise<T | UnhandledException>
-export function executeRun<T, E>(
+export function executeRunAsync<T, E, Ctx extends BaseTryCtx>(
   config: BuilderConfig,
-  input: { try: SyncRunTryFn<T>; catch: SyncRunCatchFn<E> }
-): T | E | Promise<T | E>
-export function executeRun<T, E>(
-  config: BuilderConfig,
-  input:
-    | { try: SyncRunTryFn<T>; catch: AsyncRunCatchFn<E> }
-    | { try: AsyncRunTryFn<T>; catch: RunCatchFn<E> }
+  input: AsyncRunInput<T, E, Ctx>
 ): Promise<T | E>
-export function executeRun<T, E>(
+export function executeRunAsync<T, E, Ctx extends BaseTryCtx>(
   config: BuilderConfig,
-  input: RunInput<T, E>
-): T | E | RunnerError | Promise<T | E | RunnerError>
+  input: AsyncRunInput<T, E, Ctx>
+): Promise<T | E | RunnerError> {
+  return Promise.resolve().then(() => executeRunCore(config, input))
+}
 
 /**
  * Core execution engine. Runs the try function with optional retry, catch, and
  * timeout support. Stays synchronous when possible and only becomes async when
  * the try function returns a promise or a retry delay is needed.
  */
-export function executeRun<T, E>(config: BuilderConfig, input: RunInput<T, E>) {
+function executeRunCore<T, E, Ctx extends BaseTryCtx>(
+  config: BuilderConfig,
+  input: AsyncRunInput<T, E, Ctx>
+) {
   const ctx = createContext(config)
 
   // Normalize input: accept either a bare function or a { try, catch } object.
@@ -122,14 +178,44 @@ export function executeRun<T, E>(config: BuilderConfig, input: RunInput<T, E>) {
     return new UnhandledException({ cause: error })
   }
 
-  const evaluateRetryDecision = (error: unknown, attempt: number): RetryDecision => {
-    const shouldAttemptRetry = checkShouldAttemptRetry(error, attempt, config)
+  const evaluateRetryDecision = (error: unknown): RetryDecision => {
+    const shouldAttemptRetry = checkShouldAttemptRetry(error, ctx, config)
 
     return {
-      delay: shouldAttemptRetry ? calculateRetryDelay(attempt, config) : 0,
-      isRetryExhausted: checkIsRetryExhausted(attempt, config),
+      delay: shouldAttemptRetry ? calculateRetryDelay(ctx.retry.attempt, config) : 0,
+      isRetryExhausted: checkIsRetryExhausted(ctx.retry.attempt, config),
       shouldAttemptRetry,
     }
+  }
+
+  /**
+   * Resolve an attempt error into either a terminal result or a retry decision.
+   *
+   * Control errors pass through unchanged, exhausted retries produce a
+   * RetryExhaustedError (skipping catch), and non-retryable errors are
+   * finalized through the catch handler or wrapped in UnhandledException.
+   *
+   * Returns the retry decision when the error should be retried.
+   */
+  const resolveAttemptError = (
+    error: unknown,
+    decision?: RetryDecision
+  ): E | RunnerError | Promise<E> | RetryResult => {
+    if (checkIsControlError(error)) {
+      return error
+    }
+
+    const retryDecision = decision ?? evaluateRetryDecision(error)
+
+    if (!retryDecision.shouldAttemptRetry) {
+      if (retryDecision.isRetryExhausted) {
+        return new RetryExhaustedError({ cause: error })
+      }
+
+      return finalizeError(error)
+    }
+
+    return { [RETRY_RESULT]: true, retry: retryDecision }
   }
 
   /**
@@ -139,73 +225,57 @@ export function executeRun<T, E>(config: BuilderConfig, input: RunInput<T, E>) {
    * (when a non-zero delay is required between retries).
    */
   const handleAttemptErrorSync = (
-    error: unknown,
-    attempt: number
+    error: unknown
   ): T | E | RunnerError | Promise<T | E | RunnerError> | SyncRetryContinuation => {
-    // Control errors (Panic, Timeout, Cancellation) are never retried.
-    if (checkIsControlError(error)) {
-      return error
-    }
+    const resolved = resolveAttemptError(error)
 
-    const retryDecision = evaluateRetryDecision(error, attempt)
-
-    if (!retryDecision.shouldAttemptRetry) {
-      // All retries used up -- return a RetryExhaustedError (skips catch).
-      if (retryDecision.isRetryExhausted) {
-        return new RetryExhaustedError({ cause: error })
-      }
-
-      // Either no retry policy or shouldRetry returned false -- finalize.
-      return finalizeError(error)
+    if (!checkIsRetryResult(resolved)) {
+      return resolved
     }
 
     // No delay needed -- stay on the synchronous path for the next attempt.
-    if (retryDecision.delay <= 0) {
-      return { [CONTINUE_SYNC]: true, nextAttempt: attempt + 1 }
+    if (resolved.retry.delay <= 0) {
+      return { [CONTINUE_SYNC]: true, nextAttempt: ctx.retry.attempt + 1 }
     }
 
     // A delay is required, so we must switch to the async retry loop.
-    return handleAttemptErrorAsync(error, attempt, retryDecision)
+    return executeAsyncRetry(resolved.retry)
   }
 
   /**
    * Handle a failed attempt in the asynchronous path.
-   *
-   * Awaits the retry delay, then recursively retries. Once we enter the async
-   * path we stay async for all subsequent attempts.
    */
   const handleAttemptErrorAsync = async (
     error: unknown,
-    attempt: number,
-    retryDecision?: RetryDecision
+    decision?: RetryDecision
   ): Promise<T | E | RunnerError> => {
-    // Same early exits as the sync path.
-    if (checkIsControlError(error)) {
-      return error
+    const resolved = resolveAttemptError(error, decision)
+
+    if (!checkIsRetryResult(resolved)) {
+      return resolved
     }
 
-    const decision = retryDecision ?? evaluateRetryDecision(error, attempt)
+    return executeAsyncRetry(resolved.retry)
+  }
 
-    if (!decision.shouldAttemptRetry) {
-      if (decision.isRetryExhausted) {
-        return new RetryExhaustedError({ cause: error })
-      }
-
-      return finalizeError(error)
-    }
-
-    // Wait for the backoff delay before the next attempt.
+  /**
+   * Execute the async retry loop. Awaits the backoff delay, then recursively
+   * retries. Once we enter the async path we stay async for all subsequent
+   * attempts.
+   */
+  const executeAsyncRetry = async (decision: RetryDecision): Promise<T | E | RunnerError> => {
     if (decision.delay > 0) {
       await sleep(decision.delay)
     }
 
-    const nextAttempt = attempt + 1
-    ctx.retry.attempt = nextAttempt
+    ctx.retry.attempt += 1
 
     try {
-      return await tryFn(ctx)
+      // Runtime context always includes retry metadata; when a call site is
+      // typed with a narrower BaseTryCtx, passing this wider value is safe.
+      return await tryFn(ctx as unknown as Ctx)
     } catch (attemptError) {
-      return handleAttemptErrorAsync(attemptError, nextAttempt)
+      return handleAttemptErrorAsync(attemptError)
     }
   }
 
@@ -220,27 +290,25 @@ export function executeRun<T, E>(config: BuilderConfig, input: RunInput<T, E>) {
   ): T | E | RunnerError | Promise<T | E | RunnerError> => {
     let currentAttempt = attempt
 
-    // eslint-disable-next-line typescript-eslint/no-unnecessary-condition
+    // oxlint-disable-next-line typescript/no-unnecessary-condition
     while (true) {
       ctx.retry.attempt = currentAttempt
 
       try {
-        const result = tryFn(ctx)
+        // Runtime context always includes retry metadata; when a call site is
+        // typed with a narrower BaseTryCtx, passing this wider value is safe.
+        const result = tryFn(ctx as unknown as Ctx)
 
         // The try function returned a promise -- handle rejections asynchronously.
         if (checkIsPromiseLike(result)) {
-          const attemptForPromise = currentAttempt
-
-          return Promise.resolve(result).catch((error: unknown) =>
-            handleAttemptErrorAsync(error, attemptForPromise)
-          )
+          return Promise.resolve(result).catch((error: unknown) => handleAttemptErrorAsync(error))
         }
 
         return result
       } catch (error) {
-        const handled = handleAttemptErrorSync(error, currentAttempt)
+        const handled = handleAttemptErrorSync(error)
 
-        if (isSyncRetryContinuation(handled)) {
+        if (checkIsSyncRetryContinuation(handled)) {
           currentAttempt = handled.nextAttempt
           continue
         }
@@ -250,12 +318,5 @@ export function executeRun<T, E>(config: BuilderConfig, input: RunInput<T, E>) {
     }
   }
 
-  // Retry execution can switch to async even from sync inputs.
-  const result = executeAttemptSync(1)
-
-  if (config.retry) {
-    return Promise.resolve(result)
-  }
-
-  return result
+  return executeAttemptSync(1)
 }

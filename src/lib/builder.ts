@@ -5,22 +5,25 @@ import type {
   UnhandledException,
 } from "./errors"
 import type { BuilderConfig, TaskMap, TimeoutOptions, TimeoutPolicy, WrapFn } from "./types/builder"
+import type {
+  DefaultTryCtxFeatures,
+  SetTryCtxFeature,
+  TryCtxFeatures,
+  TryCtxFor,
+} from "./types/core"
 import type { RetryOptions } from "./types/retry"
 import type {
-  AsyncRunCatchFn,
+  AsyncRunInput,
   AsyncRunTryFn,
-  RunInput,
-  SyncRunCatchFn,
+  RunOptions,
+  SyncRunInput,
   SyncRunTryFn,
 } from "./types/run"
 import { normalizeRetryPolicy } from "./retry"
-import { executeRun } from "./runner"
+import { executeRunAsync, executeRunSync } from "./runner"
 
-type BuiltInRunErrors = UnhandledException
 type ConfigRunErrors = RetryExhaustedError | TimeoutError | CancellationError
-type AsyncIfRetryConfigured<E extends ConfigRunErrors, T> = RetryExhaustedError extends E
-  ? Promise<T>
-  : T
+type WithRetry<CtxFeatures extends TryCtxFeatures> = SetTryCtxFeature<CtxFeatures, "retry">
 
 function normalizeTimeoutOptions(options: TimeoutOptions): TimeoutPolicy {
   if (typeof options === "number") {
@@ -30,52 +33,65 @@ function normalizeTimeoutOptions(options: TimeoutOptions): TimeoutPolicy {
   return options
 }
 
-export class TryBuilder<E extends ConfigRunErrors = never> {
+export class TryBuilder<
+  E extends ConfigRunErrors = never,
+  CanRunSync extends boolean = true,
+  CtxFeatures extends TryCtxFeatures = DefaultTryCtxFeatures,
+> {
   readonly #config: BuilderConfig
 
   constructor(config: BuilderConfig = {}) {
     this.#config = config
   }
 
-  retry(policy: RetryOptions): TryBuilder<E | RetryExhaustedError> {
+  retry<P extends RetryOptions>(
+    policy: P
+  ): TryBuilder<E | RetryExhaustedError, P extends number ? true : false, WithRetry<CtxFeatures>>
+  retry(
+    policy: RetryOptions
+  ): TryBuilder<E | RetryExhaustedError, boolean, WithRetry<CtxFeatures>> {
     return new TryBuilder({
       ...this.#config,
       retry: normalizeRetryPolicy(policy),
     })
   }
 
-  timeout(options: TimeoutOptions): TryBuilder<E | TimeoutError> {
+  timeout(options: TimeoutOptions): TryBuilder<E | TimeoutError, CanRunSync, CtxFeatures> {
     return new TryBuilder({
       ...this.#config,
       timeout: normalizeTimeoutOptions(options),
     })
   }
 
-  signal(signal: AbortSignal): TryBuilder<E | CancellationError> {
+  signal(signal: AbortSignal): TryBuilder<E | CancellationError, CanRunSync, CtxFeatures> {
     return new TryBuilder({ ...this.#config, signal })
   }
 
-  wrap(fn: WrapFn): TryBuilder<E> {
+  wrap(fn: WrapFn): TryBuilder<E, CanRunSync, CtxFeatures> {
     return new TryBuilder({
       ...this.#config,
       wraps: [...(this.#config.wraps ?? []), fn],
     })
   }
 
-  run<T>(tryFn: SyncRunTryFn<T>): AsyncIfRetryConfigured<E, T | BuiltInRunErrors | E>
-  run<T>(tryFn: AsyncRunTryFn<T>): Promise<T | BuiltInRunErrors | E>
-  run<T, C>(options: {
-    try: SyncRunTryFn<T>
-    catch: SyncRunCatchFn<C>
-  }): AsyncIfRetryConfigured<E, T | C | E>
+  run<T>(
+    tryFn: CanRunSync extends true ? SyncRunTryFn<T, TryCtxFor<CtxFeatures>> : never
+  ): T | UnhandledException | E
   run<T, C>(
-    options:
-      | { try: AsyncRunTryFn<T>; catch: SyncRunCatchFn<C> | AsyncRunCatchFn<C> }
-      | { try: SyncRunTryFn<T>; catch: AsyncRunCatchFn<C> }
-  ): Promise<T | C | E>
+    options: CanRunSync extends true ? RunOptions<T, C, TryCtxFor<CtxFeatures>> : never
+  ): T | C | E
 
-  run<T, E>(input: RunInput<T, E>) {
-    return executeRun(this.#config, input)
+  run<T, C>(input: SyncRunInput<T, C, TryCtxFor<CtxFeatures>>) {
+    return executeRunSync(this.#config, input)
+  }
+
+  runAsync<T>(
+    tryFn: SyncRunTryFn<T, TryCtxFor<CtxFeatures>> | AsyncRunTryFn<T, TryCtxFor<CtxFeatures>>
+  ): Promise<T | UnhandledException | E>
+  runAsync<T, C>(options: AsyncRunInput<T, C, TryCtxFor<CtxFeatures>>): Promise<T | C | E>
+
+  runAsync<T, C>(input: AsyncRunInput<T, C, TryCtxFor<CtxFeatures>>) {
+    return executeRunAsync(this.#config, input)
   }
 
   all(_tasks: TaskMap): never {

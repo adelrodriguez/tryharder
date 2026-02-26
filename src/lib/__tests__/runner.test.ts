@@ -1,17 +1,18 @@
 import { describe, expect, it } from "bun:test"
+import type { TryCtx } from "../types/core"
 import { Panic, UnhandledException } from "../errors"
-import { executeRun } from "../runner"
+import { executeRunAsync, executeRunSync } from "../runner"
 
-describe("executeRun", () => {
+describe("executeRunSync / executeRunAsync", () => {
   describe("sync", () => {
     it("returns success value in function form", () => {
-      const result = executeRun({}, () => "ok" as const)
+      const result = executeRunSync({}, () => "ok" as const)
 
       expect(result).toBe("ok")
     })
 
     it("returns UnhandledException when function form throws", () => {
-      const result = executeRun({}, () => {
+      const result = executeRunSync({}, () => {
         throw new Error("boom")
       })
 
@@ -19,7 +20,7 @@ describe("executeRun", () => {
     })
 
     it("maps errors in object form with try and catch", () => {
-      const result = executeRun(
+      const result = executeRunSync(
         {},
         {
           catch: () => "mapped" as const,
@@ -34,7 +35,7 @@ describe("executeRun", () => {
 
     it("throws Panic when catch throws", () => {
       expect(() =>
-        executeRun(
+        executeRunSync(
           {},
           {
             catch: () => {
@@ -48,29 +49,37 @@ describe("executeRun", () => {
       ).toThrow(Panic)
     })
 
-    it("passes normalized context to try", async () => {
-      const result = executeRun(
+    it("passes normalized context to try", () => {
+      const result = executeRunSync(
         {
           retry: { backoff: "constant", limit: 3 },
         },
-        (ctx) => ({
+        (ctx: TryCtx) => ({
           attempt: ctx.retry.attempt,
           hasSignal: Boolean(ctx.signal),
           limit: ctx.retry.limit,
         })
       )
 
-      expect(await result).toEqual({
+      expect(result).toEqual({
         attempt: 1,
         hasSignal: false,
         limit: 3,
       })
     })
+
+    it("throws when sync runner returns a promise via unsafe cast", () => {
+      const unsafeSyncFn = (() => Promise.resolve("ok")) as unknown as () => string
+
+      expect(() => executeRunSync({}, unsafeSyncFn)).toThrow(
+        "The try function returned a Promise. Use runAsync() instead of run()."
+      )
+    })
   })
 
   describe("async", () => {
     it("returns resolved value when function form is async", async () => {
-      const result = executeRun({}, async () => {
+      const result = executeRunAsync({}, async () => {
         await Promise.resolve()
 
         return "ok" as const
@@ -80,7 +89,7 @@ describe("executeRun", () => {
     })
 
     it("maps rejected value to UnhandledException in async function form", async () => {
-      const result = executeRun({}, async () => {
+      const result = executeRunAsync({}, async () => {
         await Promise.resolve()
         throw new Error("boom")
       })
@@ -89,7 +98,7 @@ describe("executeRun", () => {
     })
 
     it("maps async try rejection through catch in object form", async () => {
-      const result = executeRun(
+      const result = executeRunAsync(
         {},
         {
           catch: () => "mapped",
@@ -104,7 +113,7 @@ describe("executeRun", () => {
     })
 
     it("throws Panic when async catch rejects", async () => {
-      const result = executeRun(
+      const result = executeRunAsync(
         {},
         {
           catch: async () => {
