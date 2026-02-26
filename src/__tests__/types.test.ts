@@ -1,12 +1,6 @@
 /* oxlint-disable typescript/no-unnecessary-type-parameters, typescript/require-await */
 import { describe, it } from "bun:test"
-import type {
-  CancellationError,
-  RetryExhaustedError,
-  TimeoutError,
-  UnhandledException,
-} from "../index"
-import { gen, retry, run, runAsync, signal, timeout } from "../index"
+import * as try$ from "../index"
 
 type Expect<T extends true> = T
 type Equal<X, Y> =
@@ -15,29 +9,29 @@ const typecheckOnly = (): boolean => false
 
 describe("type inference", () => {
   describe("no config", () => {
-    it("run sync function returns T | UnhandledException", () => {
-      const result = run(() => 42)
-      type _assert = Expect<Equal<typeof result, number | UnhandledException>>
+    it("runSync sync function returns T | UnhandledException", () => {
+      const result = try$.runSync(() => 42)
+      type _assert = Expect<Equal<typeof result, number | try$.UnhandledException>>
     })
 
-    it("runAsync async function returns Promise<T | UnhandledException>", () => {
-      const result = runAsync(async () => 42)
-      type _assert = Expect<Equal<typeof result, Promise<number | UnhandledException>>>
+    it("run function returns Promise<T | UnhandledException>", () => {
+      const result = try$.run(async () => 42)
+      type _assert = Expect<Equal<typeof result, Promise<number | try$.UnhandledException>>>
     })
 
-    it("run sync try/catch returns T | E", () => {
-      const result = run({ catch: () => "err" as const, try: () => 42 })
+    it("runSync sync try/catch returns T | E", () => {
+      const result = try$.runSync({ catch: () => "err" as const, try: () => 42 })
       type _assert = Expect<Equal<typeof result, number | "err">>
     })
 
-    it("runAsync async try with sync catch returns Promise<T | E>", () => {
-      const result = runAsync({ catch: () => "err" as const, try: async () => 42 })
+    it("run async try with sync catch returns Promise<T | E>", () => {
+      const result = try$.run({ catch: () => "err" as const, try: async () => 42 })
       type _assert = Expect<Equal<typeof result, Promise<number | "err">>>
     })
 
     it("ctx.retry is not available without retry config", () => {
       if (typecheckOnly()) {
-        run((ctx) => {
+        void try$.run((ctx) => {
           // @ts-expect-error retry metadata is only available after calling retry()
           void ctx.retry.attempt
           return 42
@@ -47,127 +41,150 @@ describe("type inference", () => {
   })
 
   describe("with retry", () => {
-    it("constant zero-delay retry allows run and returns sync union", () => {
-      const result = retry(3).run(() => 42)
-      type _assert = Expect<Equal<typeof result, number | UnhandledException | RetryExhaustedError>>
+    it("constant zero-delay retry run returns Promise union", () => {
+      const result = try$.retry(3).run(() => 42)
+      type _assert = Expect<
+        Equal<typeof result, Promise<number | try$.UnhandledException | try$.RetryExhaustedError>>
+      >
     })
 
-    it("retry runAsync returns Promise union", () => {
-      const result = retry(3).runAsync(async () => 42)
+    it("retry run returns Promise union", () => {
+      const result = try$.retry(3).run(async () => 42)
       type _assert = Expect<
-        Equal<typeof result, Promise<number | UnhandledException | RetryExhaustedError>>
+        Equal<typeof result, Promise<number | try$.UnhandledException | try$.RetryExhaustedError>>
       >
     })
 
     it("ctx.retry is available when retry config is present", () => {
-      const result = retry(3).run((ctx) => ctx.retry.attempt)
-      type _assert = Expect<Equal<typeof result, number | UnhandledException | RetryExhaustedError>>
-    })
-
-    it("linear retry requires runAsync", () => {
-      if (typecheckOnly()) {
-        // @ts-expect-error run is unavailable for async-required retry policies
-        retry({ backoff: "linear", delayMs: 1, limit: 3 }).run(() => 42)
-      }
-    })
-
-    it("constant non-zero delay retry requires runAsync", () => {
-      if (typecheckOnly()) {
-        // @ts-expect-error run is unavailable for async-required retry policies
-        retry({ backoff: "constant", delayMs: 1, limit: 3 }).run(() => 42)
-      }
-    })
-
-    it("constant zero-delay object retry still requires runAsync", () => {
-      if (typecheckOnly()) {
-        // @ts-expect-error only numeric retry keeps run() available
-        retry({ backoff: "constant", delayMs: 0, limit: 3 }).run(() => 42)
-      }
-    })
-
-    it("constant retry with jitter requires runAsync", () => {
-      if (typecheckOnly()) {
-        // @ts-expect-error only numeric retry keeps run() available
-        retry({ backoff: "constant", delayMs: 0, jitter: true, limit: 3 }).run(() => 42)
-      }
+      const result = try$.retry(3).run((ctx) => ctx.retry.attempt)
+      type _assert = Expect<
+        Equal<typeof result, Promise<number | try$.UnhandledException | try$.RetryExhaustedError>>
+      >
     })
   })
 
   describe("with timeout", () => {
-    it("run sync function returns T | UnhandledException | TimeoutError", () => {
-      const result = timeout(5000).run(() => 42)
-      type _assert = Expect<Equal<typeof result, number | UnhandledException | TimeoutError>>
-    })
-
-    it("runAsync async function returns Promise<T | UnhandledException | TimeoutError>", () => {
-      const result = timeout(5000).runAsync(async () => 42)
+    it("run function returns Promise<T | UnhandledException | TimeoutError>", () => {
+      const result = try$.timeout(5000).run(() => 42)
       type _assert = Expect<
-        Equal<typeof result, Promise<number | UnhandledException | TimeoutError>>
+        Equal<typeof result, Promise<number | try$.UnhandledException | try$.TimeoutError>>
       >
     })
   })
 
   describe("with signal", () => {
-    it("run sync function returns T | UnhandledException | CancellationError", () => {
+    it("run function returns Promise<T | UnhandledException | CancellationError>", () => {
       const ac = new AbortController()
-      const result = signal(ac.signal).run(() => 42)
-      type _assert = Expect<Equal<typeof result, number | UnhandledException | CancellationError>>
-    })
-
-    it("runAsync async function returns Promise<T | UnhandledException | CancellationError>", () => {
-      const ac = new AbortController()
-      const result = signal(ac.signal).runAsync(async () => 42)
+      const result = try$.signal(ac.signal).run(() => 42)
       type _assert = Expect<
-        Equal<typeof result, Promise<number | UnhandledException | CancellationError>>
+        Equal<typeof result, Promise<number | try$.UnhandledException | try$.CancellationError>>
       >
     })
   })
 
   describe("combined configs", () => {
-    it("retry + timeout constant retry still allows run sync", () => {
-      const result = retry(3)
+    it("retry + timeout run returns Promise union", () => {
+      const result = try$
+        .retry(3)
         .timeout(5000)
         .run(() => 42)
       type _assert = Expect<
-        Equal<typeof result, number | UnhandledException | RetryExhaustedError | TimeoutError>
-      >
-    })
-
-    it("retry + timeout async returns Promise union via runAsync", () => {
-      const result = retry(3)
-        .timeout(5000)
-        .runAsync(async () => 42)
-      type _assert = Expect<
         Equal<
           typeof result,
-          Promise<number | UnhandledException | RetryExhaustedError | TimeoutError>
+          Promise<number | try$.UnhandledException | try$.RetryExhaustedError | try$.TimeoutError>
         >
       >
     })
 
-    it("all three with run keeps sync union when retry is sync-safe", () => {
+    it("retry + timeout async returns Promise union via run", () => {
+      const result = try$
+        .retry(3)
+        .timeout(5000)
+        .run(async () => 42)
+      type _assert = Expect<
+        Equal<
+          typeof result,
+          Promise<number | try$.UnhandledException | try$.RetryExhaustedError | try$.TimeoutError>
+        >
+      >
+    })
+
+    it("all three with run keeps Promise union when retry is sync-safe", () => {
       const ac = new AbortController()
-      const result = retry(3)
+      const result = try$
+        .retry(3)
         .timeout(5000)
         .signal(ac.signal)
         .run({ catch: () => "err" as const, try: () => 42 as const })
       type _assert = Expect<
-        Equal<typeof result, 42 | "err" | RetryExhaustedError | TimeoutError | CancellationError>
+        Equal<
+          typeof result,
+          Promise<
+            42 | "err" | try$.RetryExhaustedError | try$.TimeoutError | try$.CancellationError
+          >
+        >
       >
     })
 
-    it("all three with async catch uses runAsync and returns Promise union", () => {
+    it("all three with async catch uses run and returns Promise union", () => {
       const ac = new AbortController()
-      const result = retry(3)
+      const result = try$
+        .retry(3)
         .timeout(5000)
         .signal(ac.signal)
-        .runAsync({ catch: () => "err" as const, try: async () => 42 })
+        .run({ catch: () => "err" as const, try: async () => 42 })
       type _assert = Expect<
         Equal<
           typeof result,
-          Promise<number | "err" | RetryExhaustedError | TimeoutError | CancellationError>
+          Promise<
+            number | "err" | try$.RetryExhaustedError | try$.TimeoutError | try$.CancellationError
+          >
         >
       >
+    })
+  })
+
+  describe("wrap capabilities", () => {
+    it("wrap builder exposes runSync", () => {
+      const result = try$.wrap((ctx, next) => next(ctx)).runSync(() => 42)
+      type _assert = Expect<Equal<typeof result, number | try$.UnhandledException>>
+    })
+
+    it("wrap builder still exposes run", () => {
+      const result = try$.wrap((ctx, next) => next(ctx)).run(() => 42)
+      type _assert = Expect<Equal<typeof result, Promise<number | try$.UnhandledException>>>
+    })
+
+    it("retry after wrap removes runSync", () => {
+      if (typecheckOnly()) {
+        const afterRetry = try$.wrap((ctx, next) => next(ctx)).retry(3)
+        // @ts-expect-error runSync is not available after retry()
+        void afterRetry.runSync
+      }
+    })
+
+    it("timeout after wrap removes runSync", () => {
+      if (typecheckOnly()) {
+        const afterTimeout = try$.wrap((ctx, next) => next(ctx)).timeout(100)
+        // @ts-expect-error runSync is not available after timeout()
+        void afterTimeout.runSync
+      }
+    })
+
+    it("signal after wrap removes runSync", () => {
+      if (typecheckOnly()) {
+        const afterSignal = try$.wrap((ctx, next) => next(ctx)).signal(new AbortController().signal)
+        // @ts-expect-error runSync is not available after signal()
+        void afterSignal.runSync
+      }
+    })
+
+    it("wrap after retry does not expose runSync", () => {
+      if (typecheckOnly()) {
+        const wrappedRetry = try$.retry(3).wrap((ctx, next) => next(ctx))
+        // @ts-expect-error runSync is not available when retry is configured
+        void wrappedRetry.runSync
+      }
     })
   })
 
@@ -176,7 +193,7 @@ describe("type inference", () => {
     class ProjectNotFound extends Error {}
 
     it("returns sync union for sync yielded values", () => {
-      const result = gen(function* (use) {
+      const result = try$.gen(function* (use) {
         const value = yield* use(Math.random() > 0.5 ? 1 : new UserNotFound("missing"))
         return value
       })
@@ -185,7 +202,7 @@ describe("type inference", () => {
     })
 
     it("returns Promise union when yielded values include Promise", () => {
-      const result = gen(function* (use) {
+      const result = try$.gen(function* (use) {
         const userId = yield* use(Promise.resolve(Math.random() > 0.5 ? 1 : new UserNotFound("u")))
         void userId
         const project = yield* use(

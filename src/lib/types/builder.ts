@@ -23,7 +23,7 @@ export type TimeoutOptions = number | TimeoutPolicy
 
 /**
  * Known limitation: wrappers currently receive the full TryCtx shape.
- * This keeps middleware signatures stable while run()/runAsync() input
+ * This keeps middleware signatures stable while run() input
  * contexts are feature-narrowed.
  */
 export type WrapFn = (ctx: TryCtx, next: RunTryFn<unknown, TryCtx>) => unknown

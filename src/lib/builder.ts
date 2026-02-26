@@ -4,96 +4,151 @@ import type {
   TimeoutError,
   UnhandledException,
 } from "./errors"
-import type { BuilderConfig, TaskMap, TimeoutOptions, TimeoutPolicy, WrapFn } from "./types/builder"
+import type { BuilderConfig, TaskMap, TimeoutOptions, WrapFn } from "./types/builder"
 import type {
-  DefaultTryCtxFeatures,
+  DefaultTryCtxProperties,
   SetTryCtxFeature,
-  TryCtxFeatures,
+  TryCtxProperties,
   TryCtxFor,
 } from "./types/core"
 import type { RetryOptions } from "./types/retry"
-import type {
-  AsyncRunInput,
-  AsyncRunTryFn,
-  RunOptions,
-  SyncRunInput,
-  SyncRunTryFn,
-} from "./types/run"
+import type { AsyncRunInput, RunTryFn, SyncRunInput, SyncRunTryFn } from "./types/run"
 import { Panic } from "./errors"
 import { normalizeRetryPolicy } from "./retry"
-import { executeRunAsync, executeRunSync } from "./runner"
+import { executeRun } from "./run"
+import { executeRunSync } from "./run-sync"
+import { normalizeTimeoutOptions } from "./timeout"
 
 type ConfigRunErrors = RetryExhaustedError | TimeoutError | CancellationError
-type WithRetry<CtxFeatures extends TryCtxFeatures> = SetTryCtxFeature<CtxFeatures, "retry">
+type WithRetry<CtxProperties extends TryCtxProperties> = SetTryCtxFeature<CtxProperties, "retry">
 
-function normalizeTimeoutOptions(options: TimeoutOptions): TimeoutPolicy {
-  if (typeof options === "number") {
-    return { ms: options, scope: "total" }
+function appendWrap(config: BuilderConfig, fn: WrapFn): BuilderConfig {
+  return {
+    ...config,
+    wraps: [...(config.wraps ?? []), fn],
   }
-
-  return options
 }
 
-export class TryBuilder<
+function appendSignal(config: BuilderConfig, signal: AbortSignal): BuilderConfig {
+  return {
+    ...config,
+    signals: [...(config.signals ?? []), signal],
+  }
+}
+
+function addRetry(config: BuilderConfig, policy: RetryOptions): BuilderConfig {
+  return {
+    ...config,
+    retry: normalizeRetryPolicy(policy),
+  }
+}
+
+function addTimeout(config: BuilderConfig, options: TimeoutOptions): BuilderConfig {
+  return {
+    ...config,
+    timeout: normalizeTimeoutOptions(options),
+  }
+}
+
+export class WrappedRunBuilder<
   E extends ConfigRunErrors = never,
-  CanRunSync extends boolean = true,
-  CtxFeatures extends TryCtxFeatures = DefaultTryCtxFeatures,
+  CtxProperties extends TryCtxProperties = DefaultTryCtxProperties,
 > {
   readonly #config: BuilderConfig
 
-  constructor(config: BuilderConfig = {}) {
+  constructor(config: BuilderConfig) {
     this.#config = config
   }
 
-  retry<P extends RetryOptions>(
-    policy: P
-  ): TryBuilder<E | RetryExhaustedError, P extends number ? true : false, WithRetry<CtxFeatures>>
+  wrap(fn: WrapFn): WrappedRunBuilder<E, CtxProperties> {
+    return new WrappedRunBuilder(appendWrap(this.#config, fn))
+  }
+
   retry(
     policy: RetryOptions
-  ): TryBuilder<E | RetryExhaustedError, boolean, WithRetry<CtxFeatures>> {
-    return new TryBuilder({
-      ...this.#config,
-      retry: normalizeRetryPolicy(policy),
-    })
+  ): RunBuilder<E | RetryExhaustedError, false, WithRetry<CtxProperties>> {
+    return new RunBuilder(addRetry(this.#config, policy), false)
   }
 
-  timeout(options: TimeoutOptions): TryBuilder<E | TimeoutError, CanRunSync, CtxFeatures> {
-    return new TryBuilder({
-      ...this.#config,
-      timeout: normalizeTimeoutOptions(options),
-    })
+  timeout(options: TimeoutOptions): RunBuilder<E | TimeoutError, false, CtxProperties> {
+    return new RunBuilder(addTimeout(this.#config, options), false)
   }
 
-  signal(signal: AbortSignal): TryBuilder<E | CancellationError, CanRunSync, CtxFeatures> {
-    return new TryBuilder({
-      ...this.#config,
-      signals: [...(this.#config.signals ?? []), signal],
-    })
+  signal(signal: AbortSignal): RunBuilder<E | CancellationError, false, CtxProperties> {
+    return new RunBuilder(appendSignal(this.#config, signal), false)
   }
 
-  wrap(fn: WrapFn): TryBuilder<E, CanRunSync, CtxFeatures> {
-    return new TryBuilder({
-      ...this.#config,
-      wraps: [...(this.#config.wraps ?? []), fn],
-    })
+  run<T>(tryFn: RunTryFn<T, TryCtxFor<CtxProperties>>): Promise<T | UnhandledException | E>
+  run<T, C>(options: AsyncRunInput<T, C, TryCtxFor<CtxProperties>>): Promise<T | C | E>
+  run<T, C>(input: AsyncRunInput<T, C, TryCtxFor<CtxProperties>>) {
+    return executeRun(this.#config, input)
   }
 
-  run<T>(
-    tryFn: CanRunSync extends true ? SyncRunTryFn<T, TryCtxFor<CtxFeatures>> : never
-  ): T | UnhandledException | E
-  run<T, C>(
-    options: CanRunSync extends true ? RunOptions<T, C, TryCtxFor<CtxFeatures>> : never
-  ): T | C | E
-  run<T, C>(input: SyncRunInput<T, C, TryCtxFor<CtxFeatures>>) {
+  runSync<T>(tryFn: SyncRunTryFn<T, TryCtxFor<CtxProperties>>): T | UnhandledException | E
+  runSync<T, C>(options: SyncRunInput<T, C, TryCtxFor<CtxProperties>>): T | C | E
+  runSync<T, C>(input: SyncRunInput<T, C, TryCtxFor<CtxProperties>>) {
     return executeRunSync(this.#config, input)
   }
 
-  runAsync<T>(
-    tryFn: SyncRunTryFn<T, TryCtxFor<CtxFeatures>> | AsyncRunTryFn<T, TryCtxFor<CtxFeatures>>
-  ): Promise<T | UnhandledException | E>
-  runAsync<T, C>(options: AsyncRunInput<T, C, TryCtxFor<CtxFeatures>>): Promise<T | C | E>
-  runAsync<T, C>(input: AsyncRunInput<T, C, TryCtxFor<CtxFeatures>>) {
-    return executeRunAsync(this.#config, input)
+  all(_tasks: TaskMap): never {
+    void this.#config
+    throw new Panic({ message: "all is not implemented yet" })
+  }
+
+  allSettled(_tasks: TaskMap): never {
+    void this.#config
+    throw new Panic({ message: "allSettled is not implemented yet" })
+  }
+
+  flow(_tasks: TaskMap): never {
+    void this.#config
+    throw new Panic({ message: "flow is not implemented yet" })
+  }
+}
+
+export class RunBuilder<
+  E extends ConfigRunErrors = never,
+  CanSync extends boolean = true,
+  CtxProperties extends TryCtxProperties = DefaultTryCtxProperties,
+> {
+  readonly #config: BuilderConfig
+  readonly #canSync: CanSync
+
+  constructor(config: BuilderConfig = {}, canSync = true as CanSync) {
+    this.#config = config
+    this.#canSync = canSync
+  }
+
+  retry(
+    policy: RetryOptions
+  ): RunBuilder<E | RetryExhaustedError, false, WithRetry<CtxProperties>> {
+    return new RunBuilder(addRetry(this.#config, policy), false)
+  }
+
+  timeout(options: TimeoutOptions): RunBuilder<E | TimeoutError, false, CtxProperties> {
+    return new RunBuilder(addTimeout(this.#config, options), false)
+  }
+
+  signal(signal: AbortSignal): RunBuilder<E | CancellationError, false, CtxProperties> {
+    return new RunBuilder(appendSignal(this.#config, signal), false)
+  }
+
+  wrap(this: RunBuilder<E, true, CtxProperties>, fn: WrapFn): WrappedRunBuilder<E, CtxProperties>
+  wrap(this: RunBuilder<E, false, CtxProperties>, fn: WrapFn): RunBuilder<E, false, CtxProperties>
+  wrap(fn: WrapFn): WrappedRunBuilder<E, CtxProperties> | RunBuilder<E, false, CtxProperties> {
+    const config = appendWrap(this.#config, fn)
+
+    if (this.#canSync) {
+      return new WrappedRunBuilder(config)
+    }
+
+    return new RunBuilder(config, false)
+  }
+
+  run<T>(tryFn: RunTryFn<T, TryCtxFor<CtxProperties>>): Promise<T | UnhandledException | E>
+  run<T, C>(options: AsyncRunInput<T, C, TryCtxFor<CtxProperties>>): Promise<T | C | E>
+  run<T, C>(input: AsyncRunInput<T, C, TryCtxFor<CtxProperties>>) {
+    return executeRun(this.#config, input)
   }
 
   all(_tasks: TaskMap): never {

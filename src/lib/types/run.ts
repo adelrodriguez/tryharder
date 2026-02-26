@@ -26,3 +26,13 @@ export type SyncRunInput<T, E, Ctx extends BaseTryCtx = BaseTryCtx> =
 export type AsyncRunInput<T, E, Ctx extends BaseTryCtx = BaseTryCtx> =
   | RunTryFn<T, Ctx>
   | RunAsyncOptions<T, E, Ctx>
+
+export type RunSyncTryFn<T> = () => NonPromise<T>
+export type RunSyncCatchFn<E> = (error: unknown) => NonPromise<E>
+
+export interface RunSyncOptions<T, E> {
+  try: RunSyncTryFn<T>
+  catch: RunSyncCatchFn<E>
+}
+
+export type RunSyncInput<T, E> = RunSyncTryFn<T> | RunSyncOptions<T, E>

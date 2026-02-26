@@ -10,10 +10,11 @@ Made with [🥐 `pastry`](https://github.com/adelrodriguez/pastry)
 
 ## API Notes
 
-- `run(...)` is the sync entrypoint.
-- `runAsync(...)` is the async entrypoint and always returns a `Promise`.
-- `retry(number)` keeps `run(...)` available.
-- `retry({ ...policy })` requires `runAsync(...)`.
+- `runSync(...)` is the sync-only entrypoint for simple try/catch wrapping.
+- `run(...)` is the builder entrypoint and always returns a `Promise`.
+- Builder features (`retry`, `timeout`, `signal`, `wrap`) are available through `run(...)`.
+- `wrap(...).runSync(...)` is supported.
+- After `retry(...)`, `timeout(...)`, or `signal(...)`, only `run(...)` is available.
 
 ### Context narrowing
 

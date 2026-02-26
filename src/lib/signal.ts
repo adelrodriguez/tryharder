@@ -1,4 +1,5 @@
 import { CancellationError, TimeoutError } from "./errors"
+import { raceWithAbortSignal } from "./utils"
 
 export class SignalController {
   readonly signal?: AbortSignal
@@ -36,21 +37,9 @@ export class SignalController {
       return promise
     }
 
-    const signal = this.signal
-    using disposer = new DisposableStack()
-
-    const cancellationPromise = new Promise<CancellationError>((resolve) => {
-      const onAbort = () => {
-        resolve(this.#createCancellationError(cause))
-      }
-
-      signal.addEventListener("abort", onAbort, { once: true })
-      disposer.defer(() => {
-        signal.removeEventListener("abort", onAbort)
-      })
-    })
-
-    return await Promise.race([Promise.resolve(promise), cancellationPromise])
+    return await raceWithAbortSignal(this.signal, promise, () =>
+      this.#createCancellationError(cause)
+    )
   }
 
   [Symbol.dispose](): void {

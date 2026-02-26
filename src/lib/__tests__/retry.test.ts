@@ -9,7 +9,8 @@ import {
   normalizeRetryPolicy,
   retryOptions,
 } from "../retry"
-import { executeRunAsync, executeRunSync } from "../runner"
+import { executeRun } from "../run"
+import { executeRunSync } from "../run-sync"
 
 function createTestCtx(attempt: number, config: BuilderConfig): TryCtx {
   return {
@@ -332,7 +333,7 @@ describe("executeRun retry", () => {
   it("maps with async catch when shouldRetry stops before exhaustion", async () => {
     let attempts = 0
 
-    const result = await executeRunAsync(
+    const result = await executeRun(
       {
         retry: {
           backoff: "constant",
@@ -412,7 +413,7 @@ describe("executeRun retry", () => {
     const { delays, restore } = withMockedSetTimeout()
 
     try {
-      const result = await executeRunAsync(
+      const result = await executeRun(
         {
           retry: { backoff: "linear", delayMs: 10, limit: 4 },
         },
@@ -432,7 +433,7 @@ describe("executeRun retry", () => {
     const { delays, restore } = withMockedSetTimeout()
 
     try {
-      const result = await executeRunAsync(
+      const result = await executeRun(
         {
           retry: { backoff: "exponential", delayMs: 5, limit: 5, maxDelayMs: 12 },
         },

@@ -14,20 +14,20 @@ export interface BaseTryCtx {
   signal?: AbortSignal
 }
 
-export interface TryCtxFeatures {
+export interface TryCtxProperties {
   retry: boolean
 }
 
-export type DefaultTryCtxFeatures = {
+export type DefaultTryCtxProperties = {
   retry: false
 }
 
 export type SetTryCtxFeature<
-  Features extends TryCtxFeatures,
-  Key extends keyof TryCtxFeatures,
+  Features extends TryCtxProperties,
+  Key extends keyof TryCtxProperties,
 > = Omit<Features, Key> & { [K in Key]: true }
 
-export type TryCtxFor<Features extends TryCtxFeatures> = BaseTryCtx &
+export type TryCtxFor<Features extends TryCtxProperties> = BaseTryCtx &
   (Features["retry"] extends true ? { retry: RetryInfo } : Record<never, never>)
 
 export type TryCtx = TryCtxFor<{ retry: true }>
