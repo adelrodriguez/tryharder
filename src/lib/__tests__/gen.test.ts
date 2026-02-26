@@ -32,13 +32,17 @@ describe("executeGen", () => {
   })
 
   it("awaits yielded promises and returns async success", async () => {
-    const result = executeGen(function* (use) {
+    const result = await executeGen(function* (use) {
       const a = yield* use(Promise.resolve(20))
+      if (a > 20) {
+        return new Error("boom")
+      }
+
       const b = yield* use(Promise.resolve(22))
       return a + b
     })
 
-    expect(await result).toBe(42)
+    expect(result).toBe(42)
   })
 
   it("short-circuits async execution on resolved Error", async () => {
@@ -46,29 +50,66 @@ describe("executeGen", () => {
 
     const maybeProject = Promise.resolve(new ProjectNotFound("missing") as number | ProjectNotFound)
 
-    const result = executeGen(function* (use) {
+    const result = await executeGen(function* (use) {
       const project = yield* use(maybeProject)
       void project
       didRunAfterError = true
       return 42
     })
 
-    expect(await result).toBeInstanceOf(ProjectNotFound)
+    expect(result).toBeInstanceOf(ProjectNotFound)
     expect(didRunAfterError).toBe(false)
   })
 
   it("propagates rejected yielded promise", async () => {
-    const result = executeGen(function* (use) {
+    const result = await executeGen(function* (use) {
       const value = yield* use(Promise.reject<unknown>(new Error("boom")))
       return value
     })
 
-    try {
-      await Promise.resolve(result)
-      throw new Error("Expected rejection")
-    } catch (error) {
-      expect(error).toBeInstanceOf(Error)
-      expect((error as Error).message).toBe("boom")
-    }
+    expect(result).toBeInstanceOf(Error)
+    expect((result as Error).message).toBe("boom")
+  })
+
+  it("returns error when factory throws", () => {
+    const result = executeGen(() => {
+      throw new Error("factory failed")
+    })
+
+    expect(result).toBeInstanceOf(Error)
+    expect((result as Error).message).toBe("factory failed")
+  })
+
+  it("returns error when generator body throws after yield", () => {
+    const result = executeGen(function* (use) {
+      void (yield* use(1))
+      throw new Error("generator failed")
+    })
+
+    expect(result).toBeInstanceOf(Error)
+    expect((result as Error).message).toBe("generator failed")
+  })
+
+  it("returns explicit error values without throwing", () => {
+    const result = executeGen(function* (use) {
+      void (yield* use(1))
+      return new ProjectNotFound("from return")
+    })
+
+    expect(result).toBeInstanceOf(ProjectNotFound)
+    expect(result.message).toBe("from return")
+  })
+
+  it("returns explicit async error values without throwing", async () => {
+    const result = executeGen(function* (use) {
+      const value = yield* use(Promise.resolve(1))
+      void value
+      return Promise.resolve(new ProjectNotFound("async return"))
+    })
+
+    const resolved = await result
+
+    expect(resolved).toBeInstanceOf(ProjectNotFound)
+    expect(resolved.message).toBe("async return")
   })
 })
