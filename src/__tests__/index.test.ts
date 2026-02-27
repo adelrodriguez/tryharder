@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test"
 import * as try$ from "../index"
+import { sleep } from "../lib/utils"
 
 class InvalidInputError extends Error {}
 class PermissionDeniedError extends Error {}
@@ -7,174 +8,182 @@ class NetworkError extends Error {}
 class RemoteServiceError extends Error {}
 
 describe("runSync", () => {
-  it("returns value when tryFn succeeds", () => {
-    const value = try$.runSync(() => 42)
+  describe("function form", () => {
+    it("returns value when function succeeds", () => {
+      const value = try$.runSync(() => 42)
 
-    expect(value).toBe(42)
-  })
-
-  it("returns UnhandledException in function form", () => {
-    const result = try$.runSync(() => {
-      throw new Error("boom")
+      expect(value).toBe(42)
     })
 
-    expect(result).toBeInstanceOf(try$.UnhandledException)
-  })
-
-  it("maps error when object form includes try and catch", () => {
-    const result = try$.runSync({
-      catch: () => "mapped",
-      try: () => {
+    it("returns UnhandledException in function form", () => {
+      const result = try$.runSync(() => {
         throw new Error("boom")
-      },
+      })
+
+      expect(result).toBeInstanceOf(try$.UnhandledException)
     })
 
-    expect(result).toBe("mapped")
+    it("throws Panic when sync run receives a Promise-returning function via unsafe cast", () => {
+      const unsafeRun = try$.runSync as unknown as (tryFn: () => number) => number
+      const unsafeTry = (() => Promise.resolve(42)) as unknown as () => number
+
+      expect(() => unsafeRun(unsafeTry)).toThrow(try$.Panic)
+    })
   })
 
-  it("throws Panic when catch throws", () => {
-    expect(() =>
-      try$.runSync({
-        catch: () => {
-          throw new Error("catch failed")
-        },
+  describe("object form", () => {
+    it("returns mapped value when object form catch handles error", () => {
+      const result = try$.runSync({
+        catch: () => "mapped",
         try: () => {
           throw new Error("boom")
         },
       })
-    ).toThrow(try$.Panic)
-  })
 
-  it("throws Panic when sync run receives a Promise-returning function via unsafe cast", () => {
-    const unsafeRun = try$.runSync as unknown as (tryFn: () => number) => number
-    const unsafeTry = (() => Promise.resolve(42)) as unknown as () => number
-
-    expect(() => unsafeRun(unsafeTry)).toThrow(try$.Panic)
-  })
-
-  it("supports multiple mapped error variants in sync object form", () => {
-    const invalidInput = try$.runSync({
-      catch: (error) => {
-        if (error instanceof SyntaxError) {
-          return new InvalidInputError("invalid")
-        }
-
-        return new PermissionDeniedError("denied")
-      },
-      try: () => {
-        throw new SyntaxError("bad input")
-      },
+      expect(result).toBe("mapped")
     })
 
-    const permissionDenied = try$.runSync({
-      catch: (error) => {
-        if (error instanceof SyntaxError) {
-          return new InvalidInputError("invalid")
-        }
-
-        return new PermissionDeniedError("denied")
-      },
-      try: () => {
-        throw new Error("no access")
-      },
+    it("throws Panic when catch throws", () => {
+      expect(() =>
+        try$.runSync({
+          catch: () => {
+            throw new Error("catch failed")
+          },
+          try: () => {
+            throw new Error("boom")
+          },
+        })
+      ).toThrow(try$.Panic)
     })
 
-    expect(invalidInput).toBeInstanceOf(InvalidInputError)
-    expect(permissionDenied).toBeInstanceOf(PermissionDeniedError)
+    it("supports multiple mapped error variants in sync object form", () => {
+      const invalidInput = try$.runSync({
+        catch: (error) => {
+          if (error instanceof SyntaxError) {
+            return new InvalidInputError("invalid")
+          }
+
+          return new PermissionDeniedError("denied")
+        },
+        try: () => {
+          throw new SyntaxError("bad input")
+        },
+      })
+
+      const permissionDenied = try$.runSync({
+        catch: (error) => {
+          if (error instanceof SyntaxError) {
+            return new InvalidInputError("invalid")
+          }
+
+          return new PermissionDeniedError("denied")
+        },
+        try: () => {
+          throw new Error("no access")
+        },
+      })
+
+      expect(invalidInput).toBeInstanceOf(InvalidInputError)
+      expect(permissionDenied).toBeInstanceOf(PermissionDeniedError)
+    })
   })
 })
 
 describe("run", () => {
-  it("returns promise value when tryFn is async", async () => {
-    const result = try$.run(async () => {
-      await Promise.resolve()
+  describe("function form", () => {
+    it("returns value when async function resolves", async () => {
+      const result = try$.run(async () => {
+        await Promise.resolve()
 
-      return 42
+        return 42
+      })
+
+      expect(await result).toBe(42)
     })
 
-    expect(await result).toBe(42)
-  })
-
-  it("returns UnhandledException when async function form rejects", async () => {
-    const result = try$.run(async () => {
-      await Promise.resolve()
-      throw new Error("boom")
-    })
-
-    expect(await result).toBeInstanceOf(try$.UnhandledException)
-  })
-
-  it("returns UnhandledException when sync function form throws", async () => {
-    const result = try$.run(() => {
-      throw new Error("boom")
-    })
-
-    expect(await result).toBeInstanceOf(try$.UnhandledException)
-  })
-
-  it("maps async object form rejections through catch", async () => {
-    const result = try$.run({
-      catch: () => "mapped",
-      try: async () => {
+    it("returns UnhandledException when async function form rejects", async () => {
+      const result = try$.run(async () => {
         await Promise.resolve()
         throw new Error("boom")
-      },
+      })
+
+      expect(await result).toBeInstanceOf(try$.UnhandledException)
     })
 
-    expect(await result).toBe("mapped")
-  })
-
-  it("throws Panic when async catch rejects", async () => {
-    const result = try$.run({
-      catch: async () => {
-        await Promise.resolve()
-        throw new Error("catch failed")
-      },
-      try: async () => {
-        await Promise.resolve()
+    it("returns UnhandledException when sync function form throws", async () => {
+      const result = try$.run(() => {
         throw new Error("boom")
-      },
-    })
+      })
 
-    try {
-      await result
-      throw new Error("Expected Panic rejection")
-    } catch (error) {
-      expect(error).toBeInstanceOf(try$.Panic)
-    }
+      expect(await result).toBeInstanceOf(try$.UnhandledException)
+    })
   })
 
-  it("supports multiple mapped error variants in async object form", async () => {
-    const networkError = await try$.run({
-      catch: (error): NetworkError | RemoteServiceError => {
-        if (error instanceof TypeError) {
-          return new NetworkError("network")
-        }
+  describe("object form", () => {
+    it("returns mapped value when async object form catch handles error", async () => {
+      const result = try$.run({
+        catch: () => "mapped",
+        try: async () => {
+          await Promise.resolve()
+          throw new Error("boom")
+        },
+      })
 
-        return new RemoteServiceError("remote")
-      },
-      try: async () => {
-        await Promise.resolve()
-        throw new TypeError("fetch failed")
-      },
+      expect(await result).toBe("mapped")
     })
 
-    const remoteServiceError = await try$.run({
-      catch: (error) => {
-        if (error instanceof TypeError) {
-          return new NetworkError("network")
-        }
+    it("throws Panic when async catch rejects", async () => {
+      const result = try$.run({
+        catch: async () => {
+          await Promise.resolve()
+          throw new Error("catch failed")
+        },
+        try: async () => {
+          await Promise.resolve()
+          throw new Error("boom")
+        },
+      })
 
-        return new RemoteServiceError("remote")
-      },
-      try: async () => {
-        await Promise.resolve()
-        throw new Error("500")
-      },
+      try {
+        await result
+        throw new Error("Expected Panic rejection")
+      } catch (error) {
+        expect(error).toBeInstanceOf(try$.Panic)
+      }
     })
 
-    expect(networkError).toBeInstanceOf(NetworkError)
-    expect(remoteServiceError).toBeInstanceOf(RemoteServiceError)
+    it("supports multiple mapped error variants in async object form", async () => {
+      const networkError = await try$.run({
+        catch: (error): NetworkError | RemoteServiceError => {
+          if (error instanceof TypeError) {
+            return new NetworkError("network")
+          }
+
+          return new RemoteServiceError("remote")
+        },
+        try: async () => {
+          await Promise.resolve()
+          throw new TypeError("fetch failed")
+        },
+      })
+
+      const remoteServiceError = await try$.run({
+        catch: (error) => {
+          if (error instanceof TypeError) {
+            return new NetworkError("network")
+          }
+
+          return new RemoteServiceError("remote")
+        },
+        try: async () => {
+          await Promise.resolve()
+          throw new Error("500")
+        },
+      })
+
+      expect(networkError).toBeInstanceOf(NetworkError)
+      expect(remoteServiceError).toBeInstanceOf(RemoteServiceError)
+    })
   })
 })
 
@@ -228,14 +237,6 @@ describe("builder helpers", () => {
     expect(result).toBe(42)
   })
 
-  it("throws for unimplemented all", () => {
-    expect(() => try$.all({})).toThrow("all is not implemented yet")
-  })
-
-  it("throws for unimplemented allSettled", () => {
-    expect(() => try$.allSettled({})).toThrow("allSettled is not implemented yet")
-  })
-
   it("throws for unimplemented flow", () => {
     expect(() => try$.flow({})).toThrow("flow is not implemented yet")
   })
@@ -279,6 +280,316 @@ describe("builder helpers", () => {
     await disposer[Symbol.asyncDispose]()
 
     expect(calls).toEqual(["cleanup"])
+  })
+})
+
+describe("all", () => {
+  it("returns empty object when task map is empty", async () => {
+    const result = await try$.all({})
+
+    expect(result).toEqual({})
+  })
+
+  it("runs tasks in parallel and returns resolved values", async () => {
+    const started: string[] = []
+
+    const result = await try$.all({
+      async a() {
+        started.push("a")
+        await sleep(10)
+        return 1
+      },
+      async b() {
+        started.push("b")
+        await sleep(10)
+        return "ok"
+      },
+    })
+
+    expect(started).toEqual(["a", "b"])
+    expect(result).toEqual({ a: 1, b: "ok" })
+  })
+
+  it("supports dependency reads through this.$result", async () => {
+    const result = await try$.all({
+      a() {
+        return 10
+      },
+      async b() {
+        const a = await this.$result.a
+        return a + 5
+      },
+    })
+
+    expect(result).toEqual({ a: 10, b: 15 })
+  })
+
+  it("rejects on first task failure", async () => {
+    try {
+      await try$.all({
+        a() {
+          throw new Error("boom")
+        },
+        async b() {
+          await sleep(20)
+          return 2
+        },
+      })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect((error as Error).message).toBe("boom")
+    }
+  })
+
+  it("returns mapped value when catch handles failure", async () => {
+    const result = await try$.all(
+      {
+        a() {
+          throw new Error("boom")
+        },
+        b() {
+          return 2
+        },
+      },
+      {
+        catch: () => "mapped" as const,
+      }
+    )
+
+    expect(result).toBe("mapped")
+  })
+
+  it("passes failed task and partial results to catch", async () => {
+    const result = await try$.all(
+      {
+        async a() {
+          await sleep(5)
+          return 1
+        },
+        b() {
+          throw new Error("boom")
+        },
+      },
+      {
+        catch: (_error, ctx) => ({
+          failedTask: ctx.failedTask,
+          hasSignal: ctx.signal instanceof AbortSignal,
+          partialA: ctx.partial.a,
+        }),
+      }
+    )
+
+    expect(result).toEqual({
+      failedTask: "b",
+      hasSignal: true,
+      partialA: undefined,
+    })
+  })
+
+  it("throws Panic when all catch throws", async () => {
+    try {
+      await try$.all(
+        {
+          a() {
+            throw new Error("boom")
+          },
+        },
+        {
+          catch: () => {
+            throw new Error("catch failed")
+          },
+        }
+      )
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect(error).toBeInstanceOf(try$.Panic)
+    }
+  })
+
+  it("throws Panic when all catch rejects", async () => {
+    try {
+      await try$.all(
+        {
+          a() {
+            throw new Error("boom")
+          },
+        },
+        {
+          catch: async () => {
+            await Promise.resolve()
+            throw new Error("catch failed")
+          },
+        }
+      )
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect(error).toBeInstanceOf(try$.Panic)
+    }
+  })
+
+  it("returns resolved values with retry and timeout builder options", async () => {
+    const result = await try$
+      .retry(3)
+      .timeout(100)
+      .all({
+        a() {
+          return 1
+        },
+        async b() {
+          await sleep(5)
+          return 2
+        },
+      })
+
+    expect(result).toEqual({ a: 1, b: 2 })
+  })
+
+  it("honors cancellation signal from builder options", async () => {
+    const controller = new AbortController()
+
+    const pending = try$
+      .retry(3)
+      .timeout(100)
+      .signal(controller.signal)
+      .all({
+        async a() {
+          await sleep(20)
+
+          if (this.$signal.aborted) {
+            throw this.$signal.reason
+          }
+
+          return 1
+        },
+        async b() {
+          await sleep(20)
+          return 2
+        },
+      })
+
+    setTimeout(() => {
+      controller.abort(new Error("stop"))
+    }, 5)
+
+    try {
+      await pending
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect((error as Error).message).toBe("stop")
+    }
+  })
+})
+
+describe("settled().all", () => {
+  it("returns empty object when task map is empty", async () => {
+    const result = await try$.settled().all({})
+
+    expect(result).toEqual({})
+  })
+
+  it("returns mixed fulfilled and rejected task results", async () => {
+    const boom = new Error("boom")
+
+    const result = await try$.settled().all({
+      a() {
+        return 1
+      },
+      b() {
+        throw boom
+      },
+    })
+
+    expect(result.a).toEqual({ status: "fulfilled", value: 1 })
+    expect(result.b).toEqual({ reason: boom, status: "rejected" })
+  })
+
+  it("does not reject outer promise when tasks fail", async () => {
+    const result = await try$.settled().all({
+      a() {
+        throw new Error("a failed")
+      },
+      b() {
+        throw new Error("b failed")
+      },
+    })
+
+    expect(result.a.status).toBe("rejected")
+    expect(result.b.status).toBe("rejected")
+  })
+
+  it("allows dependent tasks to handle failed dependencies", async () => {
+    const result = await try$.settled().all({
+      a() {
+        throw new Error("a failed")
+      },
+      async b() {
+        try {
+          return await this.$result.a
+        } catch {
+          return "fallback"
+        }
+      },
+    })
+
+    expect(result.a.status).toBe("rejected")
+    expect(result.b).toEqual({ status: "fulfilled", value: "fallback" })
+  })
+
+  it("returns settled results with retry and timeout builder options", async () => {
+    const result = await try$
+      .retry(3)
+      .timeout(100)
+      .settled()
+      .all({
+        a() {
+          return 1
+        },
+        b() {
+          throw new Error("boom")
+        },
+      })
+
+    expect(result.a).toEqual({ status: "fulfilled", value: 1 })
+    expect(result.b.status).toBe("rejected")
+  })
+
+  it("honors cancellation signal from builder options", async () => {
+    const controller = new AbortController()
+
+    const pending = try$
+      .retry(3)
+      .timeout(100)
+      .signal(controller.signal)
+      .settled()
+      .all({
+        async a() {
+          await sleep(20)
+
+          if (this.$signal.aborted) {
+            throw this.$signal.reason
+          }
+
+          return 1
+        },
+        async b() {
+          await sleep(25)
+
+          if (this.$signal.aborted) {
+            throw this.$signal.reason
+          }
+
+          return 2
+        },
+      })
+
+    setTimeout(() => {
+      controller.abort(new Error("stop"))
+    }, 5)
+
+    const result = await pending
+
+    expect(result.a.status).toBe("rejected")
+    expect(result.b.status).toBe("rejected")
   })
 })
 
@@ -334,7 +645,7 @@ describe("full builder chain", () => {
     expect(result).toBe("mapped")
   })
 
-  it("combines chained signal calls into a compound ctx.signal", async () => {
+  it("returns CancellationError when one chained signal aborts", async () => {
     const first = new AbortController()
     const second = new AbortController()
 
@@ -380,7 +691,7 @@ describe("full builder chain", () => {
     expect(result).toBeInstanceOf(try$.TimeoutError)
   })
 
-  it("matches root helpers and chained timeout/signal API", async () => {
+  it("returns same value for timeout().signal() and signal().timeout() chains", async () => {
     const ac = new AbortController()
 
     const directResult = await try$

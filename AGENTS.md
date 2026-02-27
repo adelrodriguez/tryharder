@@ -26,3 +26,8 @@ This project was built with [`pastry`](https://github.com/adelrodriguez/pastry) 
 
 - Prefer type inference whenever possible.
 - Do not add explicit return types unless required by tooling, declaration emit, or a public API contract.
+
+## Implementation Approach
+
+- Prefer a WET-first approach while behavior is still evolving: duplicate simple logic when it keeps intent obvious and local.
+- Move to DRY only after patterns stabilize and the abstraction clearly improves readability, maintenance, or correctness.

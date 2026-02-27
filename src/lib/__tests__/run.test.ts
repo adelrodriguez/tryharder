@@ -2,13 +2,13 @@ import { describe, expect, it } from "bun:test"
 import type { TryCtx } from "../types/core"
 import { CancellationError, Panic, TimeoutError, UnhandledException } from "../errors"
 import { executeRun } from "../run"
+import { sleep } from "../utils"
 
 describe("executeRun", () => {
-  describe("async", () => {
+  describe("function form", () => {
     it("returns resolved value when function form is async", async () => {
       const result = executeRun({}, async () => {
         await Promise.resolve()
-
         return "ok" as const
       })
 
@@ -23,7 +23,9 @@ describe("executeRun", () => {
 
       expect(await result).toBeInstanceOf(UnhandledException)
     })
+  })
 
+  describe("object form", () => {
     it("maps async try rejection through catch in object form", async () => {
       const result = executeRun(
         {},
@@ -61,16 +63,16 @@ describe("executeRun", () => {
         expect(error).toBeInstanceOf(Panic)
       }
     })
+  })
 
+  describe("timeout behavior", () => {
     it("returns TimeoutError when timeout expires during try execution", async () => {
       const result = await executeRun(
         {
           timeout: { ms: 5, scope: "total" },
         },
         async () => {
-          await new Promise((resolve) => {
-            setTimeout(resolve, 20)
-          })
+          await sleep(20)
           return "never"
         }
       )
@@ -122,9 +124,7 @@ describe("executeRun", () => {
         },
         {
           catch: async () => {
-            await new Promise((resolve) => {
-              setTimeout(resolve, 20)
-            })
+            await sleep(20)
             return "mapped"
           },
           try: () => {
@@ -135,14 +135,14 @@ describe("executeRun", () => {
 
       expect(result).toBeInstanceOf(TimeoutError)
     })
+  })
 
+  describe("cancellation behavior", () => {
     it("returns CancellationError when signal aborts during async try", async () => {
       const ac = new AbortController()
 
       const pending = executeRun({ signals: [ac.signal] }, async () => {
-        await new Promise((resolve) => {
-          setTimeout(resolve, 25)
-        })
+        await sleep(25)
         return "ok"
       })
 
@@ -160,9 +160,7 @@ describe("executeRun", () => {
       const second = new AbortController()
 
       const pending = executeRun({ signals: [first.signal, second.signal] }, async () => {
-        await new Promise((resolve) => {
-          setTimeout(resolve, 25)
-        })
+        await sleep(25)
         return "ok"
       })
 
@@ -174,7 +172,9 @@ describe("executeRun", () => {
 
       expect(result).toBeInstanceOf(CancellationError)
     })
+  })
 
+  describe("wrap behavior", () => {
     it("runs wraps once when retries are handled asynchronously", async () => {
       let wrapCalls = 0
       let attempts = 0

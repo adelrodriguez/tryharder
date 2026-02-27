@@ -1,10 +1,8 @@
-/* oxlint-disable typescript/no-unnecessary-type-parameters, typescript/require-await */
 import { describe, it } from "bun:test"
 import * as try$ from "../index"
 
 type Expect<T extends true> = T
-type Equal<X, Y> =
-  (<T>() => T extends X ? 1 : 2) extends <T>() => T extends Y ? 1 : 2 ? true : false
+type Equal<X, Y> = [X] extends [Y] ? ([Y] extends [X] ? true : false) : false
 const typecheckOnly = (): boolean => false
 
 describe("type inference", () => {
@@ -15,7 +13,7 @@ describe("type inference", () => {
     })
 
     it("run function returns Promise<T | UnhandledException>", () => {
-      const result = try$.run(async () => 42)
+      const result = try$.run(() => 42)
       type _assert = Expect<Equal<typeof result, Promise<number | try$.UnhandledException>>>
     })
 
@@ -25,7 +23,7 @@ describe("type inference", () => {
     })
 
     it("run async try with sync catch returns Promise<T | E>", () => {
-      const result = try$.run({ catch: () => "err" as const, try: async () => 42 })
+      const result = try$.run({ catch: () => "err" as const, try: () => Promise.resolve(42) })
       type _assert = Expect<Equal<typeof result, Promise<number | "err">>>
     })
 
@@ -36,6 +34,30 @@ describe("type inference", () => {
           void ctx.retry.attempt
           return 42
         })
+      }
+    })
+
+    it("ctx.retry is not available with timeout/signal/wrap alone", () => {
+      if (typecheckOnly()) {
+        void try$.timeout(100).run((ctx) => {
+          // @ts-expect-error retry metadata is only available after retry()
+          void ctx.retry.attempt
+          return 1
+        })
+
+        void try$.signal(new AbortController().signal).run((ctx) => {
+          // @ts-expect-error retry metadata is only available after retry()
+          void ctx.retry.attempt
+          return 1
+        })
+
+        void try$
+          .wrap((ctx, next) => next(ctx))
+          .run((ctx) => {
+            // @ts-expect-error retry metadata is only available after retry()
+            void ctx.retry.attempt
+            return 1
+          })
       }
     })
   })
@@ -49,7 +71,7 @@ describe("type inference", () => {
     })
 
     it("retry run returns Promise union", () => {
-      const result = try$.retry(3).run(async () => 42)
+      const result = try$.retry(3).run(() => Promise.resolve(42))
       type _assert = Expect<
         Equal<typeof result, Promise<number | try$.UnhandledException | try$.RetryExhaustedError>>
       >
@@ -57,6 +79,13 @@ describe("type inference", () => {
 
     it("ctx.retry is available when retry config is present", () => {
       const result = try$.retry(3).run((ctx) => ctx.retry.attempt)
+      type _assert = Expect<
+        Equal<typeof result, Promise<number | try$.UnhandledException | try$.RetryExhaustedError>>
+      >
+    })
+
+    it("ctx.retry supports async usage when retry config is present", () => {
+      const result = try$.retry(3).run((ctx) => Promise.resolve(ctx.retry.limit))
       type _assert = Expect<
         Equal<typeof result, Promise<number | try$.UnhandledException | try$.RetryExhaustedError>>
       >
@@ -100,7 +129,7 @@ describe("type inference", () => {
       const result = try$
         .retry(3)
         .timeout(5000)
-        .run(async () => 42)
+        .run(() => Promise.resolve(42))
       type _assert = Expect<
         Equal<
           typeof result,
@@ -132,12 +161,34 @@ describe("type inference", () => {
         .retry(3)
         .timeout(5000)
         .signal(ac.signal)
-        .run({ catch: () => "err" as const, try: async () => 42 })
+        .run({ catch: () => "err" as const, try: () => Promise.resolve(42) })
       type _assert = Expect<
         Equal<
           typeof result,
           Promise<
             number | "err" | try$.RetryExhaustedError | try$.TimeoutError | try$.CancellationError
+          >
+        >
+      >
+    })
+
+    it("retry metadata remains available across timeout/signal/wrap chain", () => {
+      const result = try$
+        .retry(3)
+        .timeout(100)
+        .signal(new AbortController().signal)
+        .wrap((ctx, next) => next(ctx))
+        .run((ctx) => ctx.retry.attempt)
+
+      type _assert = Expect<
+        Equal<
+          typeof result,
+          Promise<
+            | number
+            | try$.UnhandledException
+            | try$.RetryExhaustedError
+            | try$.TimeoutError
+            | try$.CancellationError
           >
         >
       >
@@ -247,13 +298,13 @@ describe("type inference", () => {
 
             return new UserNotFound("missing user")
           },
-          try: async (): Promise<User> => ({ id: "u_1" }),
+          try: (): Promise<User> => Promise.resolve({ id: "u_1" }),
         })
 
       const getProject = (userId: string) =>
         try$.run({
           catch: (): ProjectNotFound => new ProjectNotFound("missing project"),
-          try: async (): Promise<Project> => ({ id: `p_${userId}` }),
+          try: (): Promise<Project> => Promise.resolve({ id: `p_${userId}` }),
         })
 
       const result = try$.gen(function* (use) {
@@ -266,6 +317,191 @@ describe("type inference", () => {
       type _assert = Expect<
         Equal<typeof result, Promise<string | UserNotFound | PermissionDenied | ProjectNotFound>>
       >
+    })
+  })
+
+  describe("all", () => {
+    it("infers result types from task return types", () => {
+      if (typecheckOnly()) return
+
+      const result = try$.all({
+        a(): number {
+          return 42
+        },
+        b(): Promise<string> {
+          return Promise.resolve("hello")
+        },
+      })
+
+      type _assert = Expect<Equal<typeof result, Promise<{ a: number; b: string }>>>
+    })
+
+    it("infers $result proxy types from non-self-referencing tasks", () => {
+      if (typecheckOnly()) return
+
+      void try$.all({
+        a(): number {
+          return 42
+        },
+        async b() {
+          const a = this.$result.a
+          const resolvedA = await this.$result.a
+
+          type _assertProxy = Expect<Equal<typeof a, Promise<number>>>
+          type _assertResolved = Expect<Equal<typeof resolvedA, number>>
+          return "hello"
+        },
+      })
+    })
+
+    it("rejects unknown $result keys", () => {
+      if (typecheckOnly()) {
+        void try$.all({
+          a() {
+            return 1
+          },
+          b() {
+            // @ts-expect-error unknown task key is not available on $result
+            void this.$result.missing
+            return 2
+          },
+        })
+      }
+    })
+
+    it("rejects non-function task entries", () => {
+      if (typecheckOnly()) {
+        void try$.all({
+          // @ts-expect-error all() tasks must be functions
+          a: 1,
+          b() {
+            return 2
+          },
+        })
+      }
+    })
+
+    it("returns success or mapped catch type when catch is provided", () => {
+      const result = try$.all(
+        {
+          a(): number {
+            return 42
+          },
+          b(): string {
+            return "hello"
+          },
+        },
+        {
+          catch: () => "mapped" as const,
+        }
+      )
+
+      type _assert = Expect<Equal<typeof result, Promise<{ a: number; b: string } | "mapped">>>
+    })
+
+    it("infers catch context for all", () => {
+      if (typecheckOnly()) return
+
+      void try$.all(
+        {
+          a(): number {
+            return 42
+          },
+          b(): string {
+            return "hello"
+          },
+        },
+        {
+          catch: (_error, ctx) => {
+            const failedTask = ctx.failedTask
+            const partialA = ctx.partial.a
+            const signal = ctx.signal
+
+            type _assertFailedTask = Expect<Equal<typeof failedTask, "a" | "b" | undefined>>
+            type _assertPartialA = Expect<Equal<typeof partialA, number | undefined>>
+            type _assertSignal = Expect<Equal<typeof signal, AbortSignal>>
+
+            return "mapped" as const
+          },
+        }
+      )
+    })
+  })
+
+  describe("settled().all", () => {
+    it("infers settled result types", () => {
+      if (typecheckOnly()) return
+
+      const result = try$.settled().all({
+        a(): number {
+          return 42
+        },
+        b(): string {
+          return "hello"
+        },
+      })
+
+      type _assert = Expect<
+        Equal<
+          typeof result,
+          Promise<{
+            a: try$.SettledResult<number>
+            b: try$.SettledResult<string>
+          }>
+        >
+      >
+    })
+
+    it("keeps $result property types when awaited", () => {
+      if (typecheckOnly()) return
+
+      void try$.settled().all({
+        a() {
+          return 42
+        },
+        async b() {
+          const a = this.$result.a
+          const resolvedA = await this.$result.a
+
+          type _assertProxy = Expect<Equal<typeof a, Promise<42>>>
+          type _assertResolved = Expect<Equal<typeof resolvedA, 42>>
+          return "hello"
+        },
+      })
+    })
+
+    it("rejects unknown $result keys in settled mode", () => {
+      if (typecheckOnly()) {
+        void try$.settled().all({
+          a() {
+            return 1
+          },
+          b() {
+            // @ts-expect-error unknown task key is not available on $result
+            void this.$result.missing
+            return 2
+          },
+        })
+      }
+    })
+
+    it("rejects non-function task entries in settled mode", () => {
+      if (typecheckOnly()) {
+        void try$.settled().all({
+          // @ts-expect-error settled().all() tasks must be functions
+          a: 1,
+          b() {
+            return 2
+          },
+        })
+      }
+    })
+
+    it("does not accept catch options in settled mode", () => {
+      if (typecheckOnly()) {
+        // @ts-expect-error catch is only available for fail-fast all()
+        void try$.settled().all({ a: () => 42 }, { catch: () => "mapped" as const })
+      }
     })
   })
 })

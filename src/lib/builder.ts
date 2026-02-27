@@ -1,18 +1,27 @@
 import type {
+  AllOptions,
+  AllSettledResult,
+  InferredTaskContext,
+  TaskRecord,
+  TaskResult,
+  TaskValidation,
+} from "./all"
+import type {
   CancellationError,
   RetryExhaustedError,
   TimeoutError,
   UnhandledException,
 } from "./errors"
-import type { BuilderConfig, TaskMap, TimeoutOptions, WrapFn } from "./types/builder"
+import type { BuilderConfig, TimeoutOptions, WrapFn } from "./types/builder"
 import type {
   DefaultTryCtxProperties,
   SetTryCtxFeature,
-  TryCtxProperties,
   TryCtxFor,
+  TryCtxProperties,
 } from "./types/core"
 import type { RetryOptions } from "./types/retry"
 import type { AsyncRunInput, RunTryFn, SyncRunInput, SyncRunTryFn } from "./types/run"
+import { executeAll, executeAllSettled } from "./all"
 import { Panic } from "./errors"
 import { normalizeRetryPolicy } from "./retry"
 import { executeRun } from "./run"
@@ -50,9 +59,17 @@ function addTimeout(config: BuilderConfig, options: TimeoutOptions): BuilderConf
   }
 }
 
+function enableSettled(config: BuilderConfig): BuilderConfig {
+  return {
+    ...config,
+    settled: true,
+  }
+}
+
 export class WrappedRunBuilder<
   E extends ConfigRunErrors = never,
   CtxProperties extends TryCtxProperties = DefaultTryCtxProperties,
+  Settled extends boolean = false,
 > {
   readonly #config: BuilderConfig
 
@@ -60,22 +77,26 @@ export class WrappedRunBuilder<
     this.#config = config
   }
 
-  wrap(fn: WrapFn): WrappedRunBuilder<E, CtxProperties> {
+  wrap(fn: WrapFn): WrappedRunBuilder<E, CtxProperties, Settled> {
     return new WrappedRunBuilder(appendWrap(this.#config, fn))
   }
 
   retry(
     policy: RetryOptions
-  ): RunBuilder<E | RetryExhaustedError, false, WithRetry<CtxProperties>> {
+  ): RunBuilder<E | RetryExhaustedError, false, WithRetry<CtxProperties>, Settled> {
     return new RunBuilder(addRetry(this.#config, policy), false)
   }
 
-  timeout(options: TimeoutOptions): RunBuilder<E | TimeoutError, false, CtxProperties> {
+  timeout(options: TimeoutOptions): RunBuilder<E | TimeoutError, false, CtxProperties, Settled> {
     return new RunBuilder(addTimeout(this.#config, options), false)
   }
 
-  signal(signal: AbortSignal): RunBuilder<E | CancellationError, false, CtxProperties> {
+  signal(signal: AbortSignal): RunBuilder<E | CancellationError, false, CtxProperties, Settled> {
     return new RunBuilder(appendSignal(this.#config, signal), false)
+  }
+
+  settled(): WrappedRunBuilder<E, CtxProperties, true> {
+    return new WrappedRunBuilder(enableSettled(this.#config))
   }
 
   run<T>(tryFn: RunTryFn<T, TryCtxFor<CtxProperties>>): Promise<T | UnhandledException | E>
@@ -90,17 +111,32 @@ export class WrappedRunBuilder<
     return executeRunSync(this.#config, input)
   }
 
-  all(_tasks: TaskMap): never {
-    void this.#config
-    throw new Panic({ message: "all is not implemented yet" })
+  all<T extends TaskRecord, C = never>(
+    tasks: T & TaskValidation<NoInfer<T>> & ThisType<InferredTaskContext<T>>,
+    ...options: Settled extends true ? [] : [options?: AllOptions<T, C>]
+  ): Promise<
+    Settled extends true ? AllSettledResult<T> : { [K in keyof T]: TaskResult<T[K]> } | C
+  > {
+    if (this.#config.settled) {
+      return executeAllSettled(this.#config, tasks) as Promise<
+        Settled extends true ? AllSettledResult<T> : { [K in keyof T]: TaskResult<T[K]> } | C
+      >
+    }
+
+    const [allOptions] = options
+
+    if (allOptions) {
+      return executeAll(this.#config, tasks, allOptions) as Promise<
+        Settled extends true ? AllSettledResult<T> : { [K in keyof T]: TaskResult<T[K]> } | C
+      >
+    }
+
+    return executeAll(this.#config, tasks) as Promise<
+      Settled extends true ? AllSettledResult<T> : { [K in keyof T]: TaskResult<T[K]> } | C
+    >
   }
 
-  allSettled(_tasks: TaskMap): never {
-    void this.#config
-    throw new Panic({ message: "allSettled is not implemented yet" })
-  }
-
-  flow(_tasks: TaskMap): never {
+  flow(_tasks: TaskRecord): never {
     void this.#config
     throw new Panic({ message: "flow is not implemented yet" })
   }
@@ -110,6 +146,7 @@ export class RunBuilder<
   E extends ConfigRunErrors = never,
   CanSync extends boolean = true,
   CtxProperties extends TryCtxProperties = DefaultTryCtxProperties,
+  Settled extends boolean = false,
 > {
   readonly #config: BuilderConfig
   readonly #canSync: CanSync
@@ -121,21 +158,33 @@ export class RunBuilder<
 
   retry(
     policy: RetryOptions
-  ): RunBuilder<E | RetryExhaustedError, false, WithRetry<CtxProperties>> {
+  ): RunBuilder<E | RetryExhaustedError, false, WithRetry<CtxProperties>, Settled> {
     return new RunBuilder(addRetry(this.#config, policy), false)
   }
 
-  timeout(options: TimeoutOptions): RunBuilder<E | TimeoutError, false, CtxProperties> {
+  timeout(options: TimeoutOptions): RunBuilder<E | TimeoutError, false, CtxProperties, Settled> {
     return new RunBuilder(addTimeout(this.#config, options), false)
   }
 
-  signal(signal: AbortSignal): RunBuilder<E | CancellationError, false, CtxProperties> {
+  signal(signal: AbortSignal): RunBuilder<E | CancellationError, false, CtxProperties, Settled> {
     return new RunBuilder(appendSignal(this.#config, signal), false)
   }
 
-  wrap(this: RunBuilder<E, true, CtxProperties>, fn: WrapFn): WrappedRunBuilder<E, CtxProperties>
-  wrap(this: RunBuilder<E, false, CtxProperties>, fn: WrapFn): RunBuilder<E, false, CtxProperties>
-  wrap(fn: WrapFn): WrappedRunBuilder<E, CtxProperties> | RunBuilder<E, false, CtxProperties> {
+  settled(): RunBuilder<E, CanSync, CtxProperties, true> {
+    return new RunBuilder(enableSettled(this.#config), this.#canSync)
+  }
+
+  wrap(
+    this: RunBuilder<E, true, CtxProperties, Settled>,
+    fn: WrapFn
+  ): WrappedRunBuilder<E, CtxProperties, Settled>
+  wrap(
+    this: RunBuilder<E, false, CtxProperties, Settled>,
+    fn: WrapFn
+  ): RunBuilder<E, false, CtxProperties, Settled>
+  wrap(
+    fn: WrapFn
+  ): WrappedRunBuilder<E, CtxProperties, Settled> | RunBuilder<E, false, CtxProperties, Settled> {
     const config = appendWrap(this.#config, fn)
 
     if (this.#canSync) {
@@ -151,17 +200,32 @@ export class RunBuilder<
     return executeRun(this.#config, input)
   }
 
-  all(_tasks: TaskMap): never {
-    void this.#config
-    throw new Panic({ message: "all is not implemented yet" })
+  all<T extends TaskRecord, C = never>(
+    tasks: T & TaskValidation<NoInfer<T>> & ThisType<InferredTaskContext<T>>,
+    ...options: Settled extends true ? [] : [options?: AllOptions<T, C>]
+  ): Promise<
+    Settled extends true ? AllSettledResult<T> : { [K in keyof T]: TaskResult<T[K]> } | C
+  > {
+    if (this.#config.settled) {
+      return executeAllSettled(this.#config, tasks) as Promise<
+        Settled extends true ? AllSettledResult<T> : { [K in keyof T]: TaskResult<T[K]> } | C
+      >
+    }
+
+    const [allOptions] = options
+
+    if (allOptions) {
+      return executeAll(this.#config, tasks, allOptions) as Promise<
+        Settled extends true ? AllSettledResult<T> : { [K in keyof T]: TaskResult<T[K]> } | C
+      >
+    }
+
+    return executeAll(this.#config, tasks) as Promise<
+      Settled extends true ? AllSettledResult<T> : { [K in keyof T]: TaskResult<T[K]> } | C
+    >
   }
 
-  allSettled(_tasks: TaskMap): never {
-    void this.#config
-    throw new Panic({ message: "allSettled is not implemented yet" })
-  }
-
-  flow(_tasks: TaskMap): never {
+  flow(_tasks: TaskRecord): never {
     void this.#config
     throw new Panic({ message: "flow is not implemented yet" })
   }
