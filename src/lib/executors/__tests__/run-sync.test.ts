@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
-import type { TryCtx } from "../types/core"
-import { CancellationError, Panic, UnhandledException } from "../errors"
+import type { TryCtx } from "../../types/core"
+import { CancellationError, ConfigurationError, Panic, UnhandledException } from "../../errors"
 import { executeRunSync } from "../run-sync"
 
 describe("executeRunSync", () => {
@@ -19,10 +19,10 @@ describe("executeRunSync", () => {
       expect(result).toBeInstanceOf(UnhandledException)
     })
 
-    it("throws Panic when sync runner returns a promise via unsafe cast", () => {
+    it("throws ConfigurationError when sync runner returns a promise via unsafe cast", () => {
       const unsafeSyncFn = (() => Promise.resolve("ok")) as unknown as () => string
 
-      expect(() => executeRunSync({}, unsafeSyncFn)).toThrow(Panic)
+      expect(() => executeRunSync({}, unsafeSyncFn)).toThrow(ConfigurationError)
     })
   })
 

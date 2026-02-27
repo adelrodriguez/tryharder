@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test"
+import { TimeoutError } from "../../errors"
+import { sleep } from "../../utils"
 import { executeAll } from "../all"
-import { TimeoutError } from "../errors"
-import { sleep } from "../utils"
 
 describe("executeAll", () => {
   describe("basic parallel execution", () => {

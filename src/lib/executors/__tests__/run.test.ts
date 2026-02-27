@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test"
-import type { TryCtx } from "../types/core"
-import { CancellationError, Panic, TimeoutError, UnhandledException } from "../errors"
+import type { TryCtx } from "../../types/core"
+import { CancellationError, Panic, TimeoutError, UnhandledException } from "../../errors"
+import { sleep } from "../../utils"
 import { executeRun } from "../run"
-import { sleep } from "../utils"
 
 describe("executeRun", () => {
   describe("function form", () => {

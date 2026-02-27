@@ -1,7 +1,7 @@
-import type { BuilderConfig } from "./types/builder"
-import type { TryCtx } from "./types/core"
-import type { RetryOptions, RetryPolicy } from "./types/retry"
-import { assertUnreachable } from "./utils"
+import type { BuilderConfig } from "../types/builder"
+import type { TryCtx } from "../types/core"
+import type { RetryOptions, RetryPolicy } from "../types/retry"
+import { assertUnreachable } from "../utils"
 
 export function normalizeRetryPolicy(policy: RetryOptions): RetryPolicy {
   if (typeof policy === "number") {

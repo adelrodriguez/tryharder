@@ -1,4 +1,5 @@
-import { checkIsPromiseLike } from "./utils"
+import { UnhandledException } from "../errors"
+import { checkIsPromiseLike } from "../utils"
 
 type GenUnwrap<T> = Exclude<Awaited<T>, Error>
 export type GenUse = <T>(value: T) => Generator<T, GenUnwrap<T>, GenUnwrap<T>>
@@ -16,14 +17,6 @@ function* use<T>(value: T): Generator<T, GenUnwrap<T>, GenUnwrap<T>> {
   return yield value
 }
 
-function normalizeError(error: unknown): Error {
-  if (error instanceof Error) {
-    return error
-  }
-
-  return new Error("Non-error thrown in gen", { cause: error })
-}
-
 async function executeAsyncGenerator<TYield, TReturn>(
   iterator: Generator<TYield, TReturn, unknown>,
   initialValue: PromiseLike<unknown>
@@ -33,7 +26,7 @@ async function executeAsyncGenerator<TYield, TReturn>(
   try {
     currentValue = await initialValue
   } catch (error) {
-    return normalizeError(error) as GenErrors<TYield>
+    return new UnhandledException({ cause: error }) as GenErrors<TYield>
   }
 
   if (currentValue instanceof Error) {
@@ -47,7 +40,7 @@ async function executeAsyncGenerator<TYield, TReturn>(
     try {
       step = iterator.next(currentValue)
     } catch (error) {
-      return normalizeError(error) as GenErrors<TYield>
+      return new UnhandledException({ cause: error }) as GenErrors<TYield>
     }
 
     if (step.done) {
@@ -56,7 +49,7 @@ async function executeAsyncGenerator<TYield, TReturn>(
           // oxlint-disable-next-line no-await-in-loop
           return (await step.value) as Awaited<TReturn>
         } catch (error) {
-          return normalizeError(error) as GenErrors<TYield>
+          return new UnhandledException({ cause: error }) as GenErrors<TYield>
         }
       }
 
@@ -68,7 +61,7 @@ async function executeAsyncGenerator<TYield, TReturn>(
         // oxlint-disable-next-line no-await-in-loop
         currentValue = await step.value
       } catch (error) {
-        return normalizeError(error) as GenErrors<TYield>
+        return new UnhandledException({ cause: error }) as GenErrors<TYield>
       }
     } else {
       currentValue = step.value
@@ -88,7 +81,7 @@ export function executeGen<TYield, TReturn>(
   try {
     iterator = factory(use)
   } catch (error) {
-    return normalizeError(error) as GenResult<TYield, TReturn>
+    return new UnhandledException({ cause: error }) as GenResult<TYield, TReturn>
   }
 
   let currentValue: unknown = undefined
@@ -100,7 +93,7 @@ export function executeGen<TYield, TReturn>(
     try {
       step = iterator.next(currentValue)
     } catch (error) {
-      return normalizeError(error) as GenResult<TYield, TReturn>
+      return new UnhandledException({ cause: error }) as GenResult<TYield, TReturn>
     }
 
     if (step.done) {

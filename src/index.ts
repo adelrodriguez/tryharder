@@ -1,33 +1,39 @@
-import type { WrappedRunBuilder } from "./lib/builder"
-import type { WrapFn } from "./lib/types/builder"
 import { RunBuilder, createWrappedBuilder } from "./lib/builder"
 import {
   CancellationError,
+  ConfigurationError,
   Panic,
   RetryExhaustedError,
   TimeoutError,
   UnhandledException,
 } from "./lib/errors"
-import { retryOptions } from "./lib/retry"
+import { retryOptions } from "./lib/modifiers/retry"
 
-const root = new RunBuilder()
+const root: RunBuilder = new RunBuilder()
 
 export const retry: RunBuilder["retry"] = root.retry.bind(root)
 export const timeout: RunBuilder["timeout"] = root.timeout.bind(root)
 export const signal: RunBuilder["signal"] = root.signal.bind(root)
-export const wrap = (fn: WrapFn): WrappedRunBuilder => createWrappedBuilder(fn)
+export const wrap: typeof createWrappedBuilder = createWrappedBuilder
 export const run: RunBuilder["run"] = root.run.bind(root)
-export { runSync } from "./lib/run-sync"
+export const runSync: RunBuilder["runSync"] = root.runSync.bind(root)
 
 export const all: RunBuilder["all"] = root.all.bind(root)
 export const allSettled: RunBuilder["allSettled"] = root.allSettled.bind(root)
 export const flow: RunBuilder["flow"] = root.flow.bind(root)
+export const gen: RunBuilder["gen"] = root.gen.bind(root)
 
 export { dispose } from "./lib/dispose"
-export { executeGen as gen } from "./lib/gen"
 
 export { retryOptions }
-export { CancellationError, Panic, RetryExhaustedError, TimeoutError, UnhandledException }
+export {
+  CancellationError,
+  ConfigurationError,
+  Panic,
+  RetryExhaustedError,
+  TimeoutError,
+  UnhandledException,
+}
 
 export type {
   AllSettledResult,
@@ -35,4 +41,4 @@ export type {
   SettledRejected,
   SettledResult,
 } from "./lib/types/all"
-export type { FlowExit } from "./lib/flow"
+export type { FlowExit } from "./lib/executors/flow"
