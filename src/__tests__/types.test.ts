@@ -428,11 +428,11 @@ describe("type inference", () => {
     })
   })
 
-  describe("settled().all", () => {
+  describe("allSettled", () => {
     it("infers settled result types", () => {
       if (typecheckOnly()) return
 
-      const result = try$.settled().all({
+      const result = try$.allSettled({
         a(): number {
           return 42
         },
@@ -455,7 +455,7 @@ describe("type inference", () => {
     it("keeps $result property types when awaited", () => {
       if (typecheckOnly()) return
 
-      void try$.settled().all({
+      void try$.allSettled({
         a() {
           return 42
         },
@@ -472,7 +472,7 @@ describe("type inference", () => {
 
     it("rejects unknown $result keys in settled mode", () => {
       if (typecheckOnly()) {
-        void try$.settled().all({
+        void try$.allSettled({
           a() {
             return 1
           },
@@ -487,8 +487,8 @@ describe("type inference", () => {
 
     it("rejects non-function task entries in settled mode", () => {
       if (typecheckOnly()) {
-        void try$.settled().all({
-          // @ts-expect-error settled().all() tasks must be functions
+        void try$.allSettled({
+          // @ts-expect-error allSettled() tasks must be functions
           a: 1,
           b() {
             return 2
@@ -500,7 +500,17 @@ describe("type inference", () => {
     it("does not accept catch options in settled mode", () => {
       if (typecheckOnly()) {
         // @ts-expect-error catch is only available for fail-fast all()
-        void try$.settled().all({ a: () => 42 }, { catch: () => "mapped" as const })
+        void try$.allSettled({ a: () => 42 }, { catch: () => "mapped" as const })
+      }
+    })
+
+    it("removes settled mode selector from namespace and chains", () => {
+      if (typecheckOnly()) {
+        // @ts-expect-error settled() was removed in favor of allSettled()
+        void try$.settled
+
+        // @ts-expect-error settled() was removed in favor of allSettled()
+        void try$.retry(3).settled
       }
     })
   })
