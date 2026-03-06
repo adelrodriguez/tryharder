@@ -4,6 +4,7 @@ import * as try$ from "../index"
 type Expect<T extends true> = T
 type Equal<X, Y> = [X] extends [Y] ? ([Y] extends [X] ? true : false) : false
 const typecheckOnly = (): boolean => false
+const passthroughWrap: Parameters<typeof try$.wrap>[0] = (ctx, next) => next(ctx)
 
 describe("type inference", () => {
   describe("no config", () => {
@@ -30,7 +31,7 @@ describe("type inference", () => {
     it("ctx.retry is not available without retry config", () => {
       if (typecheckOnly()) {
         void try$.run((ctx) => {
-          // @ts-expect-error retry metadata is only available after calling retry()
+          // @ts-expect-error -- retry metadata is only available after calling retry()
           void ctx.retry.attempt
           return 42
         })
@@ -40,13 +41,13 @@ describe("type inference", () => {
     it("ctx.retry is not available with timeout/signal/wrap alone", () => {
       if (typecheckOnly()) {
         void try$.timeout(100).run((ctx) => {
-          // @ts-expect-error retry metadata is only available after retry()
+          // @ts-expect-error -- retry metadata is only available after retry()
           void ctx.retry.attempt
           return 1
         })
 
         void try$.signal(new AbortController().signal).run((ctx) => {
-          // @ts-expect-error retry metadata is only available after retry()
+          // @ts-expect-error -- retry metadata is only available after retry()
           void ctx.retry.attempt
           return 1
         })
@@ -54,10 +55,97 @@ describe("type inference", () => {
         void try$
           .wrap((ctx, next) => next(ctx))
           .run((ctx) => {
-            // @ts-expect-error retry metadata is only available after retry()
+            // @ts-expect-error -- retry metadata is only available after retry()
             void ctx.retry.attempt
             return 1
           })
+      }
+    })
+  })
+
+  describe("top-level factories", () => {
+    it("retry() returns an async-only builder with retry error union", () => {
+      const retryBuilder = try$.retry(3)
+      const result = retryBuilder.run(() => 1)
+
+      type _assert = Expect<
+        Equal<typeof result, Promise<number | try$.UnhandledException | try$.RetryExhaustedError>>
+      >
+
+      if (typecheckOnly()) {
+        // @ts-expect-error -- wrap() is unavailable after retry(), timeout(), or signal()
+        void retryBuilder.wrap(passthroughWrap)
+      }
+    })
+
+    it("timeout() returns an async-only builder with timeout error union", () => {
+      const timeoutBuilder = try$.timeout(100)
+      const result = timeoutBuilder.run(() => 1)
+
+      type _assert = Expect<
+        Equal<typeof result, Promise<number | try$.UnhandledException | try$.TimeoutError>>
+      >
+
+      if (typecheckOnly()) {
+        // @ts-expect-error -- wrap() is unavailable after retry(), timeout(), or signal()
+        void timeoutBuilder.wrap(passthroughWrap)
+      }
+    })
+
+    it("signal() returns an async-only builder with cancellation error union", () => {
+      const signalBuilder = try$.signal(new AbortController().signal)
+      const result = signalBuilder.run(() => 1)
+
+      type _assert = Expect<
+        Equal<typeof result, Promise<number | try$.UnhandledException | try$.CancellationError>>
+      >
+
+      if (typecheckOnly()) {
+        // @ts-expect-error -- wrap() is unavailable after retry(), timeout(), or signal()
+        void signalBuilder.wrap(passthroughWrap)
+      }
+    })
+
+    it("wrap() preserves runSync() and gen() availability", () => {
+      const wrappedBuilder = try$.wrap((ctx, next) => next(ctx))
+      const syncResult = wrappedBuilder.runSync(() => 1)
+      const genResult = wrappedBuilder.gen(function* (use) {
+        return yield* use(1)
+      })
+
+      type _assertSync = Expect<Equal<typeof syncResult, number | try$.UnhandledException>>
+      type _assertGen = Expect<Equal<typeof genResult, number>>
+    })
+
+    it("async-only builders do not expose runSync() or gen()", () => {
+      if (typecheckOnly()) {
+        const retryBuilder = try$.retry(3)
+        const timeoutBuilder = try$.timeout(100)
+        const signalBuilder = try$.signal(new AbortController().signal)
+
+        // @ts-expect-error -- runSync() is unavailable after retry(), timeout(), or signal()
+        void retryBuilder.runSync(() => 1)
+        // @ts-expect-error -- gen() is unavailable after retry(), timeout(), or signal()
+        void retryBuilder.gen(function* () {
+          yield 1
+          return 1
+        })
+
+        // @ts-expect-error -- runSync() is unavailable after retry(), timeout(), or signal()
+        void timeoutBuilder.runSync(() => 1)
+        // @ts-expect-error -- gen() is unavailable after retry(), timeout(), or signal()
+        void timeoutBuilder.gen(function* () {
+          yield 1
+          return 1
+        })
+
+        // @ts-expect-error -- runSync() is unavailable after retry(), timeout(), or signal()
+        void signalBuilder.runSync(() => 1)
+        // @ts-expect-error -- gen() is unavailable after retry(), timeout(), or signal()
+        void signalBuilder.gen(function* () {
+          yield 1
+          return 1
+        })
       }
     })
   })
@@ -244,17 +332,11 @@ describe("type inference", () => {
       >
     })
 
-    it("retry chain exposes wrap", () => {
-      if (typecheckOnly()) return
-
-      const result = try$
-        .retry(3)
-        .wrap((ctx, next) => next(ctx))
-        .run((ctx) => ctx.retry.attempt)
-
-      type _assert = Expect<
-        Equal<typeof result, Promise<number | try$.UnhandledException | try$.RetryExhaustedError>>
-      >
+    it("retry chain does not expose wrap", () => {
+      if (typecheckOnly()) {
+        // @ts-expect-error -- wrap is top-level only and not available after retry()
+        void try$.retry(3).wrap(passthroughWrap)
+      }
     })
 
     it("wrap builder exposes gen", () => {
@@ -391,7 +473,7 @@ describe("type inference", () => {
             return 1
           },
           b() {
-            // @ts-expect-error unknown task key is not available on $result
+            // @ts-expect-error -- unknown task key is not available on $result
             void this.$result.missing
             return 2
           },
@@ -402,7 +484,7 @@ describe("type inference", () => {
     it("rejects non-function task entries", () => {
       if (typecheckOnly()) {
         void try$.all({
-          // @ts-expect-error all() tasks must be functions
+          // @ts-expect-error -- all() tasks must be functions
           a: 1,
           b() {
             return 2
@@ -507,7 +589,7 @@ describe("type inference", () => {
             return 1
           },
           b() {
-            // @ts-expect-error unknown task key is not available on $result
+            // @ts-expect-error -- unknown task key is not available on $result
             void this.$result.missing
             return 2
           },
@@ -518,7 +600,7 @@ describe("type inference", () => {
     it("rejects non-function task entries in settled mode", () => {
       if (typecheckOnly()) {
         void try$.allSettled({
-          // @ts-expect-error allSettled() tasks must be functions
+          // @ts-expect-error -- allSettled() tasks must be functions
           a: 1,
           b() {
             return 2
@@ -529,17 +611,17 @@ describe("type inference", () => {
 
     it("does not accept catch options in settled mode", () => {
       if (typecheckOnly()) {
-        // @ts-expect-error catch is only available for fail-fast all()
+        // @ts-expect-error -- catch is only available for fail-fast all()
         void try$.allSettled({ a: () => 42 }, { catch: () => "mapped" as const })
       }
     })
 
     it("removes settled mode selector from namespace and chains", () => {
       if (typecheckOnly()) {
-        // @ts-expect-error settled() was removed in favor of allSettled()
+        // @ts-expect-error -- settled() was removed in favor of allSettled()
         void try$.settled
 
-        // @ts-expect-error settled() was removed in favor of allSettled()
+        // @ts-expect-error -- settled() was removed in favor of allSettled()
         void try$.retry(3).settled
       }
     })

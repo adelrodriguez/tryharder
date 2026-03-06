@@ -1,10 +1,3 @@
-export type ErrorCode =
-  | "EXEC_CANCELLED"
-  | "EXEC_TIMEOUT"
-  | "EXEC_RETRY_EXHAUSTED"
-  | "EXEC_UNHANDLED_EXCEPTION"
-  | "EXEC_PANIC"
-
 export interface RetryInfo {
   attempt: number
   limit: number
@@ -17,6 +10,24 @@ export interface BaseTryCtx {
 export interface TryCtxProperties {
   retry: boolean
 }
+
+export interface BuilderState {
+  canSync: boolean
+  canWrap: boolean
+  isWrapped: boolean
+}
+
+export type DefaultBuilderState = {
+  canSync: true
+  canWrap: true
+  isWrapped: false
+}
+
+export type SetBuilderState<
+  State extends BuilderState,
+  Key extends keyof BuilderState,
+  Value extends BuilderState[Key],
+> = Omit<State, Key> & { [K in Key]: Value }
 
 export type DefaultTryCtxProperties = {
   retry: false

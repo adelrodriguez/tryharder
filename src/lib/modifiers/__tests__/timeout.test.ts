@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { TimeoutError } from "../errors"
+import { TimeoutError } from "../../errors"
 import { TimeoutController } from "../timeout"
 
 describe("TimeoutController", () => {

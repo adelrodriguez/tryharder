@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { CancellationError, RetryExhaustedError, TimeoutError } from "../errors"
+import { CancellationError, RetryExhaustedError, TimeoutError } from "../../errors"
 import { executeFlow } from "../flow"
 
 function sleep(ms: number): Promise<void> {

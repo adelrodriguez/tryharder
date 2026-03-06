@@ -1,6 +1,6 @@
-import type { WrapFn } from "./types/builder"
-import type { TryCtx } from "./types/core"
-import type { RunTryFn } from "./types/run"
+import type { WrapFn } from "../types/builder"
+import type { TryCtx } from "../types/core"
+import type { RunTryFn } from "../types/run"
 
 export function executeWithWraps<R>(
   wraps: readonly WrapFn[] | undefined,

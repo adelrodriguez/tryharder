@@ -1,5 +1,5 @@
-import { CancellationError, TimeoutError } from "./errors"
-import { raceWithAbortSignal } from "./utils"
+import { CancellationError, TimeoutError } from "../errors"
+import { raceWithAbortSignal } from "../utils"
 
 export class SignalController {
   readonly signal?: AbortSignal

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test"
+import { TimeoutError } from "../../errors"
+import { sleep } from "../../utils"
 import { executeAllSettled } from "../all-settled"
-import { TimeoutError } from "../errors"
-import { sleep } from "../utils"
 
 describe("executeAllSettled", () => {
   describe("basic behavior", () => {
@@ -79,6 +79,63 @@ describe("executeAllSettled", () => {
 
       expect(result.a.status).toBe("rejected")
       expect(result.b.status).toBe("rejected")
+    })
+  })
+
+  describe("wrap behavior", () => {
+    it("applies wrap middleware once around settled execution", async () => {
+      let wrapCalls = 0
+
+      const result = await executeAllSettled(
+        {
+          wraps: [
+            (ctx, next) => {
+              wrapCalls += 1
+              expect(ctx.retry.attempt).toBe(1)
+              return next(ctx)
+            },
+          ],
+        },
+        {
+          fail() {
+            throw new Error("boom")
+          },
+          ok() {
+            return 1
+          },
+        }
+      )
+
+      expect(result.ok).toEqual({ status: "fulfilled", value: 1 })
+      expect(result.fail.status).toBe("rejected")
+      expect(wrapCalls).toBe(1)
+    })
+
+    it("keeps wrap retry metadata fixed to one attempt", async () => {
+      const attempts: number[] = []
+      const limits: number[] = []
+
+      const result = await executeAllSettled(
+        {
+          retry: { backoff: "constant", delayMs: 0, limit: 3 },
+          wraps: [
+            (ctx, next) => {
+              attempts.push(ctx.retry.attempt)
+              limits.push(ctx.retry.limit)
+              return next(ctx)
+            },
+          ],
+        },
+        {
+          only() {
+            return "ok"
+          },
+        }
+      )
+
+      expect(result.only).toEqual({ status: "fulfilled", value: "ok" })
+      expect(attempts).toEqual([1])
+      expect(limits).toEqual([1])
     })
   })
 

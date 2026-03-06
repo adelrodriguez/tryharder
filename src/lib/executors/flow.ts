@@ -1,13 +1,9 @@
-import type { ResultProxy, TaskRecord } from "./types/all"
-import type { BuilderConfig } from "./types/builder"
-import type { TryCtx } from "./types/core"
-import type { FlowResult, FlowTaskContext, InferredFlowTaskContext } from "./types/flow"
-import { CancellationError, RetryExhaustedError, TimeoutError } from "./errors"
-import { calculateRetryDelay, checkIsRetryExhausted, checkShouldAttemptRetry } from "./retry"
-import { SignalController } from "./signal"
-import { TimeoutController } from "./timeout"
-import { checkIsControlError, sleep } from "./utils"
-import { executeWithWraps } from "./wrap"
+import type { ResultProxy, TaskRecord } from "../types/all"
+import type { BuilderConfig } from "../types/builder"
+import type { FlowResult, FlowTaskContext, InferredFlowTaskContext } from "../types/flow"
+import { CancellationError, RetryExhaustedError, TimeoutError, UnhandledException } from "../errors"
+import { checkIsControlError } from "../utils"
+import { BaseExecution } from "./base"
 
 class FlowExitSignal extends Error {
   readonly value: unknown
@@ -84,11 +80,9 @@ class FlowExecution<T extends TaskRecord> {
         return Promise.reject(resultError)
       }
 
-      if (resultError instanceof Error) {
-        return Promise.reject(resultError)
-      }
-
-      return Promise.reject(new Error("Referenced task failed", { cause: resultError }))
+      return Promise.reject(
+        resultError instanceof Error ? resultError : new UnhandledException({ cause: resultError })
+      )
     }
 
     return new Promise((resolve, reject) => {
@@ -113,6 +107,8 @@ class FlowExecution<T extends TaskRecord> {
       for (const [resolve] of fulfilled) {
         resolve(value)
       }
+
+      this.#resolvers.delete(taskName)
     }
   }
 
@@ -125,6 +121,8 @@ class FlowExecution<T extends TaskRecord> {
       for (const [, reject] of rejected) {
         reject(error)
       }
+
+      this.#resolvers.delete(taskName)
     }
   }
 
@@ -164,59 +162,31 @@ class FlowExecution<T extends TaskRecord> {
   }
 }
 
-export async function executeFlow<T extends TaskRecord>(
-  config: BuilderConfig,
-  tasks: T & ThisType<InferredFlowTaskContext<T>>
-): Promise<FlowResult<T>> {
-  using timeout = new TimeoutController(config.timeout)
-  using signal = new SignalController(
-    [...(config.signals ?? []), timeout.signal].filter(
-      (currentSignal): currentSignal is AbortSignal => currentSignal !== undefined
-    )
-  )
-  const executionSignal = signal.signal
-  const ctx: TryCtx = {
-    retry: {
-      attempt: 1,
-      limit: config.retry?.limit ?? 1,
-    },
-    signal: signal.signal,
+class FlowRunnerExecution<T extends TaskRecord> extends BaseExecution<Promise<FlowResult<T>>> {
+  readonly #tasks: T
+
+  constructor(config: BuilderConfig, tasks: T) {
+    super(config)
+    this.#tasks = tasks
   }
 
-  const runWithConfig = async (): Promise<FlowResult<T>> => {
-    const race = async <V>(
-      promise: PromiseLike<V>,
-      cause?: unknown
-    ): Promise<V | CancellationError | TimeoutError> => {
-      const raced = await timeout.race(signal.race(promise, cause), cause)
-
-      if (raced instanceof TimeoutError) {
-        const cancelled = signal.checkDidCancel(cause)
-
-        if (cancelled) {
-          return cancelled
-        }
-      }
-
-      return raced
-    }
-
-    const executeAttempt = async () => {
-      await using execution = new FlowExecution(executionSignal, tasks)
-      return await race(execution.execute())
-    }
+  protected override async executeCore(): Promise<FlowResult<T>> {
+    let currentAttempt = 1
 
     // oxlint-disable-next-line typescript/no-unnecessary-condition
     while (true) {
-      const controlBeforeAttempt = signal.checkDidCancel() ?? timeout.checkDidTimeout()
+      const controlBeforeAttempt = this.checkBeforeAttempt()
 
       if (controlBeforeAttempt) {
         throw controlBeforeAttempt
       }
 
+      this.ctx.retry.attempt = currentAttempt
+
       try {
         // oxlint-disable-next-line no-await-in-loop
-        const result = await executeAttempt()
+        const raced = await this.#executeAttempt()
+        const result = FlowRunnerExecution.resolveRacedResult(raced)
 
         if (result instanceof CancellationError || result instanceof TimeoutError) {
           throw result
@@ -228,41 +198,46 @@ export async function executeFlow<T extends TaskRecord>(
           throw error
         }
 
-        const controlAfterFailure = signal.checkDidCancel(error) ?? timeout.checkDidTimeout(error)
+        const controlAfterFailure = this.checkDidControlFail(error)
 
         if (controlAfterFailure) {
           throw controlAfterFailure
         }
 
-        const shouldRetry = checkShouldAttemptRetry(error, ctx, config)
+        const retryDecision = this.buildRetryDecision(error)
 
-        if (!shouldRetry) {
-          if (checkIsRetryExhausted(ctx.retry.attempt, config)) {
+        if (!retryDecision.shouldAttemptRetry) {
+          if (retryDecision.isRetryExhausted) {
             throw new RetryExhaustedError({ cause: error })
           }
 
           throw error
         }
 
-        const delay = calculateRetryDelay(ctx.retry.attempt, config)
+        // oxlint-disable-next-line no-await-in-loop
+        const delayControlResult = await this.waitForRetryDelay(retryDecision.delay)
 
-        if (delay > 0) {
-          // oxlint-disable-next-line no-await-in-loop
-          const delayed = await race(sleep(delay), error)
-
-          if (delayed instanceof CancellationError || delayed instanceof TimeoutError) {
-            throw delayed
-          }
+        if (delayControlResult) {
+          throw delayControlResult
         }
 
-        ctx.retry.attempt += 1
+        currentAttempt += 1
       }
     }
   }
 
-  return (await Promise.resolve(
-    executeWithWraps(config.wraps, ctx, () => runWithConfig())
-  )) as FlowResult<T>
+  async #executeAttempt(): Promise<FlowResult<T> | CancellationError | TimeoutError> {
+    await using execution = new FlowExecution(this.signal.signal, this.#tasks)
+    return await this.race(execution.execute())
+  }
 }
 
-export type { FlowExit, FlowResult, FlowTaskContext, InferredFlowTaskContext } from "./types/flow"
+export async function executeFlow<T extends TaskRecord>(
+  config: BuilderConfig,
+  tasks: T & ThisType<InferredFlowTaskContext<T>>
+): Promise<FlowResult<T>> {
+  using execution = new FlowRunnerExecution(config, tasks)
+  return await execution.execute()
+}
+
+export type { FlowExit, FlowResult, FlowTaskContext, InferredFlowTaskContext } from "../types/flow"

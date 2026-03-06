@@ -263,6 +263,7 @@ disposer.defer(() => {
 - `gen`
 - `retryOptions`
 - `CancellationError`
+- `ConfigurationError`
 - `TimeoutError`
 - `RetryExhaustedError`
 - `UnhandledException`
@@ -284,6 +285,7 @@ disposer.defer(() => {
 - `flow` requires at least one `$exit(...)` path; otherwise it throws.
 - Control outcomes have precedence over mapped catch results in racing scenarios.
 - `wrap` is only available from `try$.wrap(...)` and can be chained as `.wrap().wrap()`.
+- Invalid builder order/config usage throws `ConfigurationError`.
 
 ## Contributing
 

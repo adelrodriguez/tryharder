@@ -44,11 +44,11 @@ describe("runSync", () => {
       expect(result).toBeInstanceOf(try$.UnhandledException)
     })
 
-    it("throws Panic when sync run receives a Promise-returning function via unsafe cast", () => {
+    it("throws ConfigurationError when sync run receives a Promise-returning function via unsafe cast", () => {
       const unsafeRun = try$.runSync as unknown as (tryFn: () => number) => number
       const unsafeTry = (() => Promise.resolve(42)) as unknown as () => number
 
-      expect(() => unsafeRun(unsafeTry)).toThrow(try$.Panic)
+      expect(() => unsafeRun(unsafeTry)).toThrow(try$.ConfigurationError)
     })
   })
 
@@ -258,6 +258,14 @@ describe("builder helpers", () => {
     expect(result).toBe(42)
   })
 
+  it("throws ConfigurationError when runSync is called after retry via unsafe cast", () => {
+    const unsafeBuilder = try$.retry(3) as unknown as {
+      runSync: typeof try$.runSync
+    }
+
+    expect(() => unsafeBuilder.runSync(() => 42)).toThrow(try$.ConfigurationError)
+  })
+
   it("supports multiple wraps in top-level wrap chain", async () => {
     const events: string[] = []
 
@@ -278,6 +286,14 @@ describe("builder helpers", () => {
 
     expect(result).toBe(42)
     expect(events).toEqual(["outer-before", "inner-before", "inner-after", "outer-after"])
+  })
+
+  it("throws ConfigurationError when wrap is called after retry", () => {
+    const retried = try$.retry(3) as unknown as {
+      wrap: (fn: Parameters<typeof try$.wrap>[0]) => unknown
+    }
+
+    expect(() => retried.wrap((ctx, next) => next(ctx))).toThrow(try$.ConfigurationError)
   })
 
   it("applies wrap around all", async () => {
@@ -393,6 +409,18 @@ describe("builder helpers", () => {
 
     expect(result).toBeInstanceOf(Error)
     expect(wrapCalls).toBe(1)
+  })
+
+  it("throws ConfigurationError when gen is called after timeout via unsafe cast", () => {
+    const unsafeBuilder = try$.timeout(10) as unknown as {
+      gen: typeof try$.gen
+    }
+
+    expect(() =>
+      unsafeBuilder.gen(function* (use) {
+        return yield* use(1)
+      })
+    ).toThrow(try$.ConfigurationError)
   })
 
   it("keeps root run isolated from retry chains", async () => {
@@ -614,6 +642,117 @@ describe("flow", () => {
     } catch (error) {
       expect((error as Error).message).toContain("Unknown task")
     }
+  })
+})
+
+describe("allSettled", () => {
+  it("returns empty object when task map is empty", async () => {
+    const result = await try$.allSettled({})
+
+    expect(result).toEqual({})
+  })
+
+  it("returns mixed fulfilled and rejected task results", async () => {
+    const boom = new Error("boom")
+
+    const result = await try$.allSettled({
+      a() {
+        return 1
+      },
+      b() {
+        throw boom
+      },
+    })
+
+    expect(result.a).toEqual({ status: "fulfilled", value: 1 })
+    expect(result.b).toEqual({ reason: boom, status: "rejected" })
+  })
+
+  it("does not reject outer promise when tasks fail", async () => {
+    const result = await try$.allSettled({
+      a() {
+        throw new Error("a failed")
+      },
+      b() {
+        throw new Error("b failed")
+      },
+    })
+
+    expect(result.a.status).toBe("rejected")
+    expect(result.b.status).toBe("rejected")
+  })
+
+  it("allows dependent tasks to handle failed dependencies", async () => {
+    const result = await try$.allSettled({
+      a() {
+        throw new Error("a failed")
+      },
+      async b() {
+        try {
+          return await this.$result.a
+        } catch {
+          return "fallback"
+        }
+      },
+    })
+
+    expect(result.a.status).toBe("rejected")
+    expect(result.b).toEqual({ status: "fulfilled", value: "fallback" })
+  })
+
+  it("returns settled results with retry and timeout builder options", async () => {
+    const result = await try$
+      .retry(3)
+      .timeout(100)
+      .allSettled({
+        a() {
+          return 1
+        },
+        b() {
+          throw new Error("boom")
+        },
+      })
+
+    expect(result.a).toEqual({ status: "fulfilled", value: 1 })
+    expect(result.b.status).toBe("rejected")
+  })
+
+  it("honors cancellation signal from builder options", async () => {
+    const controller = new AbortController()
+
+    const pending = try$
+      .retry(3)
+      .timeout(100)
+      .signal(controller.signal)
+      .allSettled({
+        async a() {
+          await sleep(20)
+
+          if (this.$signal.aborted) {
+            throw this.$signal.reason
+          }
+
+          return 1
+        },
+        async b() {
+          await sleep(25)
+
+          if (this.$signal.aborted) {
+            throw this.$signal.reason
+          }
+
+          return 2
+        },
+      })
+
+    setTimeout(() => {
+      controller.abort(new Error("stop"))
+    }, 5)
+
+    const result = await pending
+
+    expect(result.a.status).toBe("rejected")
+    expect(result.b.status).toBe("rejected")
   })
 })
 
