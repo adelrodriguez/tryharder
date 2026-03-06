@@ -53,7 +53,7 @@ export function executeRunSync<T, E, Ctx extends BaseTryCtx>(
   }
 
   using execution = new RunExecution<T, E, Ctx>(config, input)
-  const result = execution.execute()
+  const result = execution.executeSync()
 
   if (checkIsPromiseLike(result)) {
     throw new Panic({

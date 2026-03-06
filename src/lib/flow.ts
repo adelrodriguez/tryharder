@@ -3,11 +3,11 @@ import type { BuilderConfig } from "./types/builder"
 import type { TryCtx } from "./types/core"
 import type { FlowResult, FlowTaskContext, InferredFlowTaskContext } from "./types/flow"
 import { CancellationError, RetryExhaustedError, TimeoutError } from "./errors"
-import { executeWithWraps } from "./execution-shared"
 import { calculateRetryDelay, checkIsRetryExhausted, checkShouldAttemptRetry } from "./retry"
 import { SignalController } from "./signal"
 import { TimeoutController } from "./timeout"
 import { checkIsControlError, sleep } from "./utils"
+import { executeWithWraps } from "./wrap"
 
 class FlowExitSignal extends Error {
   readonly value: unknown

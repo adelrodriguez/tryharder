@@ -13,6 +13,7 @@ import type {
   UnhandledException,
 } from "./errors"
 import type { FlowResult, InferredFlowTaskContext } from "./flow"
+import type { GenResult, GenUse } from "./gen"
 import type { BuilderConfig, TimeoutOptions, WrapFn } from "./types/builder"
 import type {
   DefaultTryCtxProperties,
@@ -25,10 +26,12 @@ import type { AsyncRunInput, RunTryFn, SyncRunInput, SyncRunTryFn } from "./type
 import { executeAll } from "./all"
 import { executeAllSettled } from "./all-settled"
 import { executeFlow } from "./flow"
+import { executeGen } from "./gen"
 import { normalizeRetryPolicy } from "./retry"
 import { executeRun } from "./run"
 import { executeRunSync } from "./run-sync"
 import { normalizeTimeoutOptions } from "./timeout"
+import { executeWithWraps } from "./wrap"
 
 type ConfigRunErrors = RetryExhaustedError | TimeoutError | CancellationError
 type WithRetry<CtxProperties extends TryCtxProperties> = SetTryCtxFeature<CtxProperties, "retry">
@@ -125,6 +128,14 @@ export class WrappedRunBuilder<
   ): Promise<FlowResult<T>> {
     return executeFlow(this.#config, tasks)
   }
+
+  gen<TYield, TReturn>(factory: (useFn: GenUse) => Generator<TYield, TReturn, unknown>) {
+    return executeWithWraps(
+      this.#config.wraps,
+      { retry: { attempt: 1, limit: 1 }, signal: undefined },
+      () => executeGen(factory)
+    ) as GenResult<TYield, TReturn>
+  }
 }
 
 export class RunBuilder<
@@ -196,4 +207,8 @@ export class RunBuilder<
   ): Promise<FlowResult<T>> {
     return executeFlow(this.#config, tasks)
   }
+}
+
+export function createWrappedBuilder(fn: WrapFn): WrappedRunBuilder {
+  return new WrappedRunBuilder({ wraps: [fn] })
 }

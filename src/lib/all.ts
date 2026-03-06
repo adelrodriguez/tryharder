@@ -39,7 +39,6 @@ export type {
   SettledRejected,
   SettledResult,
   TaskContext,
-  TaskFn,
   TaskRecord,
   TaskResult,
   TaskValidation,

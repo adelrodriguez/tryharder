@@ -172,6 +172,59 @@ describe("executeRun", () => {
 
       expect(result).toBeInstanceOf(CancellationError)
     })
+
+    it("returns CancellationError when aborted during retry backoff", async () => {
+      const ac = new AbortController()
+      let attempts = 0
+
+      const pending = executeRun(
+        {
+          retry: { backoff: "constant", delayMs: 50, limit: 3 },
+          signals: [ac.signal],
+        },
+        () => {
+          attempts += 1
+          throw new Error("boom")
+        }
+      )
+
+      setTimeout(() => {
+        ac.abort(new Error("stop"))
+      }, 5)
+
+      const result = await pending
+
+      expect(result).toBeInstanceOf(CancellationError)
+      expect(attempts).toBe(1)
+    })
+
+    it("prefers cancellation over timeout when abort happens during catch", async () => {
+      const ac = new AbortController()
+
+      const pending = executeRun(
+        {
+          signals: [ac.signal],
+          timeout: { ms: 50, scope: "total" },
+        },
+        {
+          catch: async () => {
+            await sleep(20)
+            return "mapped"
+          },
+          try: () => {
+            throw new Error("boom")
+          },
+        }
+      )
+
+      setTimeout(() => {
+        ac.abort(new Error("cancelled"))
+      }, 5)
+
+      const result = await pending
+
+      expect(result).toBeInstanceOf(CancellationError)
+    })
   })
 
   describe("wrap behavior", () => {

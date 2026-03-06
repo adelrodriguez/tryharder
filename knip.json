@@ -17,14 +17,6 @@
     "duplicates": "warn"
   },
   "ignoreExportsUsedInFile": true,
-  "ignoreFiles": [
-    "**/dist/**",
-    "**/build/**",
-    "**/coverage/**",
-    "**/.next/**",
-    "**/.vercel/**",
-    "**/.turbo/**"
-  ],
-  "ignore": ["**/*.d.ts"],
+  "ignore": [".context/**"],
   "project": ["src/**/*.ts"]
 }

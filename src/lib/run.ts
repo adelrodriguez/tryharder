@@ -8,11 +8,11 @@ import {
   TimeoutError,
   UnhandledException,
 } from "./errors"
-import { executeWithWraps } from "./execution-shared"
 import { calculateRetryDelay, checkIsRetryExhausted, checkShouldAttemptRetry } from "./retry"
 import { SignalController } from "./signal"
 import { TimeoutController } from "./timeout"
 import { checkIsControlError, checkIsPromiseLike, sleep } from "./utils"
+import { executeWithWraps } from "./wrap"
 
 export type RunnerError =
   | CancellationError
@@ -27,26 +27,12 @@ type RetryDecision = {
   shouldAttemptRetry: boolean
 }
 
-const RETRY_RESULT = Symbol("RETRY_RESULT")
+class RetryDirective {
+  readonly decision: RetryDecision
 
-type RetryResult = {
-  [RETRY_RESULT]: true
-  retry: RetryDecision
-}
-
-function checkIsRetryResult(value: unknown): value is RetryResult {
-  return typeof value === "object" && value !== null && RETRY_RESULT in value
-}
-
-const CONTINUE_SYNC = Symbol("CONTINUE_SYNC")
-
-type SyncRetryContinuation = {
-  [CONTINUE_SYNC]: true
-  nextAttempt: number
-}
-
-function checkIsSyncRetryContinuation(value: unknown): value is SyncRetryContinuation {
-  return typeof value === "object" && value !== null && CONTINUE_SYNC in value
+  constructor(decision: RetryDecision) {
+    this.decision = decision
+  }
 }
 
 function extractControlResult(value: unknown): CancellationError | TimeoutError | undefined {
@@ -80,6 +66,14 @@ export class RunExecution<T, E, Ctx extends BaseTryCtx> {
     this.#tryFn = typeof input === "function" ? input : input.try
   }
 
+  executeAsync(): Promise<T | E | RunnerError> {
+    return Promise.resolve(this.#runWithWrapsAsync())
+  }
+
+  executeSync(): T | E | RunnerError | Promise<T | E | RunnerError> {
+    return this.#runWithWrapsSync()
+  }
+
   execute(): T | E | RunnerError | Promise<T | E | RunnerError> {
     return this.#runWithWraps()
   }
@@ -101,7 +95,15 @@ export class RunExecution<T, E, Ctx extends BaseTryCtx> {
   }
 
   #runWithWraps(): T | E | RunnerError | Promise<T | E | RunnerError> {
+    return this.#runWithWrapsSync()
+  }
+
+  #runWithWrapsSync(): T | E | RunnerError | Promise<T | E | RunnerError> {
     return executeWithWraps(this.#config.wraps, this.#ctx, () => this.#runAttemptLoopSync(1))
+  }
+
+  #runWithWrapsAsync(): T | E | RunnerError | Promise<T | E | RunnerError> {
+    return executeWithWraps(this.#config.wraps, this.#ctx, () => this.#runAttemptLoopAsync(1))
   }
 
   #checkDidControlFail(cause?: unknown): CancellationError | TimeoutError | undefined {
@@ -223,7 +225,7 @@ export class RunExecution<T, E, Ctx extends BaseTryCtx> {
   }
 
   /** Resolve an attempt error into either a terminal result or a retry decision. */
-  #resolveFailure(error: unknown): E | RunnerError | Promise<E | RunnerError> | RetryResult {
+  #resolveFailure(error: unknown): E | RunnerError | Promise<E | RunnerError> | RetryDirective {
     if (checkIsControlError(error)) {
       return error
     }
@@ -244,39 +246,18 @@ export class RunExecution<T, E, Ctx extends BaseTryCtx> {
       return this.#finalizeFailure(error)
     }
 
-    return { [RETRY_RESULT]: true, retry: retryDecision }
+    return new RetryDirective(retryDecision)
   }
 
-  #handleSyncFailure(
-    error: unknown
-  ): T | E | RunnerError | Promise<T | E | RunnerError> | SyncRetryContinuation {
-    const resolved = this.#resolveFailure(error)
-
-    if (!checkIsRetryResult(resolved)) {
-      return resolved
-    }
-
-    if (resolved.retry.delay <= 0) {
-      return { [CONTINUE_SYNC]: true, nextAttempt: this.#ctx.retry.attempt + 1 }
-    }
-
-    return this.#runAttemptLoopAsync(resolved.retry)
-  }
-
-  async #handleAsyncFailure(error: unknown): Promise<T | E | RunnerError> {
-    const resolved = this.#resolveFailure(error)
-
-    if (!checkIsRetryResult(resolved)) {
-      return resolved
-    }
-
-    return this.#runAttemptLoopAsync(resolved.retry)
-  }
-
-  /** Async retry loop. Once we enter async we stay async for all subsequent attempts. */
-  async #runAttemptLoopAsync(decision: RetryDecision): Promise<T | E | RunnerError> {
-    let currentDecision = decision
-    let currentAttempt = this.#ctx.retry.attempt + 1
+  /** Async attempt loop. Used for async starts and sync-to-async upgrades. */
+  async #runAttemptLoopAsync(
+    attempt: number,
+    initialDecision?: RetryDecision,
+    initialResult?: PromiseLike<T>
+  ): Promise<T | E | RunnerError> {
+    let currentAttempt = attempt
+    let currentDecision = initialDecision
+    let currentResult = initialResult
 
     // oxlint-disable-next-line typescript/no-unnecessary-condition
     while (true) {
@@ -286,17 +267,22 @@ export class RunExecution<T, E, Ctx extends BaseTryCtx> {
         return controlBeforeAttempt
       }
 
-      // oxlint-disable-next-line no-await-in-loop
-      const delayControlResult = await this.#waitForRetryDelay(currentDecision.delay)
+      if (currentDecision) {
+        // oxlint-disable-next-line no-await-in-loop
+        const delayControlResult = await this.#waitForRetryDelay(currentDecision.delay)
 
-      if (delayControlResult) {
-        return delayControlResult
+        if (delayControlResult) {
+          return delayControlResult
+        }
+
+        currentDecision = undefined
       }
 
       this.#ctx.retry.attempt = currentAttempt
 
       try {
-        const result = this.#tryFn(this.#ctx as unknown as Ctx)
+        const result = currentResult ?? this.#tryFn(this.#ctx as unknown as Ctx)
+        currentResult = undefined
 
         if (checkIsPromiseLike(result)) {
           // oxlint-disable-next-line no-await-in-loop
@@ -307,11 +293,11 @@ export class RunExecution<T, E, Ctx extends BaseTryCtx> {
       } catch (attemptError) {
         const resolved = this.#resolveFailure(attemptError)
 
-        if (!checkIsRetryResult(resolved)) {
+        if (!(resolved instanceof RetryDirective)) {
           return resolved
         }
 
-        currentDecision = resolved.retry
+        currentDecision = resolved.decision
         currentAttempt += 1
       }
     }
@@ -335,21 +321,23 @@ export class RunExecution<T, E, Ctx extends BaseTryCtx> {
         const result = this.#tryFn(this.#ctx as unknown as Ctx)
 
         if (checkIsPromiseLike(result)) {
-          return this.#resolveAsyncTryResult(result).catch((error: unknown) =>
-            this.#handleAsyncFailure(error)
-          )
+          return this.#runAttemptLoopAsync(currentAttempt, undefined, result)
         }
 
         return this.#resolveSyncSuccess(result)
       } catch (error) {
-        const handled = this.#handleSyncFailure(error)
+        const resolved = this.#resolveFailure(error)
 
-        if (checkIsSyncRetryContinuation(handled)) {
-          currentAttempt = handled.nextAttempt
+        if (resolved instanceof RetryDirective) {
+          if (resolved.decision.delay > 0) {
+            return this.#runAttemptLoopAsync(currentAttempt + 1, resolved.decision)
+          }
+
+          currentAttempt += 1
           continue
         }
 
-        return handled
+        return resolved
       }
     }
   }
@@ -372,5 +360,5 @@ export async function executeRun<T, E, Ctx extends BaseTryCtx>(
   input: AsyncRunInput<T, E, Ctx>
 ): Promise<T | E | RunnerError> {
   using execution = new RunExecution<T, E, Ctx>(config, input)
-  return await execution.execute()
+  return await execution.executeAsync()
 }

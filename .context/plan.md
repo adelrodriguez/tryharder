@@ -17,7 +17,7 @@ Goal: implement `hardtry` incrementally with behavior locked by
 - [x] Phase 9 - `gen`
 - [x] Phase 10 - `all` and `allSettled`
 - [x] Phase 11 - `flow` + `$exit`
-- [ ] Phase 12 - Hardening + release readiness
+- [x] Phase 12 - Hardening + release readiness
 
 ## Principles
 

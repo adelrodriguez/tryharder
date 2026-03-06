@@ -1,6 +1,6 @@
 import type { WrappedRunBuilder } from "./lib/builder"
 import type { WrapFn } from "./lib/types/builder"
-import { RunBuilder } from "./lib/builder"
+import { RunBuilder, createWrappedBuilder } from "./lib/builder"
 import {
   CancellationError,
   Panic,
@@ -15,7 +15,7 @@ const root = new RunBuilder()
 export const retry: RunBuilder["retry"] = root.retry.bind(root)
 export const timeout: RunBuilder["timeout"] = root.timeout.bind(root)
 export const signal: RunBuilder["signal"] = root.signal.bind(root)
-export const wrap = (fn: WrapFn): WrappedRunBuilder => root.wrap(fn)
+export const wrap = (fn: WrapFn): WrappedRunBuilder => createWrappedBuilder(fn)
 export const run: RunBuilder["run"] = root.run.bind(root)
 export { runSync } from "./lib/run-sync"
 

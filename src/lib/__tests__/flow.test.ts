@@ -315,4 +315,52 @@ describe("executeFlow", () => {
       expect(error).toBeInstanceOf(CancellationError)
     }
   })
+
+  it("throws when accessing an unknown task result", async () => {
+    try {
+      await executeFlow(
+        {},
+        {
+          async a() {
+            return await (this.$result as Record<string, Promise<unknown>>).doesNotExist
+          },
+        }
+      )
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect((error as Error).message).toContain("Unknown task")
+    }
+  })
+
+  it("aborts sibling task signal after early exit", async () => {
+    let signalAbortedInB = false
+
+    const result = await executeFlow(
+      {},
+      {
+        a() {
+          return this.$exit("done" as const)
+        },
+        async b() {
+          if (!this.$signal.aborted) {
+            await new Promise<void>((resolve) => {
+              this.$signal.addEventListener(
+                "abort",
+                () => {
+                  resolve()
+                },
+                { once: true }
+              )
+            })
+          }
+
+          signalAbortedInB = this.$signal.aborted
+          return null
+        },
+      }
+    )
+
+    expect(result).toBe("done")
+    expect(signalAbortedInB).toBe(true)
+  })
 })

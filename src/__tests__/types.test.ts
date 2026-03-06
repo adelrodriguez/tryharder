@@ -172,12 +172,11 @@ describe("type inference", () => {
       >
     })
 
-    it("retry metadata remains available across timeout/signal/wrap chain", () => {
+    it("retry metadata remains available across timeout/signal chain", () => {
       const result = try$
         .retry(3)
         .timeout(100)
         .signal(new AbortController().signal)
-        .wrap((ctx, next) => next(ctx))
         .run((ctx) => ctx.retry.attempt)
 
       type _assert = Expect<
@@ -206,36 +205,67 @@ describe("type inference", () => {
       type _assert = Expect<Equal<typeof result, Promise<number | try$.UnhandledException>>>
     })
 
-    it("retry after wrap removes runSync", () => {
-      if (typecheckOnly()) {
-        const afterRetry = try$.wrap((ctx, next) => next(ctx)).retry(3)
-        // @ts-expect-error runSync is not available after retry()
-        void afterRetry.runSync
-      }
+    it("wrap builder exposes retry", () => {
+      if (typecheckOnly()) return
+
+      const result = try$
+        .wrap((ctx, next) => next(ctx))
+        .retry(3)
+        .run((ctx) => ctx.retry.attempt)
+
+      type _assert = Expect<
+        Equal<typeof result, Promise<number | try$.UnhandledException | try$.RetryExhaustedError>>
+      >
     })
 
-    it("timeout after wrap removes runSync", () => {
-      if (typecheckOnly()) {
-        const afterTimeout = try$.wrap((ctx, next) => next(ctx)).timeout(100)
-        // @ts-expect-error runSync is not available after timeout()
-        void afterTimeout.runSync
-      }
+    it("wrap builder exposes timeout", () => {
+      if (typecheckOnly()) return
+
+      const result = try$
+        .wrap((ctx, next) => next(ctx))
+        .timeout(100)
+        .run(() => 1)
+
+      type _assert = Expect<
+        Equal<typeof result, Promise<number | try$.UnhandledException | try$.TimeoutError>>
+      >
     })
 
-    it("signal after wrap removes runSync", () => {
-      if (typecheckOnly()) {
-        const afterSignal = try$.wrap((ctx, next) => next(ctx)).signal(new AbortController().signal)
-        // @ts-expect-error runSync is not available after signal()
-        void afterSignal.runSync
-      }
+    it("wrap builder exposes signal", () => {
+      if (typecheckOnly()) return
+
+      const result = try$
+        .wrap((ctx, next) => next(ctx))
+        .signal(new AbortController().signal)
+        .run(() => 1)
+
+      type _assert = Expect<
+        Equal<typeof result, Promise<number | try$.UnhandledException | try$.CancellationError>>
+      >
     })
 
-    it("wrap after retry does not expose runSync", () => {
-      if (typecheckOnly()) {
-        const wrappedRetry = try$.retry(3).wrap((ctx, next) => next(ctx))
-        // @ts-expect-error runSync is not available when retry is configured
-        void wrappedRetry.runSync
-      }
+    it("retry chain exposes wrap", () => {
+      if (typecheckOnly()) return
+
+      const result = try$
+        .retry(3)
+        .wrap((ctx, next) => next(ctx))
+        .run((ctx) => ctx.retry.attempt)
+
+      type _assert = Expect<
+        Equal<typeof result, Promise<number | try$.UnhandledException | try$.RetryExhaustedError>>
+      >
+    })
+
+    it("wrap builder exposes gen", () => {
+      const result = try$
+        .wrap((ctx, next) => next(ctx))
+        .gen(function* (use) {
+          const value = yield* use(1)
+          return value + 1
+        })
+
+      type _assert = Expect<Equal<typeof result, number>>
     })
   })
 
@@ -546,6 +576,57 @@ describe("type inference", () => {
 
         type _assert = Expect<Equal<typeof result, Promise<never>>>
       }
+    })
+  })
+
+  describe("combined api chains", () => {
+    it("retry + timeout + signal + all preserves task result map", () => {
+      if (typecheckOnly()) return
+
+      const ac = new AbortController()
+
+      const result = try$
+        .retry(3)
+        .timeout(1000)
+        .signal(ac.signal)
+        .all({
+          a() {
+            return 1
+          },
+          async b() {
+            return (await this.$result.a) + 1
+          },
+        })
+
+      type _assert = Expect<Equal<typeof result, Promise<{ a: 1; b: number }>>>
+    })
+
+    it("timeout + signal + allSettled preserves settled map", () => {
+      if (typecheckOnly()) return
+
+      const ac = new AbortController()
+
+      const result = try$
+        .timeout(1000)
+        .signal(ac.signal)
+        .allSettled({
+          a() {
+            return 1
+          },
+          b() {
+            return "ok"
+          },
+        })
+
+      type _assert = Expect<
+        Equal<
+          typeof result,
+          Promise<{
+            a: try$.SettledResult<1>
+            b: try$.SettledResult<"ok">
+          }>
+        >
+      >
     })
   })
 })

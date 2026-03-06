@@ -258,6 +258,143 @@ describe("builder helpers", () => {
     expect(result).toBe(42)
   })
 
+  it("supports multiple wraps in top-level wrap chain", async () => {
+    const events: string[] = []
+
+    const result = await try$
+      .wrap((ctx, next) => {
+        events.push("outer-before")
+        const value = next(ctx)
+        events.push("outer-after")
+        return value
+      })
+      .wrap((ctx, next) => {
+        events.push("inner-before")
+        const value = next(ctx)
+        events.push("inner-after")
+        return value
+      })
+      .run(() => 42)
+
+    expect(result).toBe(42)
+    expect(events).toEqual(["outer-before", "inner-before", "inner-after", "outer-after"])
+  })
+
+  it("applies wrap around all", async () => {
+    let wrapCalls = 0
+
+    const result = await try$
+      .wrap((ctx, next) => {
+        wrapCalls += 1
+        return next(ctx)
+      })
+      .all({
+        a() {
+          return 1
+        },
+        async b() {
+          return (await this.$result.a) + 1
+        },
+      })
+
+    expect(result).toEqual({ a: 1, b: 2 })
+    expect(wrapCalls).toBe(1)
+  })
+
+  it("applies wrap around failing all and preserves rejection", async () => {
+    let wrapCalls = 0
+
+    try {
+      await try$
+        .wrap((ctx, next) => {
+          wrapCalls += 1
+          return next(ctx)
+        })
+        .all({
+          a() {
+            throw new Error("boom")
+          },
+        })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect((error as Error).message).toBe("boom")
+      expect(wrapCalls).toBe(1)
+    }
+  })
+
+  it("applies wrap around flow", async () => {
+    let wrapCalls = 0
+
+    const result = await try$
+      .wrap((ctx, next) => {
+        wrapCalls += 1
+        return next(ctx)
+      })
+      .flow({
+        a() {
+          return this.$exit("done" as const)
+        },
+      })
+
+    expect(result).toBe("done")
+    expect(wrapCalls).toBe(1)
+  })
+
+  it("applies wrap around flow failure", async () => {
+    let wrapCalls = 0
+
+    try {
+      await try$
+        .wrap((ctx, next) => {
+          wrapCalls += 1
+          return next(ctx)
+        })
+        .flow({
+          a() {
+            return 1
+          },
+        })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect((error as Error).message).toBe("Flow completed without exit")
+      expect(wrapCalls).toBe(1)
+    }
+  })
+
+  it("applies wrap around gen", () => {
+    let wrapCalls = 0
+
+    const result = try$
+      .wrap((ctx, next) => {
+        wrapCalls += 1
+        return next(ctx)
+      })
+      .gen(function* (use) {
+        const value = yield* use(1)
+        return value + 1
+      })
+
+    expect(result).toBe(2)
+    expect(wrapCalls).toBe(1)
+  })
+
+  it("applies wrap around gen rejection path", async () => {
+    let wrapCalls = 0
+
+    const result = await try$
+      .wrap((ctx, next) => {
+        wrapCalls += 1
+        return next(ctx)
+      })
+      .gen(function* (use) {
+        const value = yield* use(Promise.reject<number>(new Error("boom")))
+        return value
+      })
+
+    expect(result).toBeInstanceOf(Error)
+    expect(wrapCalls).toBe(1)
+  })
+
   it("keeps root run isolated from retry chains", async () => {
     const retried = await try$.retry(2).run(() => {
       throw new Error("boom")
@@ -448,6 +585,34 @@ describe("flow", () => {
       expect.unreachable("should have thrown")
     } catch (error) {
       expect(error).toBeInstanceOf(try$.TimeoutError)
+    }
+  })
+
+  it("rejects when a flow task awaits its own result", async () => {
+    try {
+      await try$.flow({
+        async a() {
+          return await (this.$result as Record<string, Promise<unknown>>).a
+        },
+      })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect((error as Error).message).toContain("cannot await its own result")
+    }
+  })
+
+  it("rejects inherited dependency keys on $result", async () => {
+    try {
+      await try$.flow({
+        async a() {
+          const key = "toString"
+          const value = (this.$result as Record<string, Promise<unknown>>)[key]
+          return await value
+        },
+      })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect((error as Error).message).toContain("Unknown task")
     }
   })
 })
@@ -669,7 +834,7 @@ describe("all", () => {
 })
 
 describe("full builder chain", () => {
-  it("supports retry + timeout + signal + wrap in sync run", async () => {
+  it("supports retry + timeout + signal in sync run", async () => {
     const ac = new AbortController()
     let attempts = 0
 
@@ -677,7 +842,6 @@ describe("full builder chain", () => {
       .retry(3)
       .timeout(100)
       .signal(ac.signal)
-      .wrap((ctx, next) => next(ctx))
       .run((ctx) => {
         attempts += 1
         expect(ctx.signal).toBeDefined()
@@ -694,7 +858,7 @@ describe("full builder chain", () => {
     expect(result).toBe(2)
   })
 
-  it("supports full chain in async run with mapped catch", async () => {
+  it("supports retry + timeout + signal in async run with mapped catch", async () => {
     const ac = new AbortController()
 
     const result = await try$
@@ -706,7 +870,6 @@ describe("full builder chain", () => {
       })
       .timeout(100)
       .signal(ac.signal)
-      .wrap((ctx, next) => next(ctx))
       .run({
         catch: () => "mapped" as const,
         try: async (ctx) => {
@@ -748,14 +911,13 @@ describe("full builder chain", () => {
     expect(result).toBeInstanceOf(try$.CancellationError)
   })
 
-  it("returns TimeoutError from full chain when deadline is exceeded", async () => {
+  it("returns TimeoutError from retry + timeout + signal when deadline is exceeded", async () => {
     const ac = new AbortController()
 
     const result = await try$
       .retry(3)
       .timeout(5)
       .signal(ac.signal)
-      .wrap((ctx, next) => next(ctx))
       .run(async () => {
         await new Promise((resolve) => {
           setTimeout(resolve, 20)
@@ -789,6 +951,39 @@ describe("full builder chain", () => {
 
     expect(directResult).toBe(7)
     expect(rootedResult).toBe(7)
+  })
+
+  it("supports wrap + run together", async () => {
+    let wrapCalls = 0
+
+    const result = await try$
+      .wrap((ctx, next) => {
+        wrapCalls += 1
+        return next(ctx)
+      })
+      .run(async () => {
+        await sleep(5)
+        return 6
+      })
+
+    expect(result).toBe(6)
+    expect(wrapCalls).toBe(1)
+  })
+
+  it("supports signal + allSettled with mixed outcomes", async () => {
+    const ac = new AbortController()
+
+    const result = await try$.signal(ac.signal).allSettled({
+      fail() {
+        throw new Error("boom")
+      },
+      ok() {
+        return 1
+      },
+    })
+
+    expect(result.ok).toEqual({ status: "fulfilled", value: 1 })
+    expect(result.fail.status).toBe("rejected")
   })
 })
 

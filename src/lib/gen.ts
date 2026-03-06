@@ -1,13 +1,13 @@
 import { checkIsPromiseLike } from "./utils"
 
 type GenUnwrap<T> = Exclude<Awaited<T>, Error>
-type GenUse = <T>(value: T) => Generator<T, GenUnwrap<T>, GenUnwrap<T>>
+export type GenUse = <T>(value: T) => Generator<T, GenUnwrap<T>, GenUnwrap<T>>
 
 type GenErrors<TYield> = Extract<Awaited<TYield>, Error>
 type CheckIsAsync<TYield, TReturn> =
   Extract<TYield | TReturn, PromiseLike<unknown>> extends never ? false : true
 
-type GenResult<TYield, TReturn> =
+export type GenResult<TYield, TReturn> =
   CheckIsAsync<TYield, TReturn> extends true
     ? Promise<Awaited<TReturn> | GenErrors<TYield>>
     : Awaited<TReturn> | GenErrors<TYield>
