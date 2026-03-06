@@ -13,7 +13,6 @@ import { retryOptions } from "./lib/retry"
 const root = new RunBuilder()
 
 export const retry: RunBuilder["retry"] = root.retry.bind(root)
-export const settled: RunBuilder["settled"] = root.settled.bind(root)
 export const timeout: RunBuilder["timeout"] = root.timeout.bind(root)
 export const signal: RunBuilder["signal"] = root.signal.bind(root)
 export const wrap = (fn: WrapFn): WrappedRunBuilder => root.wrap(fn)
@@ -21,6 +20,7 @@ export const run: RunBuilder["run"] = root.run.bind(root)
 export { runSync } from "./lib/run-sync"
 
 export const all: RunBuilder["all"] = root.all.bind(root)
+export const allSettled: RunBuilder["allSettled"] = root.allSettled.bind(root)
 export const flow: RunBuilder["flow"] = root.flow.bind(root)
 
 export { dispose } from "./lib/dispose"

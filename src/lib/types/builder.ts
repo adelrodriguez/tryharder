@@ -45,8 +45,4 @@ export interface BuilderConfig {
    * Wrapper middleware chain around execution.
    */
   wraps?: WrapFn[]
-  /**
-   * Task aggregation mode for all().
-   */
-  settled?: boolean
 }
