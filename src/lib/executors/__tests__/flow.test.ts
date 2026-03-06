@@ -383,6 +383,154 @@ describe("executeFlow", () => {
     }
   })
 
+  it("waits for all tasks to settle before retrying", async () => {
+    let concurrentRuns = 0
+    let maxConcurrentRuns = 0
+    let attempts = 0
+
+    const result = await executeFlow(
+      {
+        retry: {
+          backoff: "constant",
+          delayMs: 0,
+          limit: 2,
+        },
+      },
+      {
+        a() {
+          attempts += 1
+
+          if (attempts === 1) {
+            throw new Error("boom")
+          }
+
+          return this.$exit("ok")
+        },
+        async b() {
+          concurrentRuns += 1
+          maxConcurrentRuns = Math.max(maxConcurrentRuns, concurrentRuns)
+          await sleep(50)
+          concurrentRuns -= 1
+        },
+      }
+    )
+
+    expect(result).toBe("ok")
+    expect(maxConcurrentRuns).toBe(1)
+  })
+
+  it("slow sibling from failed attempt settles before next attempt starts", async () => {
+    const timestamps: string[] = []
+    let attempts = 0
+
+    const result = await executeFlow(
+      {
+        retry: {
+          backoff: "constant",
+          delayMs: 0,
+          limit: 2,
+        },
+      },
+      {
+        a() {
+          attempts += 1
+
+          if (attempts === 1) {
+            throw new Error("boom")
+          }
+
+          timestamps.push("attempt2-start")
+          return this.$exit("ok")
+        },
+        async b() {
+          if (attempts === 1) {
+            await sleep(50)
+            timestamps.push("attempt1-b-settled")
+          }
+        },
+      }
+    )
+
+    expect(result).toBe("ok")
+    expect(timestamps).toEqual(["attempt1-b-settled", "attempt2-start"])
+  })
+
+  it("returns exit value when $exit fires before a sibling error", async () => {
+    const result = await executeFlow(
+      {},
+      {
+        a() {
+          return this.$exit("done")
+        },
+        async b() {
+          await sleep(10)
+          throw new Error("late error")
+        },
+      }
+    )
+
+    expect(result).toBe("done")
+  })
+
+  it("throws error when a task fails before a sibling calls $exit", async () => {
+    try {
+      await executeFlow(
+        {},
+        {
+          a() {
+            throw new Error("fast error")
+          },
+          async b() {
+            await sleep(10)
+            return this.$exit("late exit")
+          },
+        }
+      )
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect((error as Error).message).toBe("fast error")
+    }
+  })
+
+  it("runs disposer cleanup after all tasks settle on a failed attempt", async () => {
+    const events: string[] = []
+    let attempts = 0
+
+    const result = await executeFlow(
+      {
+        retry: {
+          backoff: "constant",
+          delayMs: 0,
+          limit: 2,
+        },
+      },
+      {
+        a() {
+          attempts += 1
+
+          this.$disposer.defer(() => {
+            events.push("cleanup")
+          })
+
+          if (attempts === 1) {
+            throw new Error("boom")
+          }
+
+          return this.$exit("ok")
+        },
+        async b() {
+          if (attempts === 1) {
+            await sleep(50)
+            events.push("b-settled")
+          }
+        },
+      }
+    )
+
+    expect(result).toBe("ok")
+    expect(events.indexOf("b-settled")).toBeLessThan(events.indexOf("cleanup"))
+  })
+
   it("aborts sibling task signal after early exit", async () => {
     let signalAbortedInB = false
 

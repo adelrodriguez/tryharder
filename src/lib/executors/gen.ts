@@ -1,5 +1,5 @@
 import { UnhandledException } from "../errors"
-import { checkIsPromiseLike } from "../utils"
+import { checkIsControlError, checkIsPromiseLike } from "../utils"
 
 type GenUnwrap<T> = Exclude<Awaited<T>, Error>
 export type GenUse = <T>(value: T) => Generator<T, GenUnwrap<T>, GenUnwrap<T>>
@@ -26,6 +26,10 @@ async function executeAsyncGenerator<TYield, TReturn>(
   try {
     currentValue = await initialValue
   } catch (error) {
+    if (checkIsControlError(error)) {
+      return error as GenErrors<TYield>
+    }
+
     return new UnhandledException(undefined, { cause: error }) as GenErrors<TYield>
   }
 
@@ -40,6 +44,10 @@ async function executeAsyncGenerator<TYield, TReturn>(
     try {
       step = iterator.next(currentValue)
     } catch (error) {
+      if (checkIsControlError(error)) {
+        return error as GenErrors<TYield>
+      }
+
       return new UnhandledException(undefined, { cause: error }) as GenErrors<TYield>
     }
 
@@ -49,6 +57,10 @@ async function executeAsyncGenerator<TYield, TReturn>(
           // oxlint-disable-next-line no-await-in-loop
           return (await step.value) as Awaited<TReturn>
         } catch (error) {
+          if (checkIsControlError(error)) {
+            return error as GenErrors<TYield>
+          }
+
           return new UnhandledException(undefined, { cause: error }) as GenErrors<TYield>
         }
       }
@@ -61,6 +73,10 @@ async function executeAsyncGenerator<TYield, TReturn>(
         // oxlint-disable-next-line no-await-in-loop
         currentValue = await step.value
       } catch (error) {
+        if (checkIsControlError(error)) {
+          return error as GenErrors<TYield>
+        }
+
         return new UnhandledException(undefined, { cause: error }) as GenErrors<TYield>
       }
     } else {
@@ -81,6 +97,10 @@ export function executeGen<TYield, TReturn>(
   try {
     iterator = factory(use)
   } catch (error) {
+    if (checkIsControlError(error)) {
+      return error as GenResult<TYield, TReturn>
+    }
+
     return new UnhandledException(undefined, { cause: error }) as GenResult<TYield, TReturn>
   }
 
@@ -93,6 +113,10 @@ export function executeGen<TYield, TReturn>(
     try {
       step = iterator.next(currentValue)
     } catch (error) {
+      if (checkIsControlError(error)) {
+        return error as GenResult<TYield, TReturn>
+      }
+
       return new UnhandledException(undefined, { cause: error }) as GenResult<TYield, TReturn>
     }
 

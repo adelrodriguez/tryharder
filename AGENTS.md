@@ -12,7 +12,6 @@ This project was built with [`pastry`](https://github.com/adelrodriguez/pastry) 
 ## Changesets
 
 - We use `changesets` for versioning and changelog management.
-- Run `bun changeset --empty` to create a new empty changeset file.
 - Never make a major version bump unless the user requests it.
 - If a breaking change is being made, and we are on v1.0.0 or higher, alert the user.
 

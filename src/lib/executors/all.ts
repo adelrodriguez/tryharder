@@ -54,21 +54,25 @@ class AllExecution<T extends TaskRecord, C> extends BaseExecution<Promise<AllVal
       }
 
       if (checkIsPromiseLike(mapped)) {
-        try {
-          const raced = await this.race(mapped, error)
+        const mappedWithPanic = (async (): Promise<C> => {
+          try {
+            return await mapped
+          } catch (catchError) {
+            if (catchError instanceof CancellationError || catchError instanceof TimeoutError) {
+              throw catchError
+            }
 
-          if (raced instanceof CancellationError || raced instanceof TimeoutError) {
-            throw raced
+            throw new Panic("ALL_CATCH_HANDLER_REJECT", { cause: catchError })
           }
+        })()
 
-          return raced
-        } catch (catchError) {
-          if (catchError instanceof CancellationError || catchError instanceof TimeoutError) {
-            throw catchError
-          }
+        const raced = await this.race(mappedWithPanic, error)
 
-          throw new Panic("ALL_CATCH_HANDLER_REJECT", { cause: catchError })
+        if (raced instanceof CancellationError || raced instanceof TimeoutError) {
+          throw raced
         }
+
+        return raced
       }
 
       return mapped

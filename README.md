@@ -250,6 +250,8 @@ disposer.defer(() => {
 
 ### Runtime exports
 
+From `hardtry`:
+
 - `retry`
 - `settled`
 - `timeout`
@@ -262,11 +264,19 @@ disposer.defer(() => {
 - `dispose`
 - `gen`
 - `createRetryPolicy`
+
+From `hardtry/errors`:
+
 - `CancellationError`
 - `TimeoutError`
 - `RetryExhaustedError`
 - `UnhandledException`
 - `Panic`
+
+```ts
+import * as try$ from "hardtry"
+import { Panic, TimeoutError, UnhandledException } from "hardtry/errors"
+```
 
 ### Common signatures
 
@@ -281,6 +291,7 @@ disposer.defer(() => {
 
 - Retry `limit` includes the first attempt.
 - Timeout scope is total execution.
+- Error classes and `PanicCode` are exported from `hardtry/errors`.
 - `flow` requires at least one `$exit(...)` path; otherwise it throws.
 - Control outcomes have precedence over mapped catch results in racing scenarios.
 - `wrap` is only available from `try$.wrap(...)` and can be chained as `.wrap().wrap()`.

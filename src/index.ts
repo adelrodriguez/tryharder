@@ -1,11 +1,4 @@
 import { RunBuilder } from "./lib/builder"
-import {
-  CancellationError,
-  Panic,
-  RetryExhaustedError,
-  TimeoutError,
-  UnhandledException,
-} from "./lib/errors"
 import { createRetryPolicy } from "./lib/modifiers/retry"
 
 const root = new RunBuilder()
@@ -25,8 +18,6 @@ export const wrap: RunBuilder["wrap"] = root.wrap.bind(root)
 export { dispose } from "./lib/dispose"
 
 export { createRetryPolicy }
-export { CancellationError, Panic, RetryExhaustedError, TimeoutError, UnhandledException }
-export type { PanicCode } from "./lib/errors"
 
 export type {
   AllSettledResult,
