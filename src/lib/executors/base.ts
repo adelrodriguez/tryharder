@@ -9,7 +9,6 @@ import {
 } from "../modifiers/retry"
 import { SignalController } from "../modifiers/signal"
 import { TimeoutController } from "../modifiers/timeout"
-import { executeWithWraps } from "../modifiers/wrap"
 import { sleep } from "../utils"
 
 interface BaseExecutionOptions {
@@ -57,7 +56,20 @@ export abstract class BaseExecution<TResult = unknown> {
   execute(): TResult {
     // Wraps cover the full retry scope; `ctx.retry.attempt` may reflect the final
     // attempt when observed after `next(ctx)` resolves.
-    return executeWithWraps(this.config.wraps, this.ctx, () => this.executeCore())
+    const wraps = this.config.wraps
+
+    if (!wraps || wraps.length === 0) {
+      return this.executeCore()
+    }
+
+    let next = (_ctx: TryCtx): unknown => this.executeCore()
+
+    for (const wrap of wraps.toReversed()) {
+      const previous = next
+      next = (wrapCtx) => wrap(wrapCtx, previous)
+    }
+
+    return next(this.ctx) as TResult
   }
 
   protected abstract executeCore(): TResult
@@ -84,10 +96,6 @@ export abstract class BaseExecution<TResult = unknown> {
 
   protected checkDidControlFail(cause?: unknown): CancellationError | TimeoutError | undefined {
     return this.signal.checkDidCancel(cause) ?? this.timeout.checkDidTimeout(cause)
-  }
-
-  protected checkBeforeAttempt(): CancellationError | TimeoutError | undefined {
-    return this.checkDidControlFail()
   }
 
   protected resolveSyncSuccess<T>(value: T): T | CancellationError | TimeoutError {

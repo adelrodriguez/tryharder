@@ -8,7 +8,7 @@ across `run`, `runSync`, `all`, `allSettled`, and `flow`.
 ## Context
 
 The follow-up concern from
-`./unify-runsync-gen-builder-exports.md` is that `BaseExecution` eagerly
+`./05-unify-runsync-gen-builder-exports.md` is that `BaseExecution` eagerly
 constructs both control objects in its constructor:
 
 ```ts

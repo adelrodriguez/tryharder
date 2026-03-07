@@ -318,10 +318,7 @@ describe("executeFlow", () => {
     try {
       await executeFlow(
         {
-          timeout: {
-            ms: 5,
-            scope: "total",
-          },
+          timeout: 5,
         },
         {
           async a() {

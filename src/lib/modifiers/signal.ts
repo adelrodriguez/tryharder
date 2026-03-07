@@ -1,5 +1,5 @@
 import { CancellationError, TimeoutError } from "../errors"
-import { raceWithAbortSignal } from "../utils"
+import { resolveWithAbort } from "../utils"
 
 export class SignalController {
   readonly signal?: AbortSignal
@@ -12,11 +12,11 @@ export class SignalController {
 
   checkDidCancel(cause?: unknown): CancellationError | undefined {
     if (!this.signal?.aborted) {
-      return undefined
+      return
     }
 
     if (this.signal.reason instanceof TimeoutError) {
-      return undefined
+      return
     }
 
     return new CancellationError(undefined, { cause: cause ?? this.signal.reason })
@@ -33,7 +33,7 @@ export class SignalController {
       return promise
     }
 
-    return await raceWithAbortSignal(
+    return await resolveWithAbort(
       this.signal,
       promise,
       () => new CancellationError(undefined, { cause: cause ?? this.signal?.reason })

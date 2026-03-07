@@ -10,7 +10,6 @@ import * as try$ from "../index"
 type Expect<T extends true> = T
 type Equal<X, Y> = [X] extends [Y] ? ([Y] extends [X] ? true : false) : false
 const typecheckOnly = (): boolean => false
-const passthroughWrap: Parameters<typeof try$.wrap>[0] = (ctx, next) => next(ctx)
 
 describe("type inference", () => {
   describe("no config", () => {
@@ -69,9 +68,29 @@ describe("type inference", () => {
     })
   })
 
-  describe("top-level factories", () => {
-    it("retry() returns an async-only builder with retry error union", () => {
+  describe("builder entrypoints", () => {
+    it("retry(number) preserves runSync() with retry error union", () => {
       const retryBuilder = try$.retry(3)
+      const result = retryBuilder.run(() => 1)
+      const syncResult = retryBuilder.runSync((ctx) => ctx.retry.attempt)
+
+      type _assert = Expect<
+        Equal<typeof result, Promise<number | UnhandledException | RetryExhaustedError>>
+      >
+      type _assertSync = Expect<
+        Equal<typeof syncResult, number | UnhandledException | RetryExhaustedError>
+      >
+
+      if (typecheckOnly()) {
+        // @ts-expect-error -- wrap() is unavailable after retry()
+        void retryBuilder.wrap
+        // @ts-expect-error -- gen() is unavailable after retry()
+        void retryBuilder.gen
+      }
+    })
+
+    it("retry(policy) returns an async-only builder with retry error union", () => {
+      const retryBuilder = try$.retry({ backoff: "constant", delayMs: 1, limit: 3 })
       const result = retryBuilder.run(() => 1)
 
       type _assert = Expect<
@@ -79,8 +98,12 @@ describe("type inference", () => {
       >
 
       if (typecheckOnly()) {
-        // @ts-expect-error -- wrap() is unavailable after retry(), timeout(), or signal()
-        void retryBuilder.wrap(passthroughWrap)
+        // @ts-expect-error -- wrap() is unavailable after retry()
+        void retryBuilder.wrap
+        // @ts-expect-error -- runSync() is unavailable after object retry()
+        void retryBuilder.runSync
+        // @ts-expect-error -- gen() is unavailable after retry()
+        void retryBuilder.gen
       }
     })
 
@@ -94,7 +117,7 @@ describe("type inference", () => {
 
       if (typecheckOnly()) {
         // @ts-expect-error -- wrap() is unavailable after retry(), timeout(), or signal()
-        void timeoutBuilder.wrap(passthroughWrap)
+        void timeoutBuilder.wrap
       }
     })
 
@@ -108,50 +131,36 @@ describe("type inference", () => {
 
       if (typecheckOnly()) {
         // @ts-expect-error -- wrap() is unavailable after retry(), timeout(), or signal()
-        void signalBuilder.wrap(passthroughWrap)
+        void signalBuilder.wrap
       }
     })
 
-    it("wrap() preserves runSync() and gen() availability", () => {
+    it("wrap() preserves runSync() availability", () => {
       const wrappedBuilder = try$.wrap((ctx, next) => next(ctx))
       const syncResult = wrappedBuilder.runSync(() => 1)
-      const genResult = wrappedBuilder.gen(function* (use) {
-        return yield* use(1)
-      })
 
       type _assertSync = Expect<Equal<typeof syncResult, number | UnhandledException>>
-      type _assertGen = Expect<Equal<typeof genResult, number>>
+
+      if (typecheckOnly()) {
+        // @ts-expect-error -- gen() is unavailable after wrap()
+        void wrappedBuilder.gen
+      }
     })
 
-    it("async-only builders do not expose runSync() or gen()", () => {
+    it("timeout()/signal() builders do not expose runSync()", () => {
       if (typecheckOnly()) {
-        const retryBuilder = try$.retry(3)
         const timeoutBuilder = try$.timeout(100)
         const signalBuilder = try$.signal(new AbortController().signal)
 
         // @ts-expect-error -- runSync() is unavailable after retry(), timeout(), or signal()
-        void retryBuilder.runSync(() => 1)
+        void timeoutBuilder.runSync
         // @ts-expect-error -- gen() is unavailable after retry(), timeout(), or signal()
-        void retryBuilder.gen(function* () {
-          yield 1
-          return 1
-        })
+        void timeoutBuilder.gen
 
         // @ts-expect-error -- runSync() is unavailable after retry(), timeout(), or signal()
-        void timeoutBuilder.runSync(() => 1)
+        void signalBuilder.runSync
         // @ts-expect-error -- gen() is unavailable after retry(), timeout(), or signal()
-        void timeoutBuilder.gen(function* () {
-          yield 1
-          return 1
-        })
-
-        // @ts-expect-error -- runSync() is unavailable after retry(), timeout(), or signal()
-        void signalBuilder.runSync(() => 1)
-        // @ts-expect-error -- gen() is unavailable after retry(), timeout(), or signal()
-        void signalBuilder.gen(function* () {
-          yield 1
-          return 1
-        })
+        void signalBuilder.gen
       }
     })
   })
@@ -159,6 +168,7 @@ describe("type inference", () => {
   describe("with retry", () => {
     it("constant zero-delay retry run returns Promise union", () => {
       const result = try$.retry(3).run(() => 42)
+
       type _assert = Expect<
         Equal<typeof result, Promise<number | UnhandledException | RetryExhaustedError>>
       >
@@ -280,7 +290,7 @@ describe("type inference", () => {
     })
   })
 
-  describe("wrap capabilities", () => {
+  describe("builder chaining", () => {
     it("wrap builder exposes runSync", () => {
       const result = try$.wrap((ctx, next) => next(ctx)).runSync(() => 42)
       type _assert = Expect<Equal<typeof result, number | UnhandledException>>
@@ -333,19 +343,15 @@ describe("type inference", () => {
     it("retry chain does not expose wrap", () => {
       if (typecheckOnly()) {
         // @ts-expect-error -- wrap is top-level only and not available after retry()
-        void try$.retry(3).wrap(passthroughWrap)
+        void try$.retry(3).wrap
       }
     })
 
-    it("wrap builder exposes gen", () => {
-      const result = try$
-        .wrap((ctx, next) => next(ctx))
-        .gen(function* (use) {
-          const value = yield* use(1)
-          return value + 1
-        })
-
-      type _assert = Expect<Equal<typeof result, number>>
+    it("wrap builder does not expose gen", () => {
+      if (typecheckOnly()) {
+        // @ts-expect-error -- gen is unavailable after wrap()
+        void try$.wrap((ctx, next) => next(ctx)).gen
+      }
     })
   })
 

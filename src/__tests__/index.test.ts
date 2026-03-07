@@ -42,6 +42,20 @@ function runCacheFlow(cachedValue: string | null) {
   })
 }
 
+function createRandomGenerator(target: number) {
+  let attempts = 0
+
+  return {
+    get attempts() {
+      return attempts
+    },
+    next() {
+      attempts += 1
+      return attempts === 3 ? target : 0
+    },
+  }
+}
+
 describe("entrypoints", () => {
   it("does not expose errors from the root entrypoint", () => {
     expect("CancellationError" in try$).toBe(false)
@@ -59,6 +73,60 @@ describe("entrypoints", () => {
     expect(new RetryExhaustedError()).toBeInstanceOf(Error)
     expect(new TimeoutError()).toBeInstanceOf(Error)
     expect(new UnhandledException()).toBeInstanceOf(Error)
+  })
+
+  it("throws Panic when timeout() receives Infinity", () => {
+    try {
+      try$.timeout(Infinity)
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expectPanic(error, "TIMEOUT_INVALID_MS")
+    }
+  })
+
+  it("throws Panic when timeout() receives a negative number", () => {
+    try {
+      try$.timeout(-1)
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expectPanic(error, "TIMEOUT_INVALID_MS")
+    }
+  })
+
+  it("throws Panic when timeout() receives NaN", () => {
+    try {
+      try$.timeout(Number.NaN)
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expectPanic(error, "TIMEOUT_INVALID_MS")
+    }
+  })
+
+  it("throws Panic when retry() receives Infinity", () => {
+    try {
+      try$.retry(Infinity)
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expectPanic(error, "RETRY_INVALID_LIMIT")
+    }
+  })
+
+  it("throws Panic when retry() receives a negative number", () => {
+    try {
+      try$.retry(-1)
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expectPanic(error, "RETRY_INVALID_LIMIT")
+    }
+  })
+
+  it("throws Panic when retry() receives NaN", () => {
+    try {
+      try$.retry(Number.NaN)
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expectPanic(error, "RETRY_INVALID_LIMIT")
+    }
   })
 })
 
@@ -287,7 +355,7 @@ describe("retry execution flow", () => {
   })
 })
 
-describe("builder helpers", () => {
+describe("builder chaining", () => {
   it("supports wrap builder step", async () => {
     const result = await try$.wrap((ctx, next) => next(ctx)).run(() => 42)
 
@@ -300,17 +368,36 @@ describe("builder helpers", () => {
     expect(result).toBe(42)
   })
 
-  it("throws Panic when runSync is called after retry via unsafe cast", () => {
-    const unsafeBuilder = try$.retry(3) as unknown as {
-      runSync: typeof try$.runSync
-    }
+  it("supports runSync after numeric retry shorthand", () => {
+    const target = 7
+    const succeedsOnThirdTry = createRandomGenerator(target)
 
-    try {
-      unsafeBuilder.runSync(() => 42)
-      expect.unreachable("should have thrown")
-    } catch (error) {
-      expectPanic(error, "RUN_SYNC_UNAVAILABLE")
-    }
+    const result = try$.retry(3).runSync(() => {
+      const value = succeedsOnThirdTry.next()
+
+      if (value !== target) {
+        throw new Error("try again")
+      }
+
+      return value
+    })
+
+    expect(result).toBe(target)
+    expect(succeedsOnThirdTry.attempts).toBe(3)
+
+    const failsAfterTwoTries = createRandomGenerator(target)
+    const exhausted = try$.retry(2).runSync(() => {
+      const value = failsAfterTwoTries.next()
+
+      if (value !== target) {
+        throw new Error("try again")
+      }
+
+      return value
+    })
+
+    expect(exhausted).toBeInstanceOf(RetryExhaustedError)
+    expect(failsAfterTwoTries.attempts).toBe(2)
   })
 
   it("supports multiple wraps in top-level wrap chain", async () => {
@@ -333,19 +420,6 @@ describe("builder helpers", () => {
 
     expect(result).toBe(42)
     expect(events).toEqual(["outer-before", "inner-before", "inner-after", "outer-after"])
-  })
-
-  it("throws Panic when wrap is called after retry", () => {
-    const retried = try$.retry(3) as unknown as {
-      wrap: (fn: Parameters<typeof try$.wrap>[0]) => unknown
-    }
-
-    try {
-      retried.wrap((ctx, next) => next(ctx))
-      expect.unreachable("should have thrown")
-    } catch (error) {
-      expectPanic(error, "WRAP_UNAVAILABLE")
-    }
   })
 
   it("applies wrap around all", async () => {
@@ -426,55 +500,6 @@ describe("builder helpers", () => {
     } catch (error) {
       expectPanic(error, "FLOW_NO_EXIT")
       expect(wrapCalls).toBe(1)
-    }
-  })
-
-  it("applies wrap around gen", () => {
-    let wrapCalls = 0
-
-    const result = try$
-      .wrap((ctx, next) => {
-        wrapCalls += 1
-        return next(ctx)
-      })
-      .gen(function* (use) {
-        const value = yield* use(1)
-        return value + 1
-      })
-
-    expect(result).toBe(2)
-    expect(wrapCalls).toBe(1)
-  })
-
-  it("applies wrap around gen rejection path", async () => {
-    let wrapCalls = 0
-
-    const result = await try$
-      .wrap((ctx, next) => {
-        wrapCalls += 1
-        return next(ctx)
-      })
-      .gen(function* (use) {
-        const value = yield* use(Promise.reject<number>(new Error("boom")))
-        return value
-      })
-
-    expect(result).toBeInstanceOf(Error)
-    expect(wrapCalls).toBe(1)
-  })
-
-  it("throws Panic when gen is called after timeout via unsafe cast", () => {
-    const unsafeBuilder = try$.timeout(10) as unknown as {
-      gen: typeof try$.gen
-    }
-
-    try {
-      unsafeBuilder.gen(function* (use) {
-        return yield* use(1)
-      })
-      expect.unreachable("should have thrown")
-    } catch (error) {
-      expectPanic(error, "GEN_UNAVAILABLE")
     }
   })
 
@@ -1183,7 +1208,7 @@ describe("full builder chain", () => {
   })
 })
 
-describe("gen integration", () => {
+describe("gen composition", () => {
   class UserNotFound extends Error {}
   class PermissionDenied extends Error {}
   class ProjectNotFound extends Error {}

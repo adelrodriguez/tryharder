@@ -1,12 +1,12 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Required for task-map inference
+// oxlint-disable-next-line no-explicit-any -- Required for task-map inference
 export type TaskRecord = Record<string, any>
 
 export type TaskValidation<T extends TaskRecord> = {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Required for function compatibility with contextual `this`
+  // oxlint-disable-next-line no-explicit-any -- Required for function compatibility with contextual `this`
   [K in keyof T]: T[K] extends (...args: any[]) => any ? T[K] : never
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Required for function compatibility with contextual `this`
+// oxlint-disable-next-line no-explicit-any -- Required for function compatibility with contextual `this`
 export type TaskResult<T> = T extends (...args: any[]) => infer R ? Awaited<R> : never
 
 export type ResultProxy<T extends TaskRecord> = {

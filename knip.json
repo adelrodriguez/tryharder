@@ -17,6 +17,6 @@
     "duplicates": "warn"
   },
   "ignoreExportsUsedInFile": true,
-  "ignore": [".context/**"],
+  "ignore": [".plans/**"],
   "project": ["src/**/*.ts"]
 }

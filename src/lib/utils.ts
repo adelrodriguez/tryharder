@@ -36,7 +36,7 @@ export function checkIsPromiseLike(value: unknown): value is PromiseLike<unknown
   )
 }
 
-export async function raceWithAbortSignal<V, E>(
+export async function resolveWithAbort<V, E>(
   signal: AbortSignal,
   promise: PromiseLike<V>,
   createAbortResult: () => E

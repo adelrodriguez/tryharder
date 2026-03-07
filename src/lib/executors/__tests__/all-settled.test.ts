@@ -144,10 +144,7 @@ describe("executeAllSettled", () => {
       try {
         await executeAllSettled(
           {
-            timeout: {
-              ms: 10,
-              scope: "total",
-            },
+            timeout: 10,
           },
           {
             async a() {

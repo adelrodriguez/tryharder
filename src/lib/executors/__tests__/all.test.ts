@@ -380,10 +380,7 @@ describe("executeAll", () => {
       try {
         await executeAll(
           {
-            timeout: {
-              ms: 10,
-              scope: "total",
-            },
+            timeout: 10,
           },
           {
             async a() {
@@ -402,10 +399,7 @@ describe("executeAll", () => {
       try {
         await executeAll(
           {
-            timeout: {
-              ms: 5,
-              scope: "total",
-            },
+            timeout: 5,
           },
           {
             a() {
