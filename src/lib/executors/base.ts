@@ -1,5 +1,5 @@
 import type { Panic, RetryExhaustedError, UnhandledException } from "../errors"
-import type { BuilderConfig } from "../types/builder"
+import type { BuilderConfig, WrapCtx } from "../types/builder"
 import type { TryCtx } from "../types/core"
 import { CancellationError, TimeoutError } from "../errors"
 import {
@@ -39,6 +39,7 @@ export class RetryDirective {
 export abstract class BaseExecution<TResult = unknown> {
   protected readonly config: BuilderConfig
   protected readonly ctx: TryCtx
+  readonly #wrapCtx: WrapCtx
   protected readonly signal: SignalController
   protected readonly timeout: TimeoutController
 
@@ -51,25 +52,26 @@ export abstract class BaseExecution<TResult = unknown> {
       )
     )
     this.ctx = BaseExecution.createContext(config, this.signal.signal, options.retryLimit)
+    this.#wrapCtx = BaseExecution.createWrapContext(this.ctx)
   }
 
   execute(): TResult {
     // Wraps cover the full retry scope; `ctx.retry.attempt` may reflect the final
-    // attempt when observed after `next(ctx)` resolves.
+    // attempt when observed after `next()` resolves.
     const wraps = this.config.wraps
 
     if (!wraps || wraps.length === 0) {
       return this.executeCore()
     }
 
-    let next = (_ctx: TryCtx): unknown => this.executeCore()
+    let next = (): unknown => this.executeCore()
 
     for (const wrap of wraps.toReversed()) {
       const previous = next
-      next = (wrapCtx) => wrap(wrapCtx, previous)
+      next = () => wrap(this.#wrapCtx, previous)
     }
 
-    return next(this.ctx) as TResult
+    return next() as TResult
   }
 
   protected abstract executeCore(): TResult
@@ -92,6 +94,59 @@ export abstract class BaseExecution<TResult = unknown> {
       },
       signal,
     }
+  }
+
+  protected static createWrapContext(ctx: TryCtx): WrapCtx {
+    const retry = new Proxy(ctx.retry, {
+      defineProperty: () => false,
+      deleteProperty: () => false,
+      getOwnPropertyDescriptor(target, property) {
+        const descriptor = Reflect.getOwnPropertyDescriptor(target, property)
+
+        if (!descriptor) {
+          return descriptor
+        }
+
+        return {
+          ...descriptor,
+          writable: false,
+        }
+      },
+      set: () => false,
+    }) as WrapCtx["retry"]
+
+    return new Proxy(ctx, {
+      defineProperty: () => false,
+      deleteProperty: () => false,
+      get(target, property, receiver) {
+        if (property === "retry") {
+          return retry
+        }
+
+        return Reflect.get(target, property, receiver) as unknown
+      },
+      getOwnPropertyDescriptor(target, property) {
+        const descriptor = Reflect.getOwnPropertyDescriptor(target, property)
+
+        if (!descriptor) {
+          return descriptor
+        }
+
+        if (property === "retry") {
+          return {
+            ...descriptor,
+            value: retry,
+            writable: false,
+          }
+        }
+
+        return {
+          ...descriptor,
+          writable: false,
+        }
+      },
+      set: () => false,
+    }) as WrapCtx
   }
 
   protected checkDidControlFail(cause?: unknown): CancellationError | TimeoutError | undefined {

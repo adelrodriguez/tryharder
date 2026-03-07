@@ -19,6 +19,10 @@ class TestExecution<TResult> extends BaseExecution<TResult> {
     this.ctx.retry.attempt = attempt
   }
 
+  currentAttempt(): number {
+    return this.ctx.retry.attempt
+  }
+
   buildDecision(error: unknown) {
     return this.buildRetryDecision(error)
   }
@@ -45,13 +49,13 @@ describe("BaseExecution", () => {
         wraps: [
           (ctx, next) => {
             events.push(`outer:before:${ctx.retry.attempt}`)
-            const value = next(ctx)
+            const value = next()
             events.push(`outer:after:${ctx.retry.attempt}`)
             return value
           },
           (ctx, next) => {
             events.push(`inner:before:${ctx.retry.attempt}`)
-            const value = next(ctx)
+            const value = next()
             events.push(`inner:after:${ctx.retry.attempt}`)
             return value
           },
@@ -84,7 +88,7 @@ describe("BaseExecution", () => {
         wraps: [
           (ctx, next) => {
             wrapCalls += 1
-            return next(ctx)
+            return next()
           },
         ],
       },
@@ -100,6 +104,35 @@ describe("BaseExecution", () => {
     expect(result).toBe("ok")
     expect(coreCalls).toBe(1)
     expect(wrapCalls).toBe(1)
+  })
+
+  it("prevents wrap middleware from mutating ctx at runtime", () => {
+    let mutationError: unknown
+
+    using execution = new TestExecution(
+      {
+        wraps: [
+          (ctx, next) => {
+            const wrapCtx = ctx
+
+            try {
+              ;(wrapCtx.retry as { attempt: number }).attempt = 4
+            } catch (error) {
+              mutationError = error
+            }
+
+            return next()
+          },
+        ],
+      },
+      () => "ok"
+    )
+
+    const result = execution.execute()
+
+    expect(result).toBe("ok")
+    expect(execution.currentAttempt()).toBe(1)
+    expect(mutationError).toBeInstanceOf(TypeError)
   })
 
   it("prefers cancellation over timeout for control checks", () => {

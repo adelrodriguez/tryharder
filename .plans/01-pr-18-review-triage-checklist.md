@@ -34,12 +34,16 @@ Defer unless the earlier steps force nearby edits:
 
 ## Execution Sequence
 
-### Step 1 - Restore top-level `runSync()` panic semantics
+### Step 1 - Restore builder-backed `runSync()` panic semantics
+
+Status:
+
+- Completed on 2026-03-07.
 
 Objective:
 
-- Make `try$.runSync(...)` match standalone `runSync(...)` again for panic
-  cases.
+- Make builder-backed `try$.runSync(...)` rethrow thrown `Panic` values instead
+  of returning them.
 
 Current code paths:
 
@@ -48,68 +52,86 @@ Current code paths:
 
 Implementation approach:
 
-- Treat this as a root-entrypoint issue, not a builder-chain issue.
-- Evaluate replacing the root `runSync` binding in `src/index.ts` with the
-  standalone `runSync` export from `src/lib/executors/run-sync.ts`, or add a
-  small root-only adapter that preserves the same semantics.
-- Preserve current builder behavior for `retry(...).runSync(...)`; only the
-  top-level namespace should change.
+- Keep the root `runSync` export sourced from `RunBuilder`; the root namespace
+  should continue exposing builder-backed functions instead of bypassing the
+  builder.
+- Treat the bug as an executor issue, not an index-surface issue: the builder
+  path was swallowing thrown `Panic` values by treating them as returned
+  control errors inside `executeRunSync()`.
+- Fix `src/lib/executors/run-sync.ts` so user-thrown `Panic` values are
+  rethrown from the sync failure path instead of being returned.
+- Do not add a root-only adapter or alternate standalone binding for this
+  behavior.
+- Backward compatibility does not constrain this change because the project is
+  still in v0; preserving incorrect panic behavior is not a goal.
 
 Regression coverage:
 
-- Extend `src/__tests__/index.test.ts` with panic cases that currently differ
-  between standalone and bound root `runSync`.
-- Include a directly thrown `Panic` and a forwarded panic such as
-  `RUN_SYNC_TRY_PROMISE`.
+- Extend `src/__tests__/index.test.ts` with root-level panic cases that prove
+  the builder-backed export rethrows both direct and forwarded panics.
+- Add direct executor coverage in
+  `src/lib/executors/__tests__/run-sync.test.ts` so `executeRunSync()` itself
+  is pinned to the corrected behavior.
 
 Done when:
 
-- Top-level `try$.runSync(...)` throws `Panic` instead of returning it.
-- Builder-chained `runSync()` behavior remains unchanged unless tests show the
-  same bug there.
+- Top-level `try$.runSync(...)` rethrows `Panic` instead of returning it.
+- The root export remains builder-backed.
+- Direct `executeRunSync()` behavior matches the builder-backed root export for
+  thrown `Panic` values.
 
-### Step 2 - Forward wrap-modified context through `BaseExecution`
+### Step 2 - Make wraps observational and context-read-only
+
+Status:
+
+- Completed on 2026-03-07 after re-scoping wrap semantics.
 
 Objective:
 
-- Make wrap middleware able to replace or clone context and have the terminal
-  executor observe that final context object.
+- Make wrap hooks able to observe execution context without mutating or
+  replacing it.
 
 Current code paths:
 
 - `src/lib/executors/base.ts`
 - `src/lib/executors/run.ts`
 - `src/lib/executors/run-sync.ts`
+- `src/lib/types/builder.ts`
 - orchestration executors that inherit from `BaseExecution`
+- wrap-related tests in `src/__tests__` and `src/lib/executors/__tests__`
 
 Implementation approach:
 
-- Change the `BaseExecution` terminal contract so `executeCore(...)` receives
-  the final wrapped `TryCtx` instead of terminals always reading `this.ctx`.
-- Update the wrap chain in `BaseExecution.execute()` so it passes the wrapped
-  context all the way into the terminal executor.
-- Update run and runSync attempt loops to read and write retry state through the
-  active context object they receive, not only through the original stored
-  context.
-- Keep the base context creation in `BaseExecution`, but treat it as the seed
-  context that wraps may replace.
+- Change the wrap contract from middleware-style `next(ctx)` to observational
+  `next()` so wraps cannot pass a replacement context into execution.
+- Make the wrap context type read-only, including nested retry metadata, so
+  TypeScript rejects direct mutation in wrap implementations.
+- Add a runtime guard around the wrap context so unsafe casts cannot mutate the
+  live execution context.
+- Keep terminal executors reading the internally owned execution context
+  (`this.ctx`) rather than any wrap-provided value.
 
 Regression coverage:
 
-- Add a wrap test that clones the context and proves the terminal sees the new
-  object.
-- Add a wrap test that mutates context before the terminal runs and proves the
-  mutation is observed.
+- Add type-level coverage proving wraps cannot assign to `ctx` or pass `ctx`
+  into `next(...)`.
+- Add runtime coverage proving wrap attempts to mutate context fail and do not
+  affect execution state.
+- Update existing wrap tests to the `next()` API shape.
 
 Dependency note:
 
-- Land this before Step 3 so retry validation and retry metadata use the same
-  terminal context shape.
+- Land this before Step 3 so retry validation and retry metadata continue to use
+  a single internal execution context shape.
 
 Done when:
 
-- A wrap-produced replacement context is visible inside the terminal executor.
-- Retry metadata still advances correctly across attempts.
+- Wraps can observe retry metadata and signals, but cannot mutate or replace
+  context.
+- `BaseExecution` and the run executors continue using their internally owned
+  context for execution and retry bookkeeping.
+- The wrap API surface and tests consistently use `next()` instead of
+  `next(ctx)`.
 
 ### Step 3 - Validate `retry.shouldRetry` runtime results strictly
 

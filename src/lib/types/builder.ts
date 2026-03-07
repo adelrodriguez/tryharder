@@ -1,13 +1,15 @@
 import type { TryCtx } from "./core"
 import type { RetryPolicy } from "./retry"
-import type { RunTryFn } from "./run"
 
 /**
- * Known limitation: wrappers currently receive the full TryCtx shape.
- * This keeps middleware signatures stable while run() input
- * contexts are feature-narrowed.
+ * Wraps are observational hooks: they can inspect execution context and
+ * surround execution, but they must not mutate context or replace it.
  */
-export type WrapFn = (ctx: TryCtx, next: RunTryFn<unknown, TryCtx>) => unknown
+export type WrapCtx = Readonly<Omit<TryCtx, "retry">> & {
+  readonly retry: Readonly<TryCtx["retry"]>
+}
+
+export type WrapFn = (ctx: WrapCtx, next: () => unknown) => unknown
 
 export interface BuilderConfig {
   /**

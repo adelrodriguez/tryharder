@@ -392,13 +392,13 @@ describe("retry execution flow", () => {
 
 describe("builder chaining", () => {
   it("supports wrap builder step", async () => {
-    const result = await try$.wrap((ctx, next) => next(ctx)).run(() => 42)
+    const result = await try$.wrap((ctx, next) => next()).run(() => 42)
 
     expect(result).toBe(42)
   })
 
   it("supports wrap builder runSync", () => {
-    const result = try$.wrap((ctx, next) => next(ctx)).runSync(() => 42)
+    const result = try$.wrap((ctx, next) => next()).runSync(() => 42)
 
     expect(result).toBe(42)
   })
@@ -450,13 +450,13 @@ describe("builder chaining", () => {
     const result = await try$
       .wrap((ctx, next) => {
         events.push("outer-before")
-        const value = next(ctx)
+        const value = next()
         events.push("outer-after")
         return value
       })
       .wrap((ctx, next) => {
         events.push("inner-before")
-        const value = next(ctx)
+        const value = next()
         events.push("inner-after")
         return value
       })
@@ -472,7 +472,7 @@ describe("builder chaining", () => {
     const result = await try$
       .wrap((ctx, next) => {
         wrapCalls += 1
-        return next(ctx)
+        return next()
       })
       .all({
         a() {
@@ -494,7 +494,7 @@ describe("builder chaining", () => {
       await try$
         .wrap((ctx, next) => {
           wrapCalls += 1
-          return next(ctx)
+          return next()
         })
         .all({
           a() {
@@ -514,7 +514,7 @@ describe("builder chaining", () => {
     const result = await try$
       .wrap((ctx, next) => {
         wrapCalls += 1
-        return next(ctx)
+        return next()
       })
       .flow({
         a() {
@@ -533,7 +533,7 @@ describe("builder chaining", () => {
       await try$
         .wrap((ctx, next) => {
           wrapCalls += 1
-          return next(ctx)
+          return next()
         })
         .flow({
           a() {
@@ -566,7 +566,7 @@ describe("builder chaining", () => {
     await try$
       .wrap((ctx, next) => {
         wrapCalls += 1
-        return next(ctx)
+        return next()
       })
       .run(() => 1)
 
@@ -695,7 +695,7 @@ describe("flow", () => {
       .wrap((ctx, next) => {
         wrapCalls += 1
         expect(ctx.retry.attempt).toBe(1)
-        return next(ctx)
+        return next()
       })
       .flow({
         a() {
@@ -1098,7 +1098,7 @@ describe("all", () => {
       .wrap((ctx, next) => {
         wrapCalls += 1
         expect(ctx.retry.attempt).toBe(1)
-        return next(ctx)
+        return next()
       })
       .all({
         a() {
@@ -1268,7 +1268,7 @@ describe("full builder chain", () => {
     const result = await try$
       .wrap((ctx, next) => {
         wrapCalls += 1
-        return next(ctx)
+        return next()
       })
       .run(async () => {
         await sleep(5)

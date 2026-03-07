@@ -166,13 +166,13 @@ describe("executeRunSync", () => {
           wraps: [
             (ctx, next) => {
               events.push(`outer:before:${ctx.retry.attempt}`)
-              const value = next(ctx)
+              const value = next()
               events.push(`outer:after:${ctx.retry.attempt}`)
               return value
             },
             (ctx, next) => {
               events.push(`inner:before:${ctx.retry.attempt}`)
-              const value = next(ctx)
+              const value = next()
               events.push(`inner:after:${ctx.retry.attempt}`)
               return value
             },

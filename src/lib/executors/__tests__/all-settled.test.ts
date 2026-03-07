@@ -114,7 +114,7 @@ describe("executeAllSettled", () => {
             (ctx, next) => {
               wrapCalls += 1
               expect(ctx.retry.attempt).toBe(1)
-              return next(ctx)
+              return next()
             },
           ],
         },
@@ -143,7 +143,7 @@ describe("executeAllSettled", () => {
             (ctx, next) => {
               attempts.push(ctx.retry.attempt)
               limits.push(ctx.retry.limit)
-              return next(ctx)
+              return next()
             },
           ],
         },

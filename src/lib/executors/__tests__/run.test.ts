@@ -278,7 +278,7 @@ describe("executeRun", () => {
           wraps: [
             (ctx, next) => {
               wrapCalls += 1
-              return next(ctx)
+              return next()
             },
           ],
         },
@@ -309,7 +309,7 @@ describe("executeRun", () => {
           wraps: [
             async (ctx, next) => {
               events.push(`before:${ctx.retry.attempt}`)
-              const value = await next(ctx)
+              const value = await next()
               events.push(`after:${ctx.retry.attempt}`)
               return value
             },

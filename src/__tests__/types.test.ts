@@ -59,12 +59,26 @@ describe("type inference", () => {
         })
 
         void try$
-          .wrap((ctx, next) => next(ctx))
+          .wrap((ctx, next) => next())
           .run((ctx) => {
             // @ts-expect-error -- retry metadata is only available after retry()
             void ctx.retry.attempt
             return 1
           })
+      }
+    })
+
+    it("wrap ctx is read-only and next does not accept ctx", () => {
+      if (typecheckOnly()) {
+        void try$.wrap((ctx, next) => {
+          const wrapCtx = ctx
+          // @ts-expect-error -- wrap ctx is read-only
+          wrapCtx.signal = undefined
+          // @ts-expect-error -- wrap retry metadata is read-only
+          wrapCtx.retry.attempt = 2
+          // @ts-expect-error -- wraps cannot pass ctx into next()
+          return next(wrapCtx)
+        })
       }
     })
   })
@@ -184,7 +198,7 @@ describe("type inference", () => {
     })
 
     it("wrap() preserves runSync() availability", () => {
-      const wrappedBuilder = try$.wrap((ctx, next) => next(ctx))
+      const wrappedBuilder = try$.wrap((ctx, next) => next())
       const syncResult = wrappedBuilder.runSync(() => 1)
 
       type _assertSync = Expect<Equal<typeof syncResult, number | UnhandledException>>
@@ -341,12 +355,12 @@ describe("type inference", () => {
 
   describe("builder chaining", () => {
     it("wrap builder exposes runSync", () => {
-      const result = try$.wrap((ctx, next) => next(ctx)).runSync(() => 42)
+      const result = try$.wrap((ctx, next) => next()).runSync(() => 42)
       type _assert = Expect<Equal<typeof result, number | UnhandledException>>
     })
 
     it("wrap builder still exposes run", () => {
-      const result = try$.wrap((ctx, next) => next(ctx)).run(() => 42)
+      const result = try$.wrap((ctx, next) => next()).run(() => 42)
       type _assert = Expect<Equal<typeof result, Promise<number | UnhandledException>>>
     })
 
@@ -354,7 +368,7 @@ describe("type inference", () => {
       if (typecheckOnly()) return
 
       const result = try$
-        .wrap((ctx, next) => next(ctx))
+        .wrap((ctx, next) => next())
         .retry(3)
         .run((ctx) => ctx.retry.attempt)
 
@@ -367,7 +381,7 @@ describe("type inference", () => {
       if (typecheckOnly()) return
 
       const result = try$
-        .wrap((ctx, next) => next(ctx))
+        .wrap((ctx, next) => next())
         .timeout(100)
         .run(() => 1)
 
@@ -380,7 +394,7 @@ describe("type inference", () => {
       if (typecheckOnly()) return
 
       const result = try$
-        .wrap((ctx, next) => next(ctx))
+        .wrap((ctx, next) => next())
         .signal(new AbortController().signal)
         .run(() => 1)
 
@@ -399,7 +413,7 @@ describe("type inference", () => {
     it("wrap builder does not expose gen", () => {
       if (typecheckOnly()) {
         // @ts-expect-error -- gen is unavailable after wrap()
-        void try$.wrap((ctx, next) => next(ctx)).gen
+        void try$.wrap((ctx, next) => next()).gen
       }
     })
   })
