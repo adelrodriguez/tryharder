@@ -86,7 +86,7 @@ describe("BaseExecution", () => {
     using execution = new TestExecution(
       {
         wraps: [
-          (ctx, next) => {
+          (_, next) => {
             wrapCalls += 1
             return next()
           },

@@ -1,5 +1,4 @@
-import { UnhandledException } from "./errors"
-import { checkIsControlError, checkIsPromiseLike } from "./utils"
+import { checkIsPromiseLike } from "./utils"
 
 type GenUnwrap<T> = Exclude<Awaited<T>, Error>
 export type GenUse = <T>(value: T) => Generator<T, GenUnwrap<T>, GenUnwrap<T>>
@@ -19,106 +18,53 @@ function* use<T>(value: T): Generator<T, GenUnwrap<T>, GenUnwrap<T>> {
 
 async function executeAsyncGenerator<TYield, TReturn>(
   iterator: Generator<TYield, TReturn, unknown>,
-  initialValue: PromiseLike<unknown>
+  initialStep: IteratorResult<TYield, TReturn>
 ): Promise<Awaited<TReturn> | GenErrors<TYield>> {
-  let currentValue: unknown
-
-  try {
-    currentValue = await initialValue
-  } catch (error) {
-    if (checkIsControlError(error)) {
-      return error as GenErrors<TYield>
-    }
-
-    return new UnhandledException(undefined, { cause: error }) as GenErrors<TYield>
-  }
-
-  if (currentValue instanceof Error) {
-    return currentValue as GenErrors<TYield>
-  }
+  let currentStep = initialStep
 
   // oxlint-disable-next-line typescript/no-unnecessary-condition
   while (true) {
-    let step: IteratorResult<TYield, TReturn>
-
-    try {
-      step = iterator.next(currentValue)
-    } catch (error) {
-      if (checkIsControlError(error)) {
-        return error as GenErrors<TYield>
+    if (currentStep.done) {
+      if (checkIsPromiseLike(currentStep.value)) {
+        // oxlint-disable-next-line no-await-in-loop
+        return await currentStep.value
       }
 
-      return new UnhandledException(undefined, { cause: error }) as GenErrors<TYield>
+      return currentStep.value as Awaited<TReturn>
     }
 
-    if (step.done) {
-      if (checkIsPromiseLike(step.value)) {
-        try {
-          // oxlint-disable-next-line no-await-in-loop
-          return await step.value
-        } catch (error) {
-          if (checkIsControlError(error)) {
-            return error as GenErrors<TYield>
-          }
+    let currentValue: unknown
 
-          return new UnhandledException(undefined, { cause: error }) as GenErrors<TYield>
-        }
-      }
-
-      return step.value as Awaited<TReturn>
-    }
-
-    if (checkIsPromiseLike(step.value)) {
+    if (checkIsPromiseLike(currentStep.value)) {
       try {
         // oxlint-disable-next-line no-await-in-loop
-        currentValue = await step.value
+        currentValue = await currentStep.value
       } catch (error) {
-        if (checkIsControlError(error)) {
-          return error as GenErrors<TYield>
-        }
-
-        return new UnhandledException(undefined, { cause: error }) as GenErrors<TYield>
+        currentStep = iterator.throw(error)
+        continue
       }
     } else {
-      currentValue = step.value
+      currentValue = currentStep.value
     }
 
     if (currentValue instanceof Error) {
       return currentValue as GenErrors<TYield>
     }
+
+    currentStep = iterator.next(currentValue)
   }
 }
 
 export function driveGen<TYield, TReturn>(
   factory: (useFn: GenUse) => Generator<TYield, TReturn, unknown>
 ): GenResult<TYield, TReturn> {
-  let iterator: Generator<TYield, TReturn, unknown>
-
-  try {
-    iterator = factory(use)
-  } catch (error) {
-    if (checkIsControlError(error)) {
-      return error as GenResult<TYield, TReturn>
-    }
-
-    return new UnhandledException(undefined, { cause: error }) as GenResult<TYield, TReturn>
-  }
+  const iterator = factory(use)
 
   let currentValue: unknown = undefined
 
   // oxlint-disable-next-line typescript/no-unnecessary-condition
   while (true) {
-    let step: IteratorResult<TYield, TReturn>
-
-    try {
-      step = iterator.next(currentValue)
-    } catch (error) {
-      if (checkIsControlError(error)) {
-        return error as GenResult<TYield, TReturn>
-      }
-
-      return new UnhandledException(undefined, { cause: error }) as GenResult<TYield, TReturn>
-    }
+    const step = iterator.next(currentValue)
 
     if (step.done) {
       if (checkIsPromiseLike(step.value)) {
@@ -129,10 +75,7 @@ export function driveGen<TYield, TReturn>(
     }
 
     if (checkIsPromiseLike(step.value)) {
-      return executeAsyncGenerator(iterator, step.value as PromiseLike<unknown>) as GenResult<
-        TYield,
-        TReturn
-      >
+      return executeAsyncGenerator(iterator, step) as GenResult<TYield, TReturn>
     }
 
     if (step.value instanceof Error) {

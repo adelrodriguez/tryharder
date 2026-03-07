@@ -487,7 +487,10 @@ describe("type inference", () => {
       })
 
       type _assert = Expect<
-        Equal<typeof result, Promise<string | UserNotFound | PermissionDenied | ProjectNotFound>>
+        Equal<
+          typeof result,
+          Promise<string | UserNotFound | PermissionDenied | ProjectNotFound | UnhandledException>
+        >
       >
     })
   })

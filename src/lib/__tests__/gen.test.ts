@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { CancellationError, Panic, TimeoutError, UnhandledException } from "../errors"
+import { CancellationError, Panic, TimeoutError } from "../errors"
 import { driveGen } from "../gen"
 
 class UserNotFound extends Error {}
@@ -62,68 +62,119 @@ describe("driveGen", () => {
     expect(didRunAfterError).toBe(false)
   })
 
-  it("propagates rejected yielded promise", async () => {
-    const result = await driveGen(function* (use) {
-      const value = yield* use(Promise.reject<unknown>(new Error("boom")))
-      return value
-    })
-
-    expect(result).toBeInstanceOf(UnhandledException)
-    expect((result as UnhandledException).cause).toBeInstanceOf(Error)
-    expect(((result as UnhandledException).cause as Error).message).toBe("boom")
+  it("rejects with the original reason when a yielded promise rejects", async () => {
+    try {
+      await driveGen(function* (use) {
+        const value = yield* use(Promise.reject<unknown>(new Error("boom")))
+        return value
+      })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error)
+      expect((error as Error).message).toBe("boom")
+    }
   })
 
   it("preserves TimeoutError from a rejected yielded promise", async () => {
     const timeout = new TimeoutError("timed out")
 
-    const result = await driveGen(function* (use) {
-      const value = yield* use(Promise.reject<unknown>(timeout))
-      return value
-    })
-
-    expect(result).toBe(timeout)
+    try {
+      await driveGen(function* (use) {
+        const value = yield* use(Promise.reject<unknown>(timeout))
+        return value
+      })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect(error).toBe(timeout)
+    }
   })
 
-  it("returns error when factory throws", () => {
-    const result = driveGen(() => {
-      throw new Error("factory failed")
+  it("runs finally blocks when the first yielded promise rejects", async () => {
+    let finalized = false
+
+    try {
+      await driveGen(function* (use) {
+        try {
+          yield* use(Promise.reject<unknown>(new Error("boom")))
+        } finally {
+          finalized = true
+        }
+      })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error)
+      expect((error as Error).message).toBe("boom")
+    }
+
+    expect(finalized).toBe(true)
+  })
+
+  it("lets the generator catch a rejected yielded promise and recover", async () => {
+    const result = await driveGen(function* (use) {
+      try {
+        yield* use(Promise.reject<unknown>(new Error("boom")))
+      } catch (error) {
+        expect(error).toBeInstanceOf(Error)
+        expect((error as Error).message).toBe("boom")
+        return 42
+      }
+
+      return 0
     })
 
-    expect(result).toBeInstanceOf(UnhandledException)
-    expect((result as UnhandledException).cause).toBeInstanceOf(Error)
-    expect(((result as UnhandledException).cause as Error).message).toBe("factory failed")
+    expect(result).toBe(42)
+  })
+
+  it("throws the original error when factory throws", () => {
+    try {
+      driveGen(() => {
+        throw new Error("factory failed")
+      })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error)
+      expect((error as Error).message).toBe("factory failed")
+    }
   })
 
   it("preserves Panic when factory throws a control error", () => {
     const panic = new Panic("FLOW_NO_EXIT")
 
-    const result = driveGen(() => {
-      throw panic
-    })
-
-    expect(result).toBe(panic)
+    try {
+      driveGen(() => {
+        throw panic
+      })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect(error).toBe(panic)
+    }
   })
 
-  it("returns error when generator body throws after yield", () => {
-    const result = driveGen(function* (use) {
-      void (yield* use(1))
-      throw new Error("generator failed")
-    })
-
-    expect(result).toBeInstanceOf(UnhandledException)
-    expect((result as UnhandledException).cause).toBeInstanceOf(Error)
-    expect(((result as UnhandledException).cause as Error).message).toBe("generator failed")
+  it("throws the original error when generator body throws after yield", () => {
+    try {
+      driveGen(function* (use) {
+        void (yield* use(1))
+        throw new Error("generator failed")
+      })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error)
+      expect((error as Error).message).toBe("generator failed")
+    }
   })
 
   it("preserves Panic when generator body throws after a sync yield", () => {
     const panic = new Panic("FLOW_NO_EXIT")
 
-    const result = driveGen<number, number | Panic>(function* (use) {
-      void (yield* use(1))
-      throw panic
-    })
-
-    expect(result).toBe(panic)
+    try {
+      driveGen<number, number | Panic>(function* (use) {
+        void (yield* use(1))
+        throw panic
+      })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect(error).toBe(panic)
+    }
   })
 
   it("returns explicit error values without throwing", () => {
@@ -149,68 +200,105 @@ describe("driveGen", () => {
     expect(resolved.message).toBe("async return")
   })
 
-  it("wraps non-Error thrown value in UnhandledException", () => {
-    const result = driveGen(() => {
-      throw "string error"
-    })
-
-    expect(result).toBeInstanceOf(UnhandledException)
-    expect((result as UnhandledException).cause).toBe("string error")
+  it("throws raw non-Error values without wrapping", () => {
+    try {
+      driveGen(() => {
+        throw "string error"
+      })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect(error).toBe("string error")
+    }
   })
 
-  it("wraps thrown error in UnhandledException in async path when generator throws after yield", async () => {
-    const result = await driveGen(function* (use) {
-      void (yield* use(Promise.resolve(1)))
-      throw new Error("async throw")
-    })
-
-    expect(result).toBeInstanceOf(UnhandledException)
-    expect((result as UnhandledException).cause).toBeInstanceOf(Error)
+  it("rejects with the original error when the generator throws after entering async path", async () => {
+    try {
+      await driveGen(function* (use) {
+        void (yield* use(Promise.resolve(1)))
+        throw new Error("async throw")
+      })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error)
+      expect((error as Error).message).toBe("async throw")
+    }
   })
 
   it("preserves CancellationError when generator throws after entering async path", async () => {
     const cancellation = new CancellationError("cancelled")
 
-    const result = await driveGen<Promise<number>, Promise<number | CancellationError>>(
-      function* (use) {
+    try {
+      await driveGen<Promise<number>, Promise<number | CancellationError>>(function* (use) {
         void (yield* use(Promise.resolve(1)))
         throw cancellation
-      }
-    )
-
-    expect(result).toBe(cancellation)
+      })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect(error).toBe(cancellation)
+    }
   })
 
-  it("wraps rejection of final returned promise in async path", async () => {
-    const result = await driveGen(function* (use) {
-      void (yield* use(Promise.resolve(1)))
-      return Promise.reject(new Error("final reject"))
-    })
-
-    expect(result).toBeInstanceOf(UnhandledException)
-    expect((result as UnhandledException).cause).toBeInstanceOf(Error)
+  it("rejects with the original error when the final returned promise rejects", async () => {
+    try {
+      await driveGen(function* (use) {
+        void (yield* use(Promise.resolve(1)))
+        return Promise.reject(new Error("final reject"))
+      })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error)
+      expect((error as Error).message).toBe("final reject")
+    }
   })
 
   it("preserves TimeoutError from a rejected final returned promise in async path", async () => {
     const timeout = new TimeoutError("timed out")
 
-    const result = await driveGen<Promise<number>, Promise<number | TimeoutError>>(function* (use) {
-      void (yield* use(Promise.resolve(1)))
-      return Promise.reject(timeout)
-    })
-
-    expect(result).toBe(timeout)
+    try {
+      await driveGen<Promise<number>, Promise<number | TimeoutError>>(function* (use) {
+        void (yield* use(Promise.resolve(1)))
+        return Promise.reject(timeout)
+      })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect(error).toBe(timeout)
+    }
   })
 
-  it("wraps rejection of second async yield", async () => {
-    const result = await driveGen(function* (use) {
-      void (yield* use(Promise.resolve(1)))
-      const value = yield* use(Promise.reject<unknown>(new Error("second reject")))
-      return value
-    })
+  it("rejects with the original reason when a later async yield rejects", async () => {
+    try {
+      await driveGen(function* (use) {
+        void (yield* use(Promise.resolve(1)))
+        const value = yield* use(Promise.reject<unknown>(new Error("second reject")))
+        return value
+      })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error)
+      expect((error as Error).message).toBe("second reject")
+    }
+  })
 
-    expect(result).toBeInstanceOf(UnhandledException)
-    expect((result as UnhandledException).cause).toBeInstanceOf(Error)
+  it("runs finally blocks when a later async yield rejects", async () => {
+    let finalized = false
+
+    try {
+      await driveGen(function* (use) {
+        void (yield* use(Promise.resolve(1)))
+
+        try {
+          yield* use(Promise.reject<unknown>(new Error("second reject")))
+        } finally {
+          finalized = true
+        }
+      })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error)
+      expect((error as Error).message).toBe("second reject")
+    }
+
+    expect(finalized).toBe(true)
   })
 
   it("handles sync yield after entering async path", async () => {
