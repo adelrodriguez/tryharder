@@ -2,7 +2,7 @@ import { defineConfig } from "bunup"
 
 export default defineConfig({
   dts: true,
-  entry: ["src/index.ts", "src/errors.ts"],
+  entry: ["src/index.ts", "src/errors.ts", "src/types.ts"],
   format: "esm",
   outDir: "dist",
   sourcemap: true,

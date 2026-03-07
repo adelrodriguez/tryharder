@@ -16,11 +16,3 @@ export { dispose } from "./lib/dispose"
 export { driveGen as gen } from "./lib/gen"
 
 export { retryOptions } from "./lib/modifiers/retry"
-
-export type {
-  AllSettledResult,
-  SettledFulfilled,
-  SettledRejected,
-  SettledResult,
-} from "./lib/types/all"
-export type { FlowExit } from "./lib/types/flow"
