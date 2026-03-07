@@ -1,4 +1,10 @@
 import { describe, it } from "bun:test"
+import type {
+  CancellationError,
+  RetryExhaustedError,
+  TimeoutError,
+  UnhandledException,
+} from "../errors"
 import * as try$ from "../index"
 
 type Expect<T extends true> = T
@@ -10,12 +16,12 @@ describe("type inference", () => {
   describe("no config", () => {
     it("runSync sync function returns T | UnhandledException", () => {
       const result = try$.runSync(() => 42)
-      type _assert = Expect<Equal<typeof result, number | try$.UnhandledException>>
+      type _assert = Expect<Equal<typeof result, number | UnhandledException>>
     })
 
     it("run function returns Promise<T | UnhandledException>", () => {
       const result = try$.run(() => 42)
-      type _assert = Expect<Equal<typeof result, Promise<number | try$.UnhandledException>>>
+      type _assert = Expect<Equal<typeof result, Promise<number | UnhandledException>>>
     })
 
     it("runSync sync try/catch returns T | E", () => {
@@ -69,7 +75,7 @@ describe("type inference", () => {
       const result = retryBuilder.run(() => 1)
 
       type _assert = Expect<
-        Equal<typeof result, Promise<number | try$.UnhandledException | try$.RetryExhaustedError>>
+        Equal<typeof result, Promise<number | UnhandledException | RetryExhaustedError>>
       >
 
       if (typecheckOnly()) {
@@ -83,7 +89,7 @@ describe("type inference", () => {
       const result = timeoutBuilder.run(() => 1)
 
       type _assert = Expect<
-        Equal<typeof result, Promise<number | try$.UnhandledException | try$.TimeoutError>>
+        Equal<typeof result, Promise<number | UnhandledException | TimeoutError>>
       >
 
       if (typecheckOnly()) {
@@ -97,7 +103,7 @@ describe("type inference", () => {
       const result = signalBuilder.run(() => 1)
 
       type _assert = Expect<
-        Equal<typeof result, Promise<number | try$.UnhandledException | try$.CancellationError>>
+        Equal<typeof result, Promise<number | UnhandledException | CancellationError>>
       >
 
       if (typecheckOnly()) {
@@ -113,7 +119,7 @@ describe("type inference", () => {
         return yield* use(1)
       })
 
-      type _assertSync = Expect<Equal<typeof syncResult, number | try$.UnhandledException>>
+      type _assertSync = Expect<Equal<typeof syncResult, number | UnhandledException>>
       type _assertGen = Expect<Equal<typeof genResult, number>>
     })
 
@@ -150,50 +156,32 @@ describe("type inference", () => {
     })
   })
 
-  describe("panic", () => {
-    it("exports PanicCode and removes ConfigurationError", () => {
-      if (typecheckOnly()) {
-        const panic = new try$.Panic("FLOW_NO_EXIT")
-        const taskCodes: try$.PanicCode[] = [
-          "FLOW_NO_EXIT",
-          "TASK_SELF_REFERENCE",
-          "TASK_UNKNOWN_REFERENCE",
-        ]
-        type _assert = Expect<Equal<typeof panic.code, try$.PanicCode>>
-        void taskCodes
-
-        // @ts-expect-error -- ConfigurationError was removed in favor of coded Panic
-        void try$.ConfigurationError
-      }
-    })
-  })
-
   describe("with retry", () => {
     it("constant zero-delay retry run returns Promise union", () => {
       const result = try$.retry(3).run(() => 42)
       type _assert = Expect<
-        Equal<typeof result, Promise<number | try$.UnhandledException | try$.RetryExhaustedError>>
+        Equal<typeof result, Promise<number | UnhandledException | RetryExhaustedError>>
       >
     })
 
     it("retry run returns Promise union", () => {
       const result = try$.retry(3).run(() => Promise.resolve(42))
       type _assert = Expect<
-        Equal<typeof result, Promise<number | try$.UnhandledException | try$.RetryExhaustedError>>
+        Equal<typeof result, Promise<number | UnhandledException | RetryExhaustedError>>
       >
     })
 
     it("ctx.retry is available when retry config is present", () => {
       const result = try$.retry(3).run((ctx) => ctx.retry.attempt)
       type _assert = Expect<
-        Equal<typeof result, Promise<number | try$.UnhandledException | try$.RetryExhaustedError>>
+        Equal<typeof result, Promise<number | UnhandledException | RetryExhaustedError>>
       >
     })
 
     it("ctx.retry supports async usage when retry config is present", () => {
       const result = try$.retry(3).run((ctx) => Promise.resolve(ctx.retry.limit))
       type _assert = Expect<
-        Equal<typeof result, Promise<number | try$.UnhandledException | try$.RetryExhaustedError>>
+        Equal<typeof result, Promise<number | UnhandledException | RetryExhaustedError>>
       >
     })
   })
@@ -202,7 +190,7 @@ describe("type inference", () => {
     it("run function returns Promise<T | UnhandledException | TimeoutError>", () => {
       const result = try$.timeout(5000).run(() => 42)
       type _assert = Expect<
-        Equal<typeof result, Promise<number | try$.UnhandledException | try$.TimeoutError>>
+        Equal<typeof result, Promise<number | UnhandledException | TimeoutError>>
       >
     })
   })
@@ -212,7 +200,7 @@ describe("type inference", () => {
       const ac = new AbortController()
       const result = try$.signal(ac.signal).run(() => 42)
       type _assert = Expect<
-        Equal<typeof result, Promise<number | try$.UnhandledException | try$.CancellationError>>
+        Equal<typeof result, Promise<number | UnhandledException | CancellationError>>
       >
     })
   })
@@ -226,7 +214,7 @@ describe("type inference", () => {
       type _assert = Expect<
         Equal<
           typeof result,
-          Promise<number | try$.UnhandledException | try$.RetryExhaustedError | try$.TimeoutError>
+          Promise<number | UnhandledException | RetryExhaustedError | TimeoutError>
         >
       >
     })
@@ -239,7 +227,7 @@ describe("type inference", () => {
       type _assert = Expect<
         Equal<
           typeof result,
-          Promise<number | try$.UnhandledException | try$.RetryExhaustedError | try$.TimeoutError>
+          Promise<number | UnhandledException | RetryExhaustedError | TimeoutError>
         >
       >
     })
@@ -254,9 +242,7 @@ describe("type inference", () => {
       type _assert = Expect<
         Equal<
           typeof result,
-          Promise<
-            42 | "err" | try$.RetryExhaustedError | try$.TimeoutError | try$.CancellationError
-          >
+          Promise<42 | "err" | RetryExhaustedError | TimeoutError | CancellationError>
         >
       >
     })
@@ -271,9 +257,7 @@ describe("type inference", () => {
       type _assert = Expect<
         Equal<
           typeof result,
-          Promise<
-            number | "err" | try$.RetryExhaustedError | try$.TimeoutError | try$.CancellationError
-          >
+          Promise<number | "err" | RetryExhaustedError | TimeoutError | CancellationError>
         >
       >
     })
@@ -289,11 +273,7 @@ describe("type inference", () => {
         Equal<
           typeof result,
           Promise<
-            | number
-            | try$.UnhandledException
-            | try$.RetryExhaustedError
-            | try$.TimeoutError
-            | try$.CancellationError
+            number | UnhandledException | RetryExhaustedError | TimeoutError | CancellationError
           >
         >
       >
@@ -303,12 +283,12 @@ describe("type inference", () => {
   describe("wrap capabilities", () => {
     it("wrap builder exposes runSync", () => {
       const result = try$.wrap((ctx, next) => next(ctx)).runSync(() => 42)
-      type _assert = Expect<Equal<typeof result, number | try$.UnhandledException>>
+      type _assert = Expect<Equal<typeof result, number | UnhandledException>>
     })
 
     it("wrap builder still exposes run", () => {
       const result = try$.wrap((ctx, next) => next(ctx)).run(() => 42)
-      type _assert = Expect<Equal<typeof result, Promise<number | try$.UnhandledException>>>
+      type _assert = Expect<Equal<typeof result, Promise<number | UnhandledException>>>
     })
 
     it("wrap builder exposes retry", () => {
@@ -320,7 +300,7 @@ describe("type inference", () => {
         .run((ctx) => ctx.retry.attempt)
 
       type _assert = Expect<
-        Equal<typeof result, Promise<number | try$.UnhandledException | try$.RetryExhaustedError>>
+        Equal<typeof result, Promise<number | UnhandledException | RetryExhaustedError>>
       >
     })
 
@@ -333,7 +313,7 @@ describe("type inference", () => {
         .run(() => 1)
 
       type _assert = Expect<
-        Equal<typeof result, Promise<number | try$.UnhandledException | try$.TimeoutError>>
+        Equal<typeof result, Promise<number | UnhandledException | TimeoutError>>
       >
     })
 
@@ -346,7 +326,7 @@ describe("type inference", () => {
         .run(() => 1)
 
       type _assert = Expect<
-        Equal<typeof result, Promise<number | try$.UnhandledException | try$.CancellationError>>
+        Equal<typeof result, Promise<number | UnhandledException | CancellationError>>
       >
     })
 

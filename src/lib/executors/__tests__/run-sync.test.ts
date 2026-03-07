@@ -191,3 +191,22 @@ describe("executeRunSync", () => {
     })
   })
 })
+
+describe("runSync", () => {
+  it("rethrows RUN_SYNC_CATCH_PROMISE unchanged when catch returns a promise", () => {
+    const unsafeCatch = (() => Promise.resolve("mapped")) as unknown as (error: unknown) => string
+
+    try {
+      runSync({
+        catch: unsafeCatch,
+        try: () => {
+          throw new Error("boom")
+        },
+      })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect(error).toBeInstanceOf(Panic)
+      expect((error as Panic).code).toBe("RUN_SYNC_CATCH_PROMISE")
+    }
+  })
+})

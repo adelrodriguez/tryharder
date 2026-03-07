@@ -27,6 +27,7 @@ class FlowExecution<T extends TaskRecord> {
   readonly #signal: AbortSignal
   readonly #internalController = new AbortController()
   readonly #disposer = new AsyncDisposableStack()
+  #firstRejection: unknown
 
   constructor(signal: AbortSignal | undefined, tasks: T) {
     this.#tasks = tasks
@@ -44,16 +45,17 @@ class FlowExecution<T extends TaskRecord> {
   async execute(): Promise<FlowResult<T>> {
     const promises = this.#taskNames.map(async (name) => this.#runTask(name))
 
-    try {
-      await Promise.all(promises)
-      throw new Panic("FLOW_NO_EXIT")
-    } catch (error) {
-      if (error instanceof FlowExitSignal) {
-        return error.value as FlowResult<T>
+    await Promise.allSettled(promises)
+
+    if (this.#firstRejection !== undefined) {
+      if (this.#firstRejection instanceof FlowExitSignal) {
+        return this.#firstRejection.value as FlowResult<T>
       }
 
-      throw error
+      throw this.#firstRejection
     }
+
+    throw new Panic("FLOW_NO_EXIT")
   }
 
   #waitForResult(taskName: keyof T, requesterTaskName?: keyof T): Promise<unknown> {
@@ -160,6 +162,7 @@ class FlowExecution<T extends TaskRecord> {
       const result = await (taskFn as (this: FlowTaskContext<T>) => unknown).call(context)
       this.#handleResult(taskName, result)
     } catch (error) {
+      this.#firstRejection ??= error
       this.#handleError(taskName, error)
 
       if (!this.#internalController.signal.aborted) {

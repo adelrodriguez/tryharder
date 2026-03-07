@@ -519,6 +519,36 @@ describe("executeAll", () => {
 
       expect(signalAborted).toBe(true)
     })
+
+    it("rejects with CancellationError when signal aborts during catch execution", async () => {
+      const controller = new AbortController()
+
+      const promise = executeAll(
+        { signals: [controller.signal] },
+        {
+          a() {
+            throw new Error("boom")
+          },
+        },
+        {
+          catch: async () => {
+            await sleep(20)
+            return "mapped"
+          },
+        }
+      )
+
+      setTimeout(() => {
+        controller.abort(new Error("external abort"))
+      }, 5)
+
+      try {
+        await promise
+        expect.unreachable("should have thrown")
+      } catch (error) {
+        expect(error).toBeInstanceOf(CancellationError)
+      }
+    })
   })
 
   describe("disposer ($disposer)", () => {

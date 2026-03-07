@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { UnhandledException } from "../../errors"
+import { CancellationError, Panic, TimeoutError, UnhandledException } from "../../errors"
 import { executeGen } from "../gen"
 
 class UserNotFound extends Error {}
@@ -73,6 +73,17 @@ describe("executeGen", () => {
     expect(((result as UnhandledException).cause as Error).message).toBe("boom")
   })
 
+  it("preserves TimeoutError from a rejected yielded promise", async () => {
+    const timeout = new TimeoutError("timed out")
+
+    const result = await executeGen(function* (use) {
+      const value = yield* use(Promise.reject<unknown>(timeout))
+      return value
+    })
+
+    expect(result).toBe(timeout)
+  })
+
   it("returns error when factory throws", () => {
     const result = executeGen(() => {
       throw new Error("factory failed")
@@ -81,6 +92,16 @@ describe("executeGen", () => {
     expect(result).toBeInstanceOf(UnhandledException)
     expect((result as UnhandledException).cause).toBeInstanceOf(Error)
     expect(((result as UnhandledException).cause as Error).message).toBe("factory failed")
+  })
+
+  it("preserves Panic when factory throws a control error", () => {
+    const panic = new Panic("FLOW_NO_EXIT")
+
+    const result = executeGen(() => {
+      throw panic
+    })
+
+    expect(result).toBe(panic)
   })
 
   it("returns error when generator body throws after yield", () => {
@@ -92,6 +113,17 @@ describe("executeGen", () => {
     expect(result).toBeInstanceOf(UnhandledException)
     expect((result as UnhandledException).cause).toBeInstanceOf(Error)
     expect(((result as UnhandledException).cause as Error).message).toBe("generator failed")
+  })
+
+  it("preserves Panic when generator body throws after a sync yield", () => {
+    const panic = new Panic("FLOW_NO_EXIT")
+
+    const result = executeGen<number, number | Panic>(function* (use) {
+      void (yield* use(1))
+      throw panic
+    })
+
+    expect(result).toBe(panic)
   })
 
   it("returns explicit error values without throwing", () => {
@@ -136,6 +168,19 @@ describe("executeGen", () => {
     expect((result as UnhandledException).cause).toBeInstanceOf(Error)
   })
 
+  it("preserves CancellationError when generator throws after entering async path", async () => {
+    const cancellation = new CancellationError("cancelled")
+
+    const result = await executeGen<Promise<number>, Promise<number | CancellationError>>(
+      function* (use) {
+        void (yield* use(Promise.resolve(1)))
+        throw cancellation
+      }
+    )
+
+    expect(result).toBe(cancellation)
+  })
+
   it("wraps rejection of final returned promise in async path", async () => {
     const result = await executeGen(function* (use) {
       void (yield* use(Promise.resolve(1)))
@@ -144,6 +189,19 @@ describe("executeGen", () => {
 
     expect(result).toBeInstanceOf(UnhandledException)
     expect((result as UnhandledException).cause).toBeInstanceOf(Error)
+  })
+
+  it("preserves TimeoutError from a rejected final returned promise in async path", async () => {
+    const timeout = new TimeoutError("timed out")
+
+    const result = await executeGen<Promise<number>, Promise<number | TimeoutError>>(
+      function* (use) {
+        void (yield* use(Promise.resolve(1)))
+        return Promise.reject(timeout)
+      }
+    )
+
+    expect(result).toBe(timeout)
   })
 
   it("wraps rejection of second async yield", async () => {

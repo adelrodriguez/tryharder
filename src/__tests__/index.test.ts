@@ -1,4 +1,12 @@
 import { describe, expect, it } from "bun:test"
+import {
+  CancellationError,
+  Panic,
+  type PanicCode,
+  RetryExhaustedError,
+  TimeoutError,
+  UnhandledException,
+} from "../errors"
 import * as try$ from "../index"
 import { sleep } from "../lib/utils"
 
@@ -7,9 +15,9 @@ class PermissionDeniedError extends Error {}
 class NetworkError extends Error {}
 class RemoteServiceError extends Error {}
 
-function expectPanic(error: unknown, code: try$.PanicCode) {
-  expect(error).toBeInstanceOf(try$.Panic)
-  expect((error as try$.Panic).code).toBe(code)
+function expectPanic(error: unknown, code: PanicCode) {
+  expect(error).toBeInstanceOf(Panic)
+  expect((error as Panic).code).toBe(code)
 }
 
 function runCacheFlow(cachedValue: string | null) {
@@ -33,6 +41,27 @@ function runCacheFlow(cachedValue: string | null) {
     },
   })
 }
+
+describe("entrypoints", () => {
+  it("does not expose errors from the root entrypoint", () => {
+    expect("CancellationError" in try$).toBe(false)
+    expect("Panic" in try$).toBe(false)
+    expect("RetryExhaustedError" in try$).toBe(false)
+    expect("TimeoutError" in try$).toBe(false)
+    expect("UnhandledException" in try$).toBe(false)
+  })
+
+  it("exposes errors from the dedicated errors entrypoint", () => {
+    const panic = new Panic("FLOW_NO_EXIT")
+
+    expect(panic.code).toBe("FLOW_NO_EXIT")
+    expect(new CancellationError()).toBeInstanceOf(Error)
+    expect(new RetryExhaustedError()).toBeInstanceOf(Error)
+    expect(new TimeoutError()).toBeInstanceOf(Error)
+    expect(new UnhandledException()).toBeInstanceOf(Error)
+  })
+})
+
 describe("runSync", () => {
   describe("function form", () => {
     it("returns value when function succeeds", () => {
@@ -46,7 +75,7 @@ describe("runSync", () => {
         throw new Error("boom")
       })
 
-      expect(result).toBeInstanceOf(try$.UnhandledException)
+      expect(result).toBeInstanceOf(UnhandledException)
     })
 
     it("throws Panic when sync run receives a Promise-returning function via unsafe cast", () => {
@@ -141,7 +170,7 @@ describe("run", () => {
         throw new Error("boom")
       })
 
-      expect(await result).toBeInstanceOf(try$.UnhandledException)
+      expect(await result).toBeInstanceOf(UnhandledException)
     })
 
     it("returns UnhandledException when sync function form throws", async () => {
@@ -149,7 +178,7 @@ describe("run", () => {
         throw new Error("boom")
       })
 
-      expect(await result).toBeInstanceOf(try$.UnhandledException)
+      expect(await result).toBeInstanceOf(UnhandledException)
     })
   })
 
@@ -253,7 +282,7 @@ describe("retry execution flow", () => {
         throw new Error("boom")
       })
 
-    expect(result).toBeInstanceOf(try$.RetryExhaustedError)
+    expect(result).toBeInstanceOf(RetryExhaustedError)
     expect(shouldRetryCalls).toBe(2)
   })
 })
@@ -458,8 +487,8 @@ describe("builder helpers", () => {
       throw new Error("boom")
     })
 
-    expect(retried).toBeInstanceOf(try$.RetryExhaustedError)
-    expect(rooted).toBeInstanceOf(try$.UnhandledException)
+    expect(retried).toBeInstanceOf(RetryExhaustedError)
+    expect(rooted).toBeInstanceOf(UnhandledException)
   })
 
   it("keeps root run isolated from wrap chains", async () => {
@@ -638,7 +667,7 @@ describe("flow", () => {
       })
       expect.unreachable("should have thrown")
     } catch (error) {
-      expect(error).toBeInstanceOf(try$.TimeoutError)
+      expect(error).toBeInstanceOf(TimeoutError)
     }
   })
 
@@ -1073,7 +1102,7 @@ describe("full builder chain", () => {
 
     const result = await pending
 
-    expect(result).toBeInstanceOf(try$.CancellationError)
+    expect(result).toBeInstanceOf(CancellationError)
   })
 
   it("returns TimeoutError from retry + timeout + signal when deadline is exceeded", async () => {
@@ -1090,7 +1119,7 @@ describe("full builder chain", () => {
         return 42
       })
 
-    expect(result).toBeInstanceOf(try$.TimeoutError)
+    expect(result).toBeInstanceOf(TimeoutError)
   })
 
   it("returns same value for timeout().signal() and signal().timeout() chains", async () => {
@@ -1168,7 +1197,7 @@ describe("gen integration", () => {
       return value
     })
 
-    expect(result).toBeInstanceOf(try$.UnhandledException)
+    expect(result).toBeInstanceOf(UnhandledException)
   })
 
   it("short-circuits with error from try$.run inside gen", async () => {
@@ -1183,7 +1212,7 @@ describe("gen integration", () => {
       return value
     })
 
-    expect(result).toBeInstanceOf(try$.UnhandledException)
+    expect(result).toBeInstanceOf(UnhandledException)
   })
 
   it("composes multiple try$ calls and returns success or mapped errors", async () => {

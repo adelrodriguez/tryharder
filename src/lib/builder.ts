@@ -35,7 +35,7 @@ import { executeGen } from "./executors/gen"
 import { executeRun } from "./executors/run"
 import { executeRunSync, type SyncRunInput, type SyncRunTryFn } from "./executors/run-sync"
 import { createRetryPolicy } from "./modifiers/retry"
-import { normalizeTimeoutOptions } from "./modifiers/timeout"
+import { createTimeoutOptions } from "./modifiers/timeout"
 import { executeWithWraps } from "./modifiers/wrap"
 import { invariant } from "./utils"
 
@@ -87,7 +87,7 @@ export class RunBuilder<
     return new RunBuilder(
       {
         ...this.#config,
-        timeout: normalizeTimeoutOptions(options),
+        timeout: createTimeoutOptions(options),
       },
       {
         ...this.#state,

@@ -23,7 +23,19 @@
     "dist"
   ],
   "type": "module",
-  "module": "src/index.ts",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./errors": {
+      "types": "./dist/errors.d.ts",
+      "import": "./dist/errors.js"
+    }
+  },
   "scripts": {
     "build": "bunup",
     "bump:deps": "bun update --interactive",

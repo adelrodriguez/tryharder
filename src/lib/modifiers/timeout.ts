@@ -2,7 +2,7 @@ import type { TimeoutOptions, TimeoutPolicy } from "../types/builder"
 import { TimeoutError } from "../errors"
 import { raceWithAbortSignal } from "../utils"
 
-export function normalizeTimeoutOptions(options: TimeoutOptions): TimeoutPolicy {
+export function createTimeoutOptions(options: TimeoutOptions): TimeoutPolicy {
   if (typeof options === "number") {
     return { ms: options, scope: "total" }
   }
