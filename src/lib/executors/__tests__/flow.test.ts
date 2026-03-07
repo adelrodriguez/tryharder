@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { CancellationError, Panic, RetryExhaustedError, TimeoutError } from "../../errors"
+import { CancellationError, Panic, TimeoutError } from "../../errors"
 import { executeFlow } from "../flow"
 
 function sleep(ms: number): Promise<void> {
@@ -27,6 +27,28 @@ describe("executeFlow", () => {
     } catch (error) {
       expect(error).toBeInstanceOf(Panic)
       expect((error as Panic).code).toBe("FLOW_NO_EXIT")
+    }
+  })
+
+  it("rejects retry/timeout config for orchestration execution", async () => {
+    try {
+      await executeFlow(
+        {
+          retry: { backoff: "constant", limit: 2 },
+          timeout: 100,
+        },
+        {
+          a() {
+            return this.$exit("done")
+          },
+        }
+      )
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect(error).toBeInstanceOf(Panic)
+      expect((error as Panic).code).toBe("ORCHESTRATION_UNSUPPORTED_POLICY")
+      expect((error as Error).message).toContain("retry")
+      expect((error as Error).message).toContain("timeout")
     }
   })
 
@@ -264,73 +286,30 @@ describe("executeFlow", () => {
     expect(wrapCalls).toBe(1)
   })
 
-  it("applies retry policy to flow execution", async () => {
-    let attempts = 0
+  it("uses default retry metadata in wrap middleware for orchestration execution", async () => {
+    const attempts: number[] = []
+    const limits: number[] = []
 
     const result = await executeFlow(
       {
-        retry: {
-          backoff: "constant",
-          delayMs: 0,
-          limit: 2,
-        },
+        wraps: [
+          (ctx, next) => {
+            attempts.push(ctx.retry.attempt)
+            limits.push(ctx.retry.limit)
+            return next(ctx)
+          },
+        ],
       },
       {
         a() {
-          attempts += 1
-
-          if (attempts === 1) {
-            throw new Error("boom")
-          }
-
-          return this.$exit("ok")
+          return this.$exit("done")
         },
       }
     )
 
-    expect(result).toBe("ok")
-    expect(attempts).toBe(2)
-  })
-
-  it("throws RetryExhaustedError when flow retries are exhausted", async () => {
-    try {
-      await executeFlow(
-        {
-          retry: {
-            backoff: "constant",
-            delayMs: 0,
-            limit: 2,
-          },
-        },
-        {
-          a() {
-            throw new Error("boom")
-          },
-        }
-      )
-      expect.unreachable("should have thrown")
-    } catch (error) {
-      expect(error).toBeInstanceOf(RetryExhaustedError)
-    }
-  })
-
-  it("applies timeout policy to flow execution", async () => {
-    try {
-      await executeFlow(
-        {
-          timeout: 5,
-        },
-        {
-          async a() {
-            await sleep(20)
-            return this.$exit("late")
-          },
-        }
-      )
-      expect.unreachable("should have thrown")
-    } catch (error) {
-      expect(error).toBeInstanceOf(TimeoutError)
-    }
+    expect(result).toBe("done")
+    expect(attempts).toEqual([1])
+    expect(limits).toEqual([1])
   })
 
   it("respects external signal cancellation via composite task signal", async () => {
@@ -380,78 +359,6 @@ describe("executeFlow", () => {
     }
   })
 
-  it("waits for all tasks to settle before retrying", async () => {
-    let concurrentRuns = 0
-    let maxConcurrentRuns = 0
-    let attempts = 0
-
-    const result = await executeFlow(
-      {
-        retry: {
-          backoff: "constant",
-          delayMs: 0,
-          limit: 2,
-        },
-      },
-      {
-        a() {
-          attempts += 1
-
-          if (attempts === 1) {
-            throw new Error("boom")
-          }
-
-          return this.$exit("ok")
-        },
-        async b() {
-          concurrentRuns += 1
-          maxConcurrentRuns = Math.max(maxConcurrentRuns, concurrentRuns)
-          await sleep(50)
-          concurrentRuns -= 1
-        },
-      }
-    )
-
-    expect(result).toBe("ok")
-    expect(maxConcurrentRuns).toBe(1)
-  })
-
-  it("slow sibling from failed attempt settles before next attempt starts", async () => {
-    const timestamps: string[] = []
-    let attempts = 0
-
-    const result = await executeFlow(
-      {
-        retry: {
-          backoff: "constant",
-          delayMs: 0,
-          limit: 2,
-        },
-      },
-      {
-        a() {
-          attempts += 1
-
-          if (attempts === 1) {
-            throw new Error("boom")
-          }
-
-          timestamps.push("attempt2-start")
-          return this.$exit("ok")
-        },
-        async b() {
-          if (attempts === 1) {
-            await sleep(50)
-            timestamps.push("attempt1-b-settled")
-          }
-        },
-      }
-    )
-
-    expect(result).toBe("ok")
-    expect(timestamps).toEqual(["attempt1-b-settled", "attempt2-start"])
-  })
-
   it("returns exit value when $exit fires before a sibling error", async () => {
     const result = await executeFlow(
       {},
@@ -487,45 +394,6 @@ describe("executeFlow", () => {
     } catch (error) {
       expect((error as Error).message).toBe("fast error")
     }
-  })
-
-  it("runs disposer cleanup after all tasks settle on a failed attempt", async () => {
-    const events: string[] = []
-    let attempts = 0
-
-    const result = await executeFlow(
-      {
-        retry: {
-          backoff: "constant",
-          delayMs: 0,
-          limit: 2,
-        },
-      },
-      {
-        a() {
-          attempts += 1
-
-          this.$disposer.defer(() => {
-            events.push("cleanup")
-          })
-
-          if (attempts === 1) {
-            throw new Error("boom")
-          }
-
-          return this.$exit("ok")
-        },
-        async b() {
-          if (attempts === 1) {
-            await sleep(50)
-            events.push("b-settled")
-          }
-        },
-      }
-    )
-
-    expect(result).toBe("ok")
-    expect(events.indexOf("b-settled")).toBeLessThan(events.indexOf("cleanup"))
   })
 
   it("aborts sibling task signal after early exit", async () => {

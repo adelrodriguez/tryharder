@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { CancellationError, Panic, RetryExhaustedError, TimeoutError } from "../../errors"
+import { CancellationError, Panic } from "../../errors"
 import { sleep } from "../../utils"
 import { executeAll } from "../all"
 
@@ -375,51 +375,6 @@ describe("executeAll", () => {
     })
   })
 
-  describe("timeout config", () => {
-    it("rejects with TimeoutError when tasks exceed configured timeout", async () => {
-      try {
-        await executeAll(
-          {
-            timeout: 10,
-          },
-          {
-            async a() {
-              await sleep(50)
-              return 1
-            },
-          }
-        )
-        expect.unreachable("should have thrown")
-      } catch (error) {
-        expect(error).toBeInstanceOf(TimeoutError)
-      }
-    })
-
-    it("rejects with TimeoutError when timeout expires during catch execution", async () => {
-      try {
-        await executeAll(
-          {
-            timeout: 5,
-          },
-          {
-            a() {
-              throw new Error("boom")
-            },
-          },
-          {
-            catch: async () => {
-              await sleep(20)
-              return "mapped"
-            },
-          }
-        )
-        expect.unreachable("should have thrown")
-      } catch (error) {
-        expect(error).toBeInstanceOf(TimeoutError)
-      }
-    })
-  })
-
   describe("abort signal ($signal)", () => {
     it("provides $signal to each task", async () => {
       let receivedSignal: AbortSignal | undefined
@@ -588,188 +543,29 @@ describe("executeAll", () => {
     })
   })
 
-  describe("retry", () => {
-    it("throws RetryExhaustedError when all retries are exhausted", async () => {
+  describe("builder integration", () => {
+    it("rejects retry/timeout config for orchestration execution", async () => {
       try {
         await executeAll(
           {
-            retry: {
-              backoff: "constant",
-              delayMs: 0,
-              limit: 2,
-            },
+            retry: { backoff: "constant", limit: 2 },
+            timeout: 100,
           },
           {
-            a() {
-              throw new Error("boom")
-            },
-          }
-        )
-        expect.unreachable("should have thrown")
-      } catch (error) {
-        expect(error).toBeInstanceOf(RetryExhaustedError)
-      }
-    })
-
-    it("waits for all tasks to settle before retrying", async () => {
-      let concurrentRuns = 0
-      let maxConcurrentRuns = 0
-      let attempts = 0
-
-      const result = await executeAll(
-        {
-          retry: {
-            backoff: "constant",
-            delayMs: 0,
-            limit: 2,
-          },
-        },
-        {
-          a() {
-            attempts += 1
-
-            if (attempts === 1) {
-              throw new Error("boom")
-            }
-
-            return 42
-          },
-          async b() {
-            concurrentRuns += 1
-            maxConcurrentRuns = Math.max(maxConcurrentRuns, concurrentRuns)
-            await sleep(50)
-            concurrentRuns -= 1
-          },
-        }
-      )
-
-      expect(result.a).toBe(42)
-      expect(maxConcurrentRuns).toBe(1)
-    })
-
-    it("slow sibling from failed attempt settles before next attempt starts", async () => {
-      const timestamps: string[] = []
-      let attempts = 0
-
-      const result = await executeAll(
-        {
-          retry: {
-            backoff: "constant",
-            delayMs: 0,
-            limit: 2,
-          },
-        },
-        {
-          a() {
-            attempts += 1
-
-            if (attempts === 1) {
-              throw new Error("boom")
-            }
-
-            timestamps.push("attempt2-start")
-            return 42
-          },
-          async b() {
-            if (attempts === 1) {
-              await sleep(50)
-              timestamps.push("attempt1-b-settled")
-            }
-          },
-        }
-      )
-
-      expect(result.a).toBe(42)
-      expect(timestamps).toEqual(["attempt1-b-settled", "attempt2-start"])
-    })
-
-    it("applies retry policy to all execution", async () => {
-      let attempts = 0
-
-      const result = await executeAll(
-        {
-          retry: {
-            backoff: "constant",
-            delayMs: 0,
-            limit: 2,
-          },
-        },
-        {
-          a() {
-            attempts += 1
-
-            if (attempts === 1) {
-              throw new Error("boom")
-            }
-
-            return 42
-          },
-        }
-      )
-
-      expect(result.a).toBe(42)
-      expect(attempts).toBe(2)
-    })
-
-    it("does not retry when catch handler recovers from failure", async () => {
-      let attempts = 0
-
-      const result = await executeAll(
-        {
-          retry: {
-            backoff: "constant",
-            delayMs: 0,
-            limit: 3,
-          },
-        },
-        {
-          a() {
-            attempts += 1
-            throw new Error("boom")
-          },
-        },
-        {
-          catch: () => "recovered" as const,
-        }
-      )
-
-      expect(result).toBe("recovered")
-      expect(attempts).toBe(1)
-    })
-
-    it("does not retry when catch handler throws Panic", async () => {
-      let attempts = 0
-
-      try {
-        await executeAll(
-          {
-            retry: {
-              backoff: "constant",
-              delayMs: 0,
-              limit: 3,
-            },
-          },
-          {
-            a() {
-              attempts += 1
-              throw new Error("boom")
-            },
-          },
-          {
-            catch() {
-              throw new Error("catch failed")
+            only() {
+              return 1
             },
           }
         )
         expect.unreachable("should have thrown")
       } catch (error) {
         expect(error).toBeInstanceOf(Panic)
-        expect(attempts).toBe(1)
+        expect((error as Panic).code).toBe("ORCHESTRATION_UNSUPPORTED_POLICY")
+        expect((error as Error).message).toContain("retry")
+        expect((error as Error).message).toContain("timeout")
       }
     })
-  })
 
-  describe("builder integration", () => {
     it("passes builder signal config to task context", async () => {
       const controller = new AbortController()
       let signalSeen = false
@@ -809,6 +605,32 @@ describe("executeAll", () => {
 
       expect(result).toEqual({ a: 1 })
       expect(wrapCalls).toBe(1)
+    })
+
+    it("uses default retry metadata in wrap middleware for orchestration execution", async () => {
+      const attempts: number[] = []
+      const limits: number[] = []
+
+      const result = await executeAll(
+        {
+          wraps: [
+            (ctx, next) => {
+              attempts.push(ctx.retry.attempt)
+              limits.push(ctx.retry.limit)
+              return next(ctx)
+            },
+          ],
+        },
+        {
+          a() {
+            return 1
+          },
+        }
+      )
+
+      expect(result).toEqual({ a: 1 })
+      expect(attempts).toEqual([1])
+      expect(limits).toEqual([1])
     })
   })
 })

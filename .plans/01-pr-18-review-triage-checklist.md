@@ -38,8 +38,10 @@ Resolved or obsolete:
   `RUN_SYNC_CATCH_PROMISE` unchanged.
 - `allSettled()` cancellation asymmetry: obsolete for current behavior; current
   code and tests show external cancellation rejects with `CancellationError`.
-- `allSettled()` forcing `retryLimit: 1`: fixed; current wrap tests observe the
-  configured retry limit.
+- `allSettled()` forcing `retryLimit: 1`: obsolete under the current API shape;
+  orchestration terminals no longer compose with top-level `retry()`, so wrap
+  metadata for `all()` / `allSettled()` / `flow()` now intentionally stays at
+  the default `attempt = 1`, `limit = 1`.
 
 ## Ordered Implementation Plan
 
@@ -68,7 +70,7 @@ actually observe that new context.
 - Expected outcome: terminals run with the final context object produced by the
   wrap chain.
 - Add regression coverage in executor or index tests for a wrap that mutates or
-  replaces retry metadata.
+  replaces context observed by the terminal executor.
 
 ### Step 3 - Validate `retry.shouldRetry` runtime results strictly
 

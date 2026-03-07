@@ -1,10 +1,47 @@
 import type { ResultProxy, TaskContext, TaskRecord } from "../types/all"
+import type { BuilderConfig } from "../types/builder"
 import { Panic, UnhandledException } from "../errors"
 import { invariant } from "../utils"
+import { BaseExecution } from "./base"
 
 type ResolverPair = [(value: unknown) => void, (reason?: unknown) => void]
 
 export type TaskExecutionMode = "fail-fast" | "settled"
+
+export abstract class OrchestrationExecution<TResult> extends BaseExecution<Promise<TResult>> {
+  protected constructor(config: BuilderConfig) {
+    const unsupportedPolicies = [
+      config.retry === undefined ? undefined : "retry",
+      config.timeout === undefined ? undefined : "timeout",
+    ].filter((value): value is "retry" | "timeout" => value !== undefined)
+
+    invariant(
+      unsupportedPolicies.length === 0,
+      new Panic("ORCHESTRATION_UNSUPPORTED_POLICY", {
+        message: `Orchestration does not support ${unsupportedPolicies.join(" or ")} policies.`,
+      })
+    )
+
+    super({
+      signals: config.signals,
+      wraps: config.wraps,
+    })
+  }
+
+  protected override async executeCore(): Promise<TResult> {
+    // Orchestration executors still share outer wraps/cancellation checks even
+    // though their task execution strategies differ.
+    const controlBeforeExecution = this.checkDidControlFail()
+
+    if (controlBeforeExecution) {
+      throw controlBeforeExecution
+    }
+
+    return await this.executeTasks()
+  }
+
+  protected abstract executeTasks(): Promise<TResult>
+}
 
 export class TaskExecution<T extends TaskRecord> {
   readonly #tasks: T

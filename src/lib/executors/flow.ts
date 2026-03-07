@@ -1,9 +1,9 @@
 import type { ResultProxy, TaskRecord } from "../types/all"
 import type { BuilderConfig } from "../types/builder"
 import type { FlowResult, FlowTaskContext, InferredFlowTaskContext } from "../types/flow"
-import { Panic, RetryExhaustedError, UnhandledException } from "../errors"
-import { checkIsControlError, invariant } from "../utils"
-import { BaseExecution } from "./base"
+import { Panic, UnhandledException } from "../errors"
+import { invariant } from "../utils"
+import { OrchestrationExecution } from "./shared"
 
 class FlowExitSignal extends Error {
   readonly value: unknown
@@ -174,7 +174,7 @@ class FlowExecution<T extends TaskRecord> {
   }
 }
 
-class FlowRunnerExecution<T extends TaskRecord> extends BaseExecution<Promise<FlowResult<T>>> {
+class FlowRunnerExecution<T extends TaskRecord> extends OrchestrationExecution<FlowResult<T>> {
   readonly #tasks: T
 
   constructor(config: BuilderConfig, tasks: T) {
@@ -182,65 +182,16 @@ class FlowRunnerExecution<T extends TaskRecord> extends BaseExecution<Promise<Fl
     this.#tasks = tasks
   }
 
-  protected override async executeCore(): Promise<FlowResult<T>> {
-    let currentAttempt = 1
-
-    // oxlint-disable-next-line typescript/no-unnecessary-condition
-    while (true) {
-      const controlBeforeAttempt = this.checkDidControlFail()
-
-      if (controlBeforeAttempt) {
-        throw controlBeforeAttempt
-      }
-
-      this.ctx.retry.attempt = currentAttempt
-
-      try {
-        // oxlint-disable-next-line no-await-in-loop
-        const result = await this.#executeAttempt()
-        const controlAfterAttempt = this.checkDidControlFail()
-
-        if (controlAfterAttempt) {
-          throw controlAfterAttempt
-        }
-
-        return result
-      } catch (error) {
-        if (checkIsControlError(error)) {
-          throw error
-        }
-
-        const controlAfterFailure = this.checkDidControlFail(error)
-
-        if (controlAfterFailure) {
-          throw controlAfterFailure
-        }
-
-        const retryDecision = this.buildRetryDecision(error)
-
-        if (!retryDecision.shouldAttemptRetry) {
-          if (retryDecision.isRetryExhausted) {
-            throw new RetryExhaustedError(undefined, { cause: error })
-          }
-
-          throw error
-        }
-
-        // oxlint-disable-next-line no-await-in-loop
-        const delayControlResult = await this.waitForRetryDelay(retryDecision.delay)
-
-        if (delayControlResult) {
-          throw delayControlResult
-        }
-
-        currentAttempt += 1
-      }
-    }
-  }
-
-  async #executeAttempt(): Promise<FlowResult<T>> {
+  protected override async executeTasks(): Promise<FlowResult<T>> {
     await using execution = new FlowExecution(this.signal.signal, this.#tasks)
-    return (await this.race(execution.execute())) as FlowResult<T>
+    const result = await this.signal.race(execution.execute())
+    const cancellation = this.signal.checkDidCancel()
+
+    if (cancellation) {
+      throw cancellation
+    }
+
+    return result as FlowResult<T>
   }
 }
 
@@ -251,5 +202,3 @@ export async function executeFlow<T extends TaskRecord>(
   using execution = new FlowRunnerExecution(config, tasks)
   return await execution.execute()
 }
-
-export type { FlowExit, FlowResult, FlowTaskContext, InferredFlowTaskContext } from "../types/flow"

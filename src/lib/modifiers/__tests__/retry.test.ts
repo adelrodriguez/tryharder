@@ -3,7 +3,7 @@ import type { Panic } from "../../errors"
 import type { BuilderConfig } from "../../types/builder"
 import type { TryCtx } from "../../types/core"
 import {
-  createRetryPolicy,
+  retryOptions,
   calculateRetryDelay,
   checkIsRetryExhausted,
   checkShouldAttemptRetry,
@@ -21,9 +21,9 @@ function createTestCtx(attempt: number, config: BuilderConfig): TryCtx {
 
 const shouldRetry = () => true
 
-describe("createRetryPolicy", () => {
+describe("retryOptions", () => {
   it("normalizes number shorthand to constant backoff", () => {
-    expect(createRetryPolicy(3)).toEqual({
+    expect(retryOptions(3)).toEqual({
       backoff: "constant",
       delayMs: 0,
       limit: 3,
@@ -31,7 +31,7 @@ describe("createRetryPolicy", () => {
   })
 
   it("normalizes linear policy with default delay", () => {
-    expect(createRetryPolicy({ backoff: "linear", limit: 2 })).toEqual({
+    expect(retryOptions({ backoff: "linear", limit: 2 })).toEqual({
       backoff: "linear",
       delayMs: 0,
       jitter: undefined,
@@ -42,7 +42,7 @@ describe("createRetryPolicy", () => {
 
   it("normalizes exponential policy and preserves maxDelayMs", () => {
     expect(
-      createRetryPolicy({
+      retryOptions({
         backoff: "exponential",
         limit: 4,
         maxDelayMs: 1000,
@@ -59,7 +59,7 @@ describe("createRetryPolicy", () => {
 
   it("preserves optional retry controls", () => {
     expect(
-      createRetryPolicy({
+      retryOptions({
         backoff: "constant",
         delayMs: 25,
         jitter: true,
@@ -76,7 +76,7 @@ describe("createRetryPolicy", () => {
   })
 
   it("returns normalized retry policy for root helper usage", () => {
-    expect(createRetryPolicy(2)).toEqual({
+    expect(retryOptions(2)).toEqual({
       backoff: "constant",
       delayMs: 0,
       limit: 2,
@@ -85,7 +85,7 @@ describe("createRetryPolicy", () => {
 
   it("throws Panic when numeric shorthand limit is Infinity", () => {
     try {
-      createRetryPolicy(Infinity)
+      retryOptions(Infinity)
       expect.unreachable("should have thrown")
     } catch (error) {
       expect((error as Panic).code).toBe("RETRY_INVALID_LIMIT")
@@ -94,7 +94,7 @@ describe("createRetryPolicy", () => {
 
   it("throws Panic when object limit is NaN", () => {
     try {
-      createRetryPolicy({ backoff: "constant", limit: Number.NaN })
+      retryOptions({ backoff: "constant", limit: Number.NaN })
       expect.unreachable("should have thrown")
     } catch (error) {
       expect((error as Panic).code).toBe("RETRY_INVALID_LIMIT")
@@ -103,7 +103,7 @@ describe("createRetryPolicy", () => {
 
   it("throws Panic when limit is negative", () => {
     try {
-      createRetryPolicy(-1)
+      retryOptions(-1)
       expect.unreachable("should have thrown")
     } catch (error) {
       expect((error as Panic).code).toBe("RETRY_INVALID_LIMIT")

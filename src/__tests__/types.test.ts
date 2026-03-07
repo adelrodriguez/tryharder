@@ -5,6 +5,7 @@ import type {
   TimeoutError,
   UnhandledException,
 } from "../errors"
+import type { RetryOptions, RetryPolicy } from "../lib/types/retry"
 import * as try$ from "../index"
 
 type Expect<T extends true> = T
@@ -69,6 +70,12 @@ describe("type inference", () => {
   })
 
   describe("builder entrypoints", () => {
+    it("retryOptions is exposed from the root entrypoint", () => {
+      const normalizeRetry = try$.retryOptions
+
+      type _assert = Expect<Equal<typeof normalizeRetry, (policy: RetryOptions) => RetryPolicy>>
+    })
+
     it("retry(number) preserves runSync() with retry error union", () => {
       const retryBuilder = try$.retry(3)
       const result = retryBuilder.run(() => 1)
@@ -82,6 +89,12 @@ describe("type inference", () => {
       >
 
       if (typecheckOnly()) {
+        // @ts-expect-error -- orchestration is unavailable after retry()
+        void retryBuilder.all
+        // @ts-expect-error -- orchestration is unavailable after retry()
+        void retryBuilder.allSettled
+        // @ts-expect-error -- orchestration is unavailable after retry()
+        void retryBuilder.flow
         // @ts-expect-error -- wrap() is unavailable after retry()
         void retryBuilder.wrap
         // @ts-expect-error -- gen() is unavailable after retry()
@@ -98,6 +111,12 @@ describe("type inference", () => {
       >
 
       if (typecheckOnly()) {
+        // @ts-expect-error -- orchestration is unavailable after retry()
+        void retryBuilder.all
+        // @ts-expect-error -- orchestration is unavailable after retry()
+        void retryBuilder.allSettled
+        // @ts-expect-error -- orchestration is unavailable after retry()
+        void retryBuilder.flow
         // @ts-expect-error -- wrap() is unavailable after retry()
         void retryBuilder.wrap
         // @ts-expect-error -- runSync() is unavailable after object retry()
@@ -116,6 +135,12 @@ describe("type inference", () => {
       >
 
       if (typecheckOnly()) {
+        // @ts-expect-error -- orchestration is unavailable after timeout()
+        void timeoutBuilder.all
+        // @ts-expect-error -- orchestration is unavailable after timeout()
+        void timeoutBuilder.allSettled
+        // @ts-expect-error -- orchestration is unavailable after timeout()
+        void timeoutBuilder.flow
         // @ts-expect-error -- wrap() is unavailable after retry(), timeout(), or signal()
         void timeoutBuilder.wrap
       }
@@ -124,10 +149,33 @@ describe("type inference", () => {
     it("signal() returns an async-only builder with cancellation error union", () => {
       const signalBuilder = try$.signal(new AbortController().signal)
       const result = signalBuilder.run(() => 1)
+      const allResult = signalBuilder.all({
+        a() {
+          return 1 as const
+        },
+        async b() {
+          return await this.$result.a
+        },
+      })
+      const settledResult = signalBuilder.allSettled({
+        a() {
+          return "ok" as const
+        },
+      })
+      const flowResult = signalBuilder.flow({
+        a() {
+          return this.$exit("done" as const)
+        },
+      })
 
       type _assert = Expect<
         Equal<typeof result, Promise<number | UnhandledException | CancellationError>>
       >
+      type _assertAll = Expect<Equal<typeof allResult, Promise<{ a: 1; b: 1 }>>>
+      type _assertSettled = Expect<
+        Equal<typeof settledResult, Promise<{ a: try$.SettledResult<"ok"> }>>
+      >
+      type _assertFlow = Expect<Equal<typeof flowResult, Promise<"done">>>
 
       if (typecheckOnly()) {
         // @ts-expect-error -- wrap() is unavailable after retry(), timeout(), or signal()
@@ -176,6 +224,7 @@ describe("type inference", () => {
 
     it("retry run returns Promise union", () => {
       const result = try$.retry(3).run(() => Promise.resolve(42))
+
       type _assert = Expect<
         Equal<typeof result, Promise<number | UnhandledException | RetryExhaustedError>>
       >
@@ -666,59 +715,25 @@ describe("type inference", () => {
   })
 
   describe("combined api chains", () => {
-    it("retry + timeout + signal + all preserves task result map", () => {
+    it("signal + all preserves task result map", () => {
       if (typecheckOnly()) return
 
-      const ac = new AbortController()
-
-      const result = try$
-        .retry(3)
-        .timeout(1000)
-        .signal(ac.signal)
-        .all({
-          a() {
-            return 1
-          },
-          async b() {
-            return (await this.$result.a) + 1
-          },
-        })
+      const result = try$.signal(new AbortController().signal).all({
+        a() {
+          return 1
+        },
+        async b() {
+          return (await this.$result.a) + 1
+        },
+      })
 
       type _assert = Expect<Equal<typeof result, Promise<{ a: 1; b: number }>>>
     })
 
-    it("timeout + signal + allSettled preserves settled map", () => {
+    it("signal + allSettled preserves settled map", () => {
       if (typecheckOnly()) return
 
-      const ac = new AbortController()
-
-      const result = try$
-        .timeout(1000)
-        .signal(ac.signal)
-        .allSettled({
-          a() {
-            return 1
-          },
-          b() {
-            return "ok"
-          },
-        })
-
-      type _assert = Expect<
-        Equal<
-          typeof result,
-          Promise<{
-            a: try$.SettledResult<1>
-            b: try$.SettledResult<"ok">
-          }>
-        >
-      >
-    })
-
-    it("retry + allSettled return type has no RetryExhaustedError", () => {
-      if (typecheckOnly()) return
-
-      const result = try$.retry(3).allSettled({
+      const result = try$.signal(new AbortController().signal).allSettled({
         a() {
           return 1
         },
@@ -736,6 +751,19 @@ describe("type inference", () => {
           }>
         >
       >
+    })
+
+    it("retry/timeout chains do not expose orchestration even after signal()", () => {
+      if (typecheckOnly()) {
+        const signal = new AbortController().signal
+
+        // @ts-expect-error -- orchestration remains unavailable after retry().signal()
+        void try$.retry(3).signal(signal).all
+        // @ts-expect-error -- orchestration remains unavailable after timeout().signal()
+        void try$.timeout(1000).signal(signal).allSettled
+        // @ts-expect-error -- orchestration remains unavailable after retry().timeout().signal()
+        void try$.retry(3).timeout(1000).signal(signal).flow
+      }
     })
   })
 })

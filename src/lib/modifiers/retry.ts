@@ -4,7 +4,7 @@ import type { RetryOptions, RetryPolicy } from "../types/retry"
 import { Panic } from "../errors"
 import { assertUnreachable, invariant } from "../utils"
 
-export function createRetryPolicy(policy: RetryOptions): RetryPolicy {
+export function retryOptions(policy: RetryOptions): RetryPolicy {
   const limit = typeof policy === "number" ? policy : policy.limit
 
   invariant(Number.isFinite(limit), new Panic("RETRY_INVALID_LIMIT"))

@@ -15,7 +15,7 @@ export const wrap: RunBuilder["wrap"] = root.wrap.bind(root)
 export { dispose } from "./lib/dispose"
 export { driveGen as gen } from "./lib/gen"
 
-export { createRetryPolicy } from "./lib/modifiers/retry"
+export { retryOptions } from "./lib/modifiers/retry"
 
 export type {
   AllSettledResult,
@@ -23,4 +23,4 @@ export type {
   SettledRejected,
   SettledResult,
 } from "./lib/types/all"
-export type { FlowExit } from "./lib/executors/flow"
+export type { FlowExit } from "./lib/types/flow"

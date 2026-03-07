@@ -29,7 +29,7 @@ const result = await try$
 - [Usage](#usage)
   - [run and runSync](#run-and-runsync)
   - [retry timeout signal wrap](#retry-timeout-signal-wrap)
-  - [all and settled all](#all-and-settled-all)
+  - [all and allSettled](#all-and-allsettled)
   - [flow and exit](#flow-and-exit)
   - [gen](#gen)
   - [dispose](#dispose)
@@ -69,17 +69,17 @@ yarn add hardtry
 
 ## Core Concepts
 
-| Term                   | Meaning                                                                     |
-| ---------------------- | --------------------------------------------------------------------------- |
-| `run`                  | Async entrypoint that returns `Promise<value \| error>`                     |
-| `runSync`              | Sync entrypoint for sync-only execution                                     |
-| `retry(limit)`         | Retry policy, where `limit` includes the first attempt                      |
-| `timeout(ms)`          | Total execution timeout (attempts + delays + catch)                         |
-| `signal(abortSignal)`  | External cancellation integration                                           |
-| `wrap(fn)`             | Top-level middleware builder for `run`, `runSync`, `all`, `flow`, and `gen` |
-| `all(tasks)`           | Fail-fast parallel named tasks                                              |
-| `settled().all(tasks)` | Settled parallel named tasks                                                |
-| `flow(tasks)`          | Task orchestration with early exit                                          |
+| Term                  | Meaning                                                                            |
+| --------------------- | ---------------------------------------------------------------------------------- |
+| `run`                 | Async entrypoint that returns `Promise<value \| error>`                            |
+| `runSync`             | Sync entrypoint for sync-only execution                                            |
+| `retry(limit)`        | Retry policy, where `limit` includes the first attempt                             |
+| `timeout(ms)`         | Total execution timeout (attempts + delays + catch)                                |
+| `signal(abortSignal)` | External cancellation integration                                                  |
+| `wrap(fn)`            | Top-level middleware builder for `run`, `runSync`, `all`, `allSettled`, and `flow` |
+| `all(tasks)`          | Fail-fast parallel named tasks                                                     |
+| `allSettled(tasks)`   | Settled parallel named tasks                                                       |
+| `flow(tasks)`         | Task orchestration with early exit                                                 |
 
 ## Quick Start
 
@@ -139,9 +139,12 @@ const wrapped = await try$.wrap((ctx, next) => next(ctx)).run(async () => "ok")
 // wrap is top-level only
 // valid: try$.wrap(w1).wrap(w2).all(...)
 // invalid: try$.retry(3).wrap(w1)
+// retry/timeout apply to run()/runSync() only
+// valid: try$.signal(controller.signal).all(...)
+// invalid: try$.timeout(1_000).all(...)
 ```
 
-### all and settled all
+### all and allSettled
 
 Fail-fast parallel tasks:
 
@@ -162,7 +165,7 @@ const values = await try$.all({
 Settled mode:
 
 ```ts
-const settled = await try$.settled().all({
+const settled = await try$.allSettled({
   fail() {
     throw new Error("boom")
   },
@@ -253,7 +256,7 @@ disposer.defer(() => {
 From `hardtry`:
 
 - `retry`
-- `settled`
+- `allSettled`
 - `timeout`
 - `signal`
 - `wrap`
@@ -263,7 +266,7 @@ From `hardtry`:
 - `flow`
 - `dispose`
 - `gen`
-- `createRetryPolicy`
+- `retryOptions`
 
 From `hardtry/errors`:
 
@@ -284,13 +287,14 @@ import { Panic, TimeoutError, UnhandledException } from "hardtry/errors"
 - `run({ try, catch })` -> `Promise<T | C | ConfigErrors>`
 - `runSync(tryFn)` -> `T | UnhandledException`
 - `all(tasks)` -> `Promise<{ [K in keyof T]: Awaited<ReturnType<T[K]>> }>`
-- `settled().all(tasks)` -> settled result map
+- `allSettled(tasks)` -> settled result map
 - `flow(tasks)` -> `Promise<FlowExitUnion>`
 
 ## Notes
 
 - Retry `limit` includes the first attempt.
 - Timeout scope is total execution.
+- `retry()` and `timeout()` only compose with `run()` / `runSync()`. Use nested `run()` calls inside orchestration tasks for leaf policies.
 - Error classes and `PanicCode` are exported from `hardtry/errors`.
 - `flow` requires at least one `$exit(...)` path; otherwise it throws.
 - Control outcomes have precedence over mapped catch results in racing scenarios.

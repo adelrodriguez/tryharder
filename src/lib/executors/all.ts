@@ -7,12 +7,11 @@ import type {
   TaskValidation,
 } from "../types/all"
 import type { BuilderConfig } from "../types/builder"
-import { CancellationError, Panic, RetryExhaustedError, TimeoutError } from "../errors"
-import { checkIsControlError, checkIsPromiseLike } from "../utils"
-import { BaseExecution } from "./base"
-import { TaskExecution } from "./shared"
+import { CancellationError, Panic } from "../errors"
+import { checkIsPromiseLike } from "../utils"
+import { OrchestrationExecution, TaskExecution } from "./shared"
 
-class AllExecution<T extends TaskRecord, C> extends BaseExecution<Promise<AllValue<T> | C>> {
+class AllExecution<T extends TaskRecord, C> extends OrchestrationExecution<AllValue<T> | C> {
   readonly #tasks: T
   readonly #options: AllOptions<T, C> | undefined
 
@@ -22,73 +21,25 @@ class AllExecution<T extends TaskRecord, C> extends BaseExecution<Promise<AllVal
     this.#options = options
   }
 
-  protected override async executeCore(): Promise<AllValue<T> | C> {
-    let currentAttempt = 1
-
-    // oxlint-disable-next-line typescript/no-unnecessary-condition
-    while (true) {
-      const controlBeforeAttempt = this.checkDidControlFail()
-
-      if (controlBeforeAttempt) {
-        throw controlBeforeAttempt
-      }
-
-      this.ctx.retry.attempt = currentAttempt
-
-      try {
-        // oxlint-disable-next-line no-await-in-loop
-        const result = await this.#executeAttempt()
-
-        if (result instanceof CancellationError || result instanceof TimeoutError) {
-          throw result
-        }
-
-        return result
-      } catch (error) {
-        if (checkIsControlError(error)) {
-          throw error
-        }
-
-        const controlAfterFailure = this.checkDidControlFail(error)
-
-        if (controlAfterFailure) {
-          throw controlAfterFailure
-        }
-
-        const retryDecision = this.buildRetryDecision(error)
-
-        if (!retryDecision.shouldAttemptRetry) {
-          if (retryDecision.isRetryExhausted) {
-            throw new RetryExhaustedError(undefined, { cause: error })
-          }
-
-          throw error
-        }
-
-        // oxlint-disable-next-line no-await-in-loop
-        const delayControlResult = await this.waitForRetryDelay(retryDecision.delay)
-
-        if (delayControlResult) {
-          throw delayControlResult
-        }
-
-        currentAttempt += 1
-      }
-    }
-  }
-
-  async #executeAttempt(): Promise<AllValue<T> | C | CancellationError | TimeoutError> {
+  protected override async executeTasks(): Promise<AllValue<T> | C> {
     await using execution = new TaskExecution(this.signal.signal, this.#tasks, "fail-fast")
 
     try {
-      const result = await this.race(execution.execute())
+      const result = await this.signal.race(execution.execute())
+      const cancellation = this.signal.checkDidCancel()
 
-      if (result instanceof CancellationError || result instanceof TimeoutError) {
-        return result
+      if (cancellation) {
+        throw cancellation
       }
 
       return result as AllValue<T>
     } catch (error) {
+      const controlAfterFailure = this.checkDidControlFail(error)
+
+      if (controlAfterFailure) {
+        throw controlAfterFailure
+      }
+
       if (!this.#options?.catch) {
         throw error
       }
@@ -109,9 +60,9 @@ class AllExecution<T extends TaskRecord, C> extends BaseExecution<Promise<AllVal
       }
 
       if (checkIsPromiseLike(mapped)) {
-        const raced = await this.race(
+        const raced = await this.signal.race(
           Promise.resolve(mapped).catch((catchError: unknown) => {
-            if (catchError instanceof CancellationError || catchError instanceof TimeoutError) {
+            if (catchError instanceof CancellationError) {
               throw catchError
             }
 
@@ -119,12 +70,13 @@ class AllExecution<T extends TaskRecord, C> extends BaseExecution<Promise<AllVal
           }),
           error
         )
+        const cancellation = this.signal.checkDidCancel(error)
 
-        if (raced instanceof CancellationError || raced instanceof TimeoutError) {
-          throw raced
+        if (cancellation) {
+          throw cancellation
         }
 
-        return raced
+        return raced as C
       }
 
       return mapped
@@ -140,20 +92,3 @@ export async function executeAll<T extends TaskRecord, C = never>(
   using execution = new AllExecution(config, tasks, options)
   return (await execution.execute()) as { [K in keyof T]: TaskResult<T[K]> } | C
 }
-
-export type {
-  AllCatchContext,
-  AllCatchFn,
-  AllOptions,
-  AllSettledResult,
-  AllValue,
-  InferredTaskContext,
-  ResultProxy,
-  SettledFulfilled,
-  SettledRejected,
-  SettledResult,
-  TaskContext,
-  TaskRecord,
-  TaskResult,
-  TaskValidation,
-} from "../types/all"

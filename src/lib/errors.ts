@@ -2,6 +2,7 @@ export type PanicCode =
   | "ALL_CATCH_HANDLER_REJECT"
   | "ALL_CATCH_HANDLER_THROW"
   | "FLOW_NO_EXIT"
+  | "ORCHESTRATION_UNSUPPORTED_POLICY"
   | "RETRY_INVALID_LIMIT"
   | "RUN_CATCH_HANDLER_REJECT"
   | "RUN_CATCH_HANDLER_THROW"
@@ -20,6 +21,7 @@ export const PanicMessages = {
   ALL_CATCH_HANDLER_REJECT: "Panic: all() catch handler rejected",
   ALL_CATCH_HANDLER_THROW: "Panic: all() catch handler threw",
   FLOW_NO_EXIT: "flow() requires at least one task to call $exit().",
+  ORCHESTRATION_UNSUPPORTED_POLICY: "Orchestration does not support retry() or timeout() policies.",
   RETRY_INVALID_LIMIT: "retry() requires a non-negative finite retry limit.",
   RUN_CATCH_HANDLER_REJECT: "Panic: run() catch handler rejected",
   RUN_CATCH_HANDLER_THROW: "Panic: run() catch handler threw",

@@ -400,6 +400,15 @@ describe("builder chaining", () => {
     expect(failsAfterTwoTries.attempts).toBe(2)
   })
 
+  it("removes orchestration methods from retry()/timeout() builders at runtime", () => {
+    const signal = new AbortController().signal
+
+    expect((try$.retry(3) as unknown as { all?: unknown }).all).toBeUndefined()
+    expect((try$.timeout(100) as unknown as { allSettled?: unknown }).allSettled).toBeUndefined()
+    expect((try$.retry(3).signal(signal) as unknown as { flow?: unknown }).flow).toBeUndefined()
+    expect(typeof (try$.signal(signal) as unknown as { all?: unknown }).all).toBe("function")
+  })
+
   it("supports multiple wraps in top-level wrap chain", async () => {
     const events: string[] = []
 
@@ -663,18 +672,22 @@ describe("flow", () => {
     expect(wrapCalls).toBe(1)
   })
 
-  it("applies retry policy in chained flow execution", async () => {
+  it("retries leaf work inside flow tasks via nested run()", async () => {
     let attempts = 0
 
-    const result = await try$.retry(2).flow({
-      a() {
-        attempts += 1
+    const result = await try$.flow({
+      async a() {
+        const value = await try$.retry(2).run(() => {
+          attempts += 1
 
-        if (attempts === 1) {
-          throw new Error("boom")
-        }
+          if (attempts === 1) {
+            throw new Error("boom")
+          }
 
-        return this.$exit("ok")
+          return "ok"
+        })
+
+        return this.$exit(value)
       },
     })
 
@@ -682,17 +695,40 @@ describe("flow", () => {
     expect(attempts).toBe(2)
   })
 
-  it("applies timeout policy in chained flow execution", async () => {
+  it("applies timeout policy to leaf work inside flow tasks via nested run()", async () => {
+    const result = await try$.flow({
+      async a() {
+        return this.$exit(
+          await try$.timeout(5).run(async () => {
+            await sleep(20)
+            return "late"
+          })
+        )
+      },
+    })
+
+    expect(result).toBeInstanceOf(TimeoutError)
+  })
+
+  it("honors cancellation signal in chained flow execution", async () => {
+    const controller = new AbortController()
+
+    const pending = try$.signal(controller.signal).flow({
+      async a() {
+        await sleep(20)
+        return this.$exit("late")
+      },
+    })
+
+    setTimeout(() => {
+      controller.abort(new Error("stop"))
+    }, 5)
+
     try {
-      await try$.timeout(5).flow({
-        async a() {
-          await sleep(20)
-          return this.$exit("late")
-        },
-      })
+      await pending
       expect.unreachable("should have thrown")
     } catch (error) {
-      expect(error).toBeInstanceOf(TimeoutError)
+      expect(error).toBeInstanceOf(CancellationError)
     }
   })
 
@@ -780,50 +816,63 @@ describe("allSettled", () => {
     expect(result.b).toEqual({ status: "fulfilled", value: "fallback" })
   })
 
-  it("returns settled results with retry and timeout builder options", async () => {
-    const result = await try$
-      .retry(3)
-      .timeout(100)
-      .allSettled({
-        a() {
+  it("applies nested run() policies inside allSettled tasks", async () => {
+    let attempts = 0
+
+    const result = await try$.allSettled({
+      async a() {
+        return await try$.retry(2).run(() => {
+          attempts += 1
+
+          if (attempts === 1) {
+            throw new Error("boom")
+          }
+
           return 1
-        },
-        b() {
-          throw new Error("boom")
-        },
-      })
+        })
+      },
+      async b() {
+        const value = await try$.timeout(5).run(async () => {
+          await sleep(20)
+          return 2
+        })
+
+        if (value instanceof TimeoutError) {
+          throw value
+        }
+
+        return value
+      },
+    })
 
     expect(result.a).toEqual({ status: "fulfilled", value: 1 })
     expect(result.b.status).toBe("rejected")
+    expect(attempts).toBe(2)
   })
 
   it("honors cancellation signal from builder options", async () => {
     const controller = new AbortController()
 
-    const pending = try$
-      .retry(3)
-      .timeout(100)
-      .signal(controller.signal)
-      .allSettled({
-        async a() {
-          await sleep(20)
+    const pending = try$.signal(controller.signal).allSettled({
+      async a() {
+        await sleep(20)
 
-          if (this.$signal.aborted) {
-            throw this.$signal.reason
-          }
+        if (this.$signal.aborted) {
+          throw this.$signal.reason
+        }
 
-          return 1
-        },
-        async b() {
-          await sleep(25)
+        return 1
+      },
+      async b() {
+        await sleep(25)
 
-          if (this.$signal.aborted) {
-            throw this.$signal.reason
-          }
+        if (this.$signal.aborted) {
+          throw this.$signal.reason
+        }
 
-          return 2
-        },
-      })
+        return 2
+      },
+    })
 
     setTimeout(() => {
       controller.abort(new Error("stop"))
@@ -982,21 +1031,29 @@ describe("all", () => {
     }
   })
 
-  it("returns resolved values with retry and timeout builder options", async () => {
-    const result = await try$
-      .retry(3)
-      .timeout(100)
-      .all({
-        a() {
+  it("retries leaf work inside all() tasks via nested run()", async () => {
+    let attempts = 0
+
+    const result = await try$.all({
+      async a() {
+        return await try$.retry(2).run(() => {
+          attempts += 1
+
+          if (attempts === 1) {
+            throw new Error("boom")
+          }
+
           return 1
-        },
-        async b() {
-          await sleep(5)
-          return 2
-        },
-      })
+        })
+      },
+      async b() {
+        await sleep(5)
+        return 2
+      },
+    })
 
     expect(result).toEqual({ a: 1, b: 2 })
+    expect(attempts).toBe(2)
   })
 
   it("applies wrap middleware around all execution", async () => {
@@ -1021,25 +1078,21 @@ describe("all", () => {
   it("honors cancellation signal from builder options", async () => {
     const controller = new AbortController()
 
-    const pending = try$
-      .retry(3)
-      .timeout(100)
-      .signal(controller.signal)
-      .all({
-        async a() {
-          await sleep(20)
+    const pending = try$.signal(controller.signal).all({
+      async a() {
+        await sleep(20)
 
-          if (this.$signal.aborted) {
-            throw this.$signal.reason
-          }
+        if (this.$signal.aborted) {
+          throw this.$signal.reason
+        }
 
-          return 1
-        },
-        async b() {
-          await sleep(20)
-          return 2
-        },
-      })
+        return 1
+      },
+      async b() {
+        await sleep(20)
+        return 2
+      },
+    })
 
     setTimeout(() => {
       controller.abort(new Error("stop"))

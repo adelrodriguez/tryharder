@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { CancellationError, TimeoutError } from "../../errors"
+import { CancellationError, Panic } from "../../errors"
 import { sleep } from "../../utils"
 import { executeAllSettled } from "../all-settled"
 
@@ -83,6 +83,28 @@ describe("executeAllSettled", () => {
   })
 
   describe("wrap behavior", () => {
+    it("rejects retry/timeout config for orchestration execution", async () => {
+      try {
+        await executeAllSettled(
+          {
+            retry: { backoff: "constant", limit: 2 },
+            timeout: 100,
+          },
+          {
+            only() {
+              return 1
+            },
+          }
+        )
+        expect.unreachable("should have thrown")
+      } catch (error) {
+        expect(error).toBeInstanceOf(Panic)
+        expect((error as Panic).code).toBe("ORCHESTRATION_UNSUPPORTED_POLICY")
+        expect((error as Error).message).toContain("retry")
+        expect((error as Error).message).toContain("timeout")
+      }
+    })
+
     it("applies wrap middleware once around settled execution", async () => {
       let wrapCalls = 0
 
@@ -111,13 +133,12 @@ describe("executeAllSettled", () => {
       expect(wrapCalls).toBe(1)
     })
 
-    it("passes retry metadata to wrap middleware", async () => {
+    it("uses default retry metadata in wrap middleware for orchestration execution", async () => {
       const attempts: number[] = []
       const limits: number[] = []
 
       const result = await executeAllSettled(
         {
-          retry: { backoff: "constant", delayMs: 0, limit: 3 },
           wraps: [
             (ctx, next) => {
               attempts.push(ctx.retry.attempt)
@@ -135,28 +156,7 @@ describe("executeAllSettled", () => {
 
       expect(result.only).toEqual({ status: "fulfilled", value: "ok" })
       expect(attempts).toEqual([1])
-      expect(limits).toEqual([3])
-    })
-  })
-
-  describe("timeout config", () => {
-    it("rejects with TimeoutError when tasks exceed configured timeout", async () => {
-      try {
-        await executeAllSettled(
-          {
-            timeout: 10,
-          },
-          {
-            async a() {
-              await sleep(50)
-              return 1
-            },
-          }
-        )
-        expect.unreachable("should have thrown")
-      } catch (error) {
-        expect(error).toBeInstanceOf(TimeoutError)
-      }
+      expect(limits).toEqual([1])
     })
   })
 
@@ -336,150 +336,6 @@ describe("executeAllSettled", () => {
       )
 
       expect(result.only).toEqual({ reason: error, status: "rejected" })
-    })
-  })
-
-  describe("retry", () => {
-    it("returns settled results when retries are exhausted", async () => {
-      let attempts = 0
-
-      const result = await executeAllSettled(
-        {
-          retry: {
-            backoff: "constant",
-            delayMs: 0,
-            limit: 2,
-          },
-        },
-        {
-          a() {
-            attempts += 1
-            throw new Error("boom")
-          },
-          b() {
-            return "ok"
-          },
-        }
-      )
-
-      expect(result.a.status).toBe("rejected")
-      expect(result.b).toEqual({ status: "fulfilled", value: "ok" })
-      expect(attempts).toBe(2)
-    })
-
-    it("does not retry when all tasks succeed", async () => {
-      let attempts = 0
-
-      const result = await executeAllSettled(
-        {
-          retry: {
-            backoff: "constant",
-            delayMs: 0,
-            limit: 3,
-          },
-        },
-        {
-          a() {
-            attempts += 1
-            return 42
-          },
-        }
-      )
-
-      expect(result.a).toEqual({ status: "fulfilled", value: 42 })
-      expect(attempts).toBe(1)
-    })
-
-    it("respects shouldRetry returning false", async () => {
-      let attempts = 0
-
-      const result = await executeAllSettled(
-        {
-          retry: {
-            backoff: "constant",
-            delayMs: 0,
-            limit: 3,
-            shouldRetry: () => false,
-          },
-        },
-        {
-          a() {
-            attempts += 1
-            throw new Error("boom")
-          },
-        }
-      )
-
-      expect(result.a.status).toBe("rejected")
-      expect(attempts).toBe(1)
-    })
-
-    it("waits for all tasks to settle before retrying", async () => {
-      let concurrentRuns = 0
-      let maxConcurrentRuns = 0
-      let attempts = 0
-
-      const result = await executeAllSettled(
-        {
-          retry: {
-            backoff: "constant",
-            delayMs: 0,
-            limit: 2,
-          },
-        },
-        {
-          a() {
-            attempts += 1
-
-            if (attempts === 1) {
-              throw new Error("boom")
-            }
-
-            return 42
-          },
-          async b() {
-            concurrentRuns += 1
-            maxConcurrentRuns = Math.max(maxConcurrentRuns, concurrentRuns)
-            await sleep(50)
-            concurrentRuns -= 1
-          },
-        }
-      )
-
-      expect(result.a).toEqual({ status: "fulfilled", value: 42 })
-      expect(maxConcurrentRuns).toBe(1)
-    })
-
-    it("retries when a task is rejected and succeeds on next attempt", async () => {
-      let attempts = 0
-
-      const result = await executeAllSettled(
-        {
-          retry: {
-            backoff: "constant",
-            delayMs: 0,
-            limit: 2,
-          },
-        },
-        {
-          a() {
-            attempts += 1
-
-            if (attempts === 1) {
-              throw new Error("boom")
-            }
-
-            return 42
-          },
-          b() {
-            return "ok"
-          },
-        }
-      )
-
-      expect(result.a).toEqual({ status: "fulfilled", value: 42 })
-      expect(result.b).toEqual({ status: "fulfilled", value: "ok" })
-      expect(attempts).toBe(2)
     })
   })
 
