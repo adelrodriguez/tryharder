@@ -13,9 +13,9 @@ class AllSettledExecution<T extends TaskRecord> extends OrchestrationExecution<
   }
 
   protected override async executeTasks(): Promise<AllSettledResult<T>> {
-    await using execution = new TaskExecution(this.signal.signal, this.#tasks, "settled")
-    const result = await this.signal.race(execution.execute())
-    const cancellation = this.signal.checkDidCancel()
+    await using execution = new TaskExecution(this.executionSignal, this.#tasks, "settled")
+    const result = await this.raceWithCancellation(execution.execute())
+    const cancellation = this.checkDidCancel()
 
     if (cancellation) {
       throw cancellation

@@ -376,11 +376,26 @@ describe("retry behavior", () => {
     expect(result).toBeInstanceOf(RetryExhaustedError)
     expect(shouldRetryCalls).toBe(2)
   })
+
+  it("keeps ctx.signal undefined for retry-only executions", async () => {
+    const result = await try$.retry(2).run((ctx) => {
+      expect(ctx.signal).toBeUndefined()
+
+      if (ctx.retry.attempt === 1) {
+        throw new Error("boom")
+      }
+
+      return ctx.retry.attempt
+    })
+
+    expect(result).toBe(2)
+  })
 })
 
 describe("timeout and cancellation behavior", () => {
   it("returns TimeoutError when timeout expires during try execution", async () => {
-    const result = await try$.timeout(5).run(async () => {
+    const result = await try$.timeout(5).run(async (ctx) => {
+      expect(ctx.signal).toBeDefined()
       await sleep(20)
       return "never"
     })
@@ -415,7 +430,9 @@ describe("timeout and cancellation behavior", () => {
 
   it("returns CancellationError when signal aborts during async try", async () => {
     const controller = new AbortController()
-    const pending = try$.signal(controller.signal).run(async () => {
+    const pending = try$.signal(controller.signal).run(async (ctx) => {
+      expect(ctx.signal).toBeDefined()
+      expect(ctx.signal).not.toBe(controller.signal)
       await sleep(25)
       return "ok"
     })
@@ -425,6 +442,21 @@ describe("timeout and cancellation behavior", () => {
     }, 5)
 
     const result = await pending
+
+    expect(result).toBeInstanceOf(CancellationError)
+  })
+
+  it("prefers cancellation over timeout when both controls are already tripped", async () => {
+    const controller = new AbortController()
+    controller.abort(new Error("cancelled"))
+
+    const result = await try$
+      .signal(controller.signal)
+      .timeout(0)
+      .run((ctx) => {
+        expect(ctx.signal).toBeDefined()
+        return "never"
+      })
 
     expect(result).toBeInstanceOf(CancellationError)
   })

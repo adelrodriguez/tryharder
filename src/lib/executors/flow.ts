@@ -127,13 +127,13 @@ class FlowRunnerExecution<T extends TaskRecord> extends OrchestrationExecution<F
   }
 
   protected override async executeTasks(): Promise<FlowResult<T>> {
-    await using execution = new FlowExecution(this.signal.signal, this.#tasks)
+    await using execution = new FlowExecution(this.executionSignal, this.#tasks)
     let result!: FlowResult<T>
     let threw = false
     let thrownError: unknown
 
     try {
-      result = (await this.signal.race(execution.execute())) as FlowResult<T>
+      result = (await this.raceWithCancellation(execution.execute())) as FlowResult<T>
     } catch (error) {
       threw = true
       thrownError = error
@@ -141,7 +141,7 @@ class FlowRunnerExecution<T extends TaskRecord> extends OrchestrationExecution<F
       await execution.waitForTasksToSettle()
     }
 
-    const cancellation = this.signal.checkDidCancel(thrownError)
+    const cancellation = this.checkDidCancel(thrownError)
 
     if (cancellation) {
       throw cancellation

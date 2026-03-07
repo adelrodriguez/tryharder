@@ -38,19 +38,20 @@ export class RetryDirective {
 export abstract class BaseExecution<TResult = unknown> {
   protected readonly config: BuilderConfig
   protected readonly ctx: TryCtx
+  protected readonly executionSignal: AbortSignal | undefined
   readonly #wrapCtx: WrapCtx
-  protected readonly signal: SignalController
-  protected readonly timeout: TimeoutController
+  readonly #signalController: SignalController | undefined
+  readonly #timeoutController: TimeoutController | undefined
 
   protected constructor(config: BuilderConfig, options: BaseExecutionOptions = {}) {
     this.config = config
-    this.timeout = new TimeoutController(config.timeout)
-    this.signal = new SignalController(
-      [...(config.signals ?? []), this.timeout.signal].filter(
-        (value): value is AbortSignal => value !== undefined
-      )
+    this.#timeoutController = BaseExecution.createTimeoutController(config.timeout)
+    this.#signalController = BaseExecution.createSignalController(
+      config.signals,
+      this.#timeoutController?.signal
     )
-    this.ctx = BaseExecution.createContext(config, this.signal.signal, options.retryLimit)
+    this.executionSignal = this.#signalController?.signal
+    this.ctx = BaseExecution.createContext(config, this.executionSignal, options.retryLimit)
     this.#wrapCtx = BaseExecution.createWrapContext(this.ctx)
   }
 
@@ -77,8 +78,13 @@ export abstract class BaseExecution<TResult = unknown> {
 
   [Symbol.dispose](): void {
     using disposer = new DisposableStack()
-    disposer.use(this.timeout)
-    disposer.use(this.signal)
+    if (this.#timeoutController) {
+      disposer.use(this.#timeoutController)
+    }
+
+    if (this.#signalController) {
+      disposer.use(this.#signalController)
+    }
   }
 
   protected static createContext(
@@ -93,6 +99,23 @@ export abstract class BaseExecution<TResult = unknown> {
       },
       signal,
     }
+  }
+
+  protected static createTimeoutController(
+    timeoutMs: number | undefined
+  ): TimeoutController | undefined {
+    return timeoutMs === undefined ? undefined : new TimeoutController(timeoutMs)
+  }
+
+  protected static createSignalController(
+    signals: readonly AbortSignal[] | undefined,
+    timeoutSignal: AbortSignal | undefined
+  ): SignalController | undefined {
+    const composedSignals = [...(signals ?? []), timeoutSignal].filter(
+      (value): value is AbortSignal => value !== undefined
+    )
+
+    return composedSignals.length > 0 ? new SignalController(composedSignals) : undefined
   }
 
   protected static createWrapContext(ctx: TryCtx): WrapCtx {
@@ -148,29 +171,44 @@ export abstract class BaseExecution<TResult = unknown> {
     }) as WrapCtx
   }
 
+  protected checkDidCancel(cause?: unknown): CancellationError | undefined {
+    return this.#signalController?.checkDidCancel(cause)
+  }
+
+  protected raceWithCancellation<V>(
+    promise: PromiseLike<V>,
+    cause?: unknown
+  ): PromiseLike<V | CancellationError> {
+    return this.#signalController ? this.#signalController.race(promise, cause) : promise
+  }
+
   protected checkDidControlFail(cause?: unknown): CancellationError | TimeoutError | undefined {
-    return this.signal.checkDidCancel(cause) ?? this.timeout.checkDidTimeout(cause)
+    return this.checkDidCancel(cause) ?? this.#timeoutController?.checkDidTimeout(cause)
   }
 
   protected resolveSyncSuccess<T>(value: T): T | CancellationError | TimeoutError {
     return this.checkDidControlFail() ?? value
   }
 
-  protected async race<V>(
+  protected race<V>(
     promise: PromiseLike<V>,
     cause?: unknown
-  ): Promise<V | CancellationError | TimeoutError> {
-    const raced = await this.timeout.race(this.signal.race(promise, cause), cause)
+  ): PromiseLike<V | CancellationError | TimeoutError> {
+    const timeoutController = this.#timeoutController
 
-    if (raced instanceof TimeoutError) {
-      const cancelled = this.signal.checkDidCancel(cause)
-
-      if (cancelled) {
-        return cancelled
-      }
+    if (!timeoutController) {
+      return this.raceWithCancellation(promise, cause)
     }
 
-    return raced
+    return Promise.resolve(
+      timeoutController.race(this.raceWithCancellation(promise, cause), cause)
+    ).then((raced) => {
+      if (raced instanceof TimeoutError) {
+        return this.checkDidCancel(cause) ?? raced
+      }
+
+      return raced
+    })
   }
 
   protected async waitForRetryDelay(

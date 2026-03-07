@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test"
+import type { BuilderConfig } from "../builder"
 import { Panic } from "../../errors"
 import { BaseExecution } from "../executors/base"
 import { TaskGraphExecutionBase, type ResultProxy, type TaskContext } from "../executors/shared"
@@ -9,13 +10,25 @@ import { assertUnreachable, resolveWithAbort, sleep } from "../utils"
 // practical to exercise through the public API without heavy contrivance.
 
 class TestExecution extends BaseExecution<number> {
-  constructor() {
-    super({})
+  constructor(config: BuilderConfig = {}) {
+    super(config)
   }
 
   protected override executeCore() {
     void this.config
     return 1
+  }
+
+  cancel(cause?: unknown) {
+    return this.checkDidCancel(cause)
+  }
+
+  get signal() {
+    return this.ctx.signal
+  }
+
+  raceCancel<V>(promise: PromiseLike<V>, cause?: unknown) {
+    return this.raceWithCancellation(promise, cause)
   }
 
   static wrapContext() {
@@ -165,6 +178,14 @@ describe("coverage exceptions", () => {
       const execution = new SharedDefaultExecution()
 
       expect(execution.shouldAbort()).toBe(false)
+    })
+
+    it("keeps control helpers inert when execution has no signal config", async () => {
+      const execution = new TestExecution()
+
+      expect(execution.signal).toBeUndefined()
+      expect(execution.cancel()).toBeUndefined()
+      expect(await execution.raceCancel(Promise.resolve("ok"))).toBe("ok")
     })
   })
 })

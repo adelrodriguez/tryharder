@@ -22,13 +22,13 @@ class AllExecution<T extends TaskRecord, C> extends OrchestrationExecution<AllVa
   }
 
   protected override async executeTasks(): Promise<AllValue<T> | C> {
-    await using execution = new TaskExecution(this.signal.signal, this.#tasks, "fail-fast")
+    await using execution = new TaskExecution(this.executionSignal, this.#tasks, "fail-fast")
     let result!: AllValue<T> | C
     let threw = false
     let thrownError: unknown
 
     try {
-      result = (await this.signal.race(execution.execute())) as AllValue<T>
+      result = (await this.raceWithCancellation(execution.execute())) as AllValue<T>
     } catch (error) {
       const controlAfterFailure = this.checkDidControlFail(error)
       const catchFn = this.#options?.catch
@@ -47,7 +47,7 @@ class AllExecution<T extends TaskRecord, C> extends OrchestrationExecution<AllVa
           const mapped = catchFn(error, context)
           if (checkIsPromiseLike(mapped)) {
             try {
-              result = (await this.signal.race(
+              result = (await this.raceWithCancellation(
                 Promise.resolve(mapped).catch((catchError: unknown) => {
                   if (catchError instanceof CancellationError) {
                     throw catchError
@@ -76,7 +76,7 @@ class AllExecution<T extends TaskRecord, C> extends OrchestrationExecution<AllVa
       await execution.waitForTasksToSettle()
     }
 
-    const cancellation = this.signal.checkDidCancel(thrownError)
+    const cancellation = this.checkDidCancel(thrownError)
 
     if (cancellation) {
       throw cancellation
