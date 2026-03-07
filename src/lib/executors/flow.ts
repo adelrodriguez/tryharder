@@ -187,7 +187,7 @@ class FlowRunnerExecution<T extends TaskRecord> extends BaseExecution<Promise<Fl
 
     // oxlint-disable-next-line typescript/no-unnecessary-condition
     while (true) {
-      const controlBeforeAttempt = this.checkBeforeAttempt()
+      const controlBeforeAttempt = this.checkDidControlFail()
 
       if (controlBeforeAttempt) {
         throw controlBeforeAttempt

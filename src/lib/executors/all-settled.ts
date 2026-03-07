@@ -26,7 +26,7 @@ class AllSettledExecution<T extends TaskRecord> extends BaseExecution<
 
     // oxlint-disable-next-line typescript/no-unnecessary-condition
     while (true) {
-      const controlBeforeAttempt = this.checkBeforeAttempt()
+      const controlBeforeAttempt = this.checkDidControlFail()
 
       if (controlBeforeAttempt) {
         throw controlBeforeAttempt

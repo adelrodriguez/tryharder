@@ -1,9 +1,15 @@
 import type { BuilderConfig } from "../types/builder"
 import type { TryCtx } from "../types/core"
 import type { RetryOptions, RetryPolicy } from "../types/retry"
-import { assertUnreachable } from "../utils"
+import { Panic } from "../errors"
+import { assertUnreachable, invariant } from "../utils"
 
 export function createRetryPolicy(policy: RetryOptions): RetryPolicy {
+  const limit = typeof policy === "number" ? policy : policy.limit
+
+  invariant(Number.isFinite(limit), new Panic("RETRY_INVALID_LIMIT"))
+  invariant(limit >= 0, new Panic("RETRY_INVALID_LIMIT"))
+
   if (typeof policy === "number") {
     return {
       backoff: "constant",

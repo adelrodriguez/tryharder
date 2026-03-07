@@ -6,7 +6,7 @@ This project was built with [`pastry`](https://github.com/adelrodriguez/pastry) 
 
 - We use `adamantite` for linting, formatting and type checking.
 - Always run `bun run format` after editing files.
-- After making changes, run `bun run check`, `bun run typecheck` and `bun run test` to ensure the code is still valid.
+- After making changes, run `bun run check`, `bun run typecheck`, `bun run test`, and `bun run build` to ensure the code is still valid.
 - After installing or removing dependencies, run `bun run analyze` to ensure we are not using any dependencies that are not needed.
 
 ## Changesets
@@ -25,6 +25,7 @@ This project was built with [`pastry`](https://github.com/adelrodriguez/pastry) 
 
 - Prefer type inference whenever possible.
 - Do not add explicit return types unless required by tooling, declaration emit, or a public API contract.
+- Do not use explicit return types when inference already produces the correct result.
 
 ## Public API Types
 

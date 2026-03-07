@@ -1,6 +1,5 @@
 import type { BuilderConfig } from "../types/builder"
 import type { BaseTryCtx, NonPromise } from "../types/core"
-import type { RetryPolicy } from "../types/retry"
 import type { RunnerError } from "./base"
 import { Panic, RetryExhaustedError, UnhandledException, type PanicCode } from "../errors"
 import { checkIsControlError, checkIsPromiseLike, invariant } from "../utils"
@@ -28,31 +27,11 @@ export interface RunSyncOptions<T, E> {
 
 export type RunSyncInput<T, E> = RunSyncTryFn<T> | RunSyncOptions<T, E>
 
-function assertNotPromiseLike<T>(
-  value: T,
-  code: PanicCode,
-  message?: string
-): asserts value is NonPromise<T> {
+function assertNotPromiseLike(value: unknown, code: PanicCode, message?: string): void {
   invariant(
     !checkIsPromiseLike(value),
     new Panic(code, message === undefined ? undefined : { message })
   )
-}
-
-function checkIsSyncSafeRetryPolicy(retryPolicy: RetryPolicy | undefined): boolean {
-  if (!retryPolicy) {
-    return true
-  }
-
-  if (retryPolicy.backoff !== "constant") {
-    return false
-  }
-
-  if (retryPolicy.jitter) {
-    return false
-  }
-
-  return (retryPolicy.delayMs ?? 0) <= 0
 }
 
 class RunSyncExecution<T, E, Ctx extends BaseTryCtx> extends BaseExecution<T | E | RunnerError> {
@@ -76,40 +55,6 @@ class RunSyncExecution<T, E, Ctx extends BaseTryCtx> extends BaseExecution<T | E
     return this.#runAttemptLoop(1)
   }
 
-  #finalizeFailure(error: unknown): E | RunnerError {
-    if (checkIsControlError(error)) {
-      return error
-    }
-
-    if (this.#catchFn) {
-      let mapped: E
-
-      try {
-        mapped = this.#catchFn(error)
-      } catch (catchError) {
-        throw new Panic("RUN_SYNC_CATCH_HANDLER_THROW", { cause: catchError })
-      }
-
-      assertNotPromiseLike(mapped, "RUN_SYNC_CATCH_PROMISE")
-
-      const controlError = this.checkDidControlFail(error)
-
-      if (controlError) {
-        return controlError
-      }
-
-      return mapped
-    }
-
-    const controlError = this.checkDidControlFail(error)
-
-    if (controlError) {
-      return controlError
-    }
-
-    return new UnhandledException(undefined, { cause: error })
-  }
-
   #resolveFailure(error: unknown): E | RunnerError | RetryDirective {
     if (checkIsControlError(error)) {
       return error
@@ -123,15 +68,45 @@ class RunSyncExecution<T, E, Ctx extends BaseTryCtx> extends BaseExecution<T | E
 
     const retryDecision = this.buildRetryDecision(error)
 
-    if (!retryDecision.shouldAttemptRetry) {
-      if (retryDecision.isRetryExhausted) {
-        return new RetryExhaustedError(undefined, { cause: error })
-      }
-
-      return this.#finalizeFailure(error)
+    if (retryDecision.shouldAttemptRetry) {
+      return new RetryDirective(retryDecision)
     }
 
-    return new RetryDirective(retryDecision)
+    if (retryDecision.isRetryExhausted) {
+      return new RetryExhaustedError(undefined, { cause: error })
+    }
+
+    if (!this.#catchFn) {
+      // Even without a catch handler, cancellation/timeout may have won since
+      // the original failure was first observed.
+      const finalizeControlError = this.checkDidControlFail(error)
+
+      if (finalizeControlError) {
+        return finalizeControlError
+      }
+
+      return new UnhandledException(undefined, { cause: error })
+    }
+
+    let mapped: E
+
+    try {
+      mapped = this.#catchFn(error)
+    } catch (catchError) {
+      throw new Panic("RUN_SYNC_CATCH_HANDLER_THROW", { cause: catchError })
+    }
+
+    assertNotPromiseLike(mapped, "RUN_SYNC_CATCH_PROMISE")
+
+    // Control state can change while the catch handler runs, so check again
+    // before returning a mapped sync value.
+    const catchControlError = this.checkDidControlFail(error)
+
+    if (catchControlError) {
+      return catchControlError
+    }
+
+    return mapped
   }
 
   #runAttemptLoop(attempt: number): T | E | RunnerError {
@@ -139,7 +114,7 @@ class RunSyncExecution<T, E, Ctx extends BaseTryCtx> extends BaseExecution<T | E
 
     // oxlint-disable-next-line typescript/no-unnecessary-condition
     while (true) {
-      const controlBeforeAttempt = this.checkBeforeAttempt()
+      const controlBeforeAttempt = this.checkDidControlFail()
 
       if (controlBeforeAttempt) {
         return controlBeforeAttempt
@@ -185,7 +160,15 @@ export function executeRunSync<T, E, Ctx extends BaseTryCtx>(
   config: BuilderConfig,
   input: SyncRunInput<T, E, Ctx>
 ): T | E | RunnerError {
-  invariant(checkIsSyncSafeRetryPolicy(config.retry), new Panic("RUN_SYNC_ASYNC_RETRY_POLICY"))
+  // Builder typing blocks async-only retry policies, but direct executor usage and
+  // unsafe casts still need a runtime guard here.
+  const isSyncSafeRetryPolicy =
+    config.retry === undefined ||
+    (config.retry.backoff === "constant" &&
+      !config.retry.jitter &&
+      (config.retry.delayMs ?? 0) <= 0)
+
+  invariant(isSyncSafeRetryPolicy, new Panic("RUN_SYNC_ASYNC_RETRY_POLICY"))
 
   using execution = new RunSyncExecution<T, E, Ctx>(config, input)
   return execution.execute()

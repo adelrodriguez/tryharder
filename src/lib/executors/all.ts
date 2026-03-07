@@ -27,7 +27,7 @@ class AllExecution<T extends TaskRecord, C> extends BaseExecution<Promise<AllVal
 
     // oxlint-disable-next-line typescript/no-unnecessary-condition
     while (true) {
-      const controlBeforeAttempt = this.checkBeforeAttempt()
+      const controlBeforeAttempt = this.checkDidControlFail()
 
       if (controlBeforeAttempt) {
         throw controlBeforeAttempt
@@ -109,19 +109,16 @@ class AllExecution<T extends TaskRecord, C> extends BaseExecution<Promise<AllVal
       }
 
       if (checkIsPromiseLike(mapped)) {
-        const mappedWithPanic = (async (): Promise<C> => {
-          try {
-            return await mapped
-          } catch (catchError) {
+        const raced = await this.race(
+          Promise.resolve(mapped).catch((catchError: unknown) => {
             if (catchError instanceof CancellationError || catchError instanceof TimeoutError) {
               throw catchError
             }
 
             throw new Panic("ALL_CATCH_HANDLER_REJECT", { cause: catchError })
-          }
-        })()
-
-        const raced = await this.race(mappedWithPanic, error)
+          }),
+          error
+        )
 
         if (raced instanceof CancellationError || raced instanceof TimeoutError) {
           throw raced

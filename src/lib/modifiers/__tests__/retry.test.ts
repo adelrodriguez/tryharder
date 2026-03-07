@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test"
+import type { Panic } from "../../errors"
 import type { BuilderConfig } from "../../types/builder"
 import type { TryCtx } from "../../types/core"
 import {
@@ -80,6 +81,33 @@ describe("createRetryPolicy", () => {
       delayMs: 0,
       limit: 2,
     })
+  })
+
+  it("throws Panic when numeric shorthand limit is Infinity", () => {
+    try {
+      createRetryPolicy(Infinity)
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect((error as Panic).code).toBe("RETRY_INVALID_LIMIT")
+    }
+  })
+
+  it("throws Panic when object limit is NaN", () => {
+    try {
+      createRetryPolicy({ backoff: "constant", limit: Number.NaN })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect((error as Panic).code).toBe("RETRY_INVALID_LIMIT")
+    }
+  })
+
+  it("throws Panic when limit is negative", () => {
+    try {
+      createRetryPolicy(-1)
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect((error as Panic).code).toBe("RETRY_INVALID_LIMIT")
+    }
   })
 })
 

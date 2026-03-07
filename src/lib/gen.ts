@@ -1,5 +1,5 @@
-import { UnhandledException } from "../errors"
-import { checkIsControlError, checkIsPromiseLike } from "../utils"
+import { UnhandledException } from "./errors"
+import { checkIsControlError, checkIsPromiseLike } from "./utils"
 
 type GenUnwrap<T> = Exclude<Awaited<T>, Error>
 export type GenUse = <T>(value: T) => Generator<T, GenUnwrap<T>, GenUnwrap<T>>
@@ -55,7 +55,7 @@ async function executeAsyncGenerator<TYield, TReturn>(
       if (checkIsPromiseLike(step.value)) {
         try {
           // oxlint-disable-next-line no-await-in-loop
-          return (await step.value) as Awaited<TReturn>
+          return await step.value
         } catch (error) {
           if (checkIsControlError(error)) {
             return error as GenErrors<TYield>
@@ -89,7 +89,7 @@ async function executeAsyncGenerator<TYield, TReturn>(
   }
 }
 
-export function executeGen<TYield, TReturn>(
+export function driveGen<TYield, TReturn>(
   factory: (useFn: GenUse) => Generator<TYield, TReturn, unknown>
 ): GenResult<TYield, TReturn> {
   let iterator: Generator<TYield, TReturn, unknown>
@@ -129,7 +129,10 @@ export function executeGen<TYield, TReturn>(
     }
 
     if (checkIsPromiseLike(step.value)) {
-      return executeAsyncGenerator(iterator, step.value) as GenResult<TYield, TReturn>
+      return executeAsyncGenerator(iterator, step.value as PromiseLike<unknown>) as GenResult<
+        TYield,
+        TReturn
+      >
     }
 
     if (step.value instanceof Error) {

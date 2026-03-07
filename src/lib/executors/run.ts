@@ -5,8 +5,6 @@ import { Panic, RetryExhaustedError, UnhandledException } from "../errors"
 import { checkIsControlError, checkIsPromiseLike } from "../utils"
 import { BaseExecution, RetryDirective, type RetryDecision, type RunnerError } from "./base"
 
-export type { RunnerError } from "./base"
-
 /** Encapsulates the shared mutable state and logic for a single run execution. */
 export class RunExecution<T, E, Ctx extends BaseTryCtx> extends BaseExecution<
   Promise<T | E | RunnerError>
@@ -25,47 +23,6 @@ export class RunExecution<T, E, Ctx extends BaseTryCtx> extends BaseExecution<
     return this.#runAttemptLoop(1)
   }
 
-  /** Route a terminal error to the catch handler or wrap in UnhandledException. */
-  async #finalizeFailure(error: unknown): Promise<E | RunnerError> {
-    if (checkIsControlError(error)) {
-      return error
-    }
-
-    if (this.#catchFn) {
-      let mapped: E | Promise<E>
-
-      try {
-        mapped = this.#catchFn(error)
-      } catch (catchError) {
-        throw new Panic("RUN_CATCH_HANDLER_THROW", { cause: catchError })
-      }
-
-      if (checkIsPromiseLike(mapped)) {
-        try {
-          return await this.race(mapped, error)
-        } catch (catchError) {
-          throw new Panic("RUN_CATCH_HANDLER_REJECT", { cause: catchError })
-        }
-      }
-
-      const controlError = this.checkDidControlFail(error)
-
-      if (controlError) {
-        return controlError
-      }
-
-      return mapped
-    }
-
-    const controlError = this.checkDidControlFail(error)
-
-    if (controlError) {
-      return controlError
-    }
-
-    return new UnhandledException(undefined, { cause: error })
-  }
-
   /** Resolve an attempt error into either a terminal result or a retry decision. */
   async #resolveFailure(error: unknown): Promise<E | RunnerError | RetryDirective> {
     if (checkIsControlError(error)) {
@@ -80,15 +37,51 @@ export class RunExecution<T, E, Ctx extends BaseTryCtx> extends BaseExecution<
 
     const retryDecision = this.buildRetryDecision(error)
 
-    if (!retryDecision.shouldAttemptRetry) {
-      if (retryDecision.isRetryExhausted) {
-        return new RetryExhaustedError(undefined, { cause: error })
-      }
-
-      return await this.#finalizeFailure(error)
+    if (retryDecision.shouldAttemptRetry) {
+      return new RetryDirective(retryDecision)
     }
 
-    return new RetryDirective(retryDecision)
+    if (retryDecision.isRetryExhausted) {
+      return new RetryExhaustedError(undefined, { cause: error })
+    }
+
+    if (!this.#catchFn) {
+      // Even without a catch handler, cancellation/timeout may have won since
+      // the original failure was first observed.
+      const finalizeControlError = this.checkDidControlFail(error)
+
+      if (finalizeControlError) {
+        return finalizeControlError
+      }
+
+      return new UnhandledException(undefined, { cause: error })
+    }
+
+    let mapped: E | Promise<E>
+
+    try {
+      mapped = this.#catchFn(error)
+    } catch (catchError) {
+      throw new Panic("RUN_CATCH_HANDLER_THROW", { cause: catchError })
+    }
+
+    if (checkIsPromiseLike(mapped)) {
+      try {
+        return await this.race(mapped, error)
+      } catch (catchError) {
+        throw new Panic("RUN_CATCH_HANDLER_REJECT", { cause: catchError })
+      }
+    }
+
+    // Control state can change while the catch handler runs, so check again
+    // before returning a mapped sync value.
+    const catchControlError = this.checkDidControlFail(error)
+
+    if (catchControlError) {
+      return catchControlError
+    }
+
+    return mapped
   }
 
   async #runAttemptLoop(attempt: number): Promise<T | E | RunnerError> {
@@ -97,7 +90,7 @@ export class RunExecution<T, E, Ctx extends BaseTryCtx> extends BaseExecution<
 
     // oxlint-disable-next-line typescript/no-unnecessary-condition
     while (true) {
-      const controlBeforeAttempt = this.checkBeforeAttempt()
+      const controlBeforeAttempt = this.checkDidControlFail()
 
       if (controlBeforeAttempt) {
         return controlBeforeAttempt

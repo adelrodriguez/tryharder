@@ -123,7 +123,7 @@ describe("executeRunSync", () => {
       const result = executeRunSync(
         {
           signals: [ac.signal],
-          timeout: { ms: 0, scope: "total" },
+          timeout: 0,
         },
         () => "ok"
       )

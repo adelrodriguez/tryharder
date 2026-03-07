@@ -109,7 +109,7 @@ describe("BaseExecution", () => {
     using execution = new TestExecution(
       {
         signals: [controller.signal],
-        timeout: { ms: 0, scope: "total" },
+        timeout: 0,
       },
       () => "ok"
     )
@@ -143,7 +143,7 @@ describe("BaseExecution", () => {
   it("returns timeout control result when waiting retry delay", async () => {
     using execution = new TestExecution(
       {
-        timeout: { ms: 0, scope: "total" },
+        timeout: 0,
       },
       () => "ok"
     )

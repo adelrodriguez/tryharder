@@ -1,14 +1,5 @@
-import type { TimeoutOptions, TimeoutPolicy } from "../types/builder"
-import { TimeoutError } from "../errors"
-import { raceWithAbortSignal } from "../utils"
-
-export function createTimeoutOptions(options: TimeoutOptions): TimeoutPolicy {
-  if (typeof options === "number") {
-    return { ms: options, scope: "total" }
-  }
-
-  return { ...options }
-}
+import { Panic, TimeoutError } from "../errors"
+import { invariant, resolveWithAbort } from "../utils"
 
 export class TimeoutController {
   readonly signal?: AbortSignal
@@ -17,12 +8,15 @@ export class TimeoutController {
   readonly #timeoutMs: number
   #timeoutId: ReturnType<typeof setTimeout> | undefined
 
-  constructor(timeoutPolicy?: TimeoutPolicy) {
-    this.#timeoutMs = timeoutPolicy?.ms ?? -1
+  constructor(timeoutMs?: number) {
+    this.#timeoutMs = timeoutMs ?? -1
 
-    if (!timeoutPolicy) {
+    if (timeoutMs === undefined) {
       return
     }
+
+    invariant(Number.isFinite(timeoutMs), new Panic("TIMEOUT_INVALID_MS"))
+    invariant(timeoutMs >= 0, new Panic("TIMEOUT_INVALID_MS"))
 
     this.#controller = new AbortController()
     this.signal = this.#controller.signal
@@ -37,11 +31,10 @@ export class TimeoutController {
     }, this.#timeoutMs)
   }
 
-  #abort(cause?: unknown): TimeoutError {
-    const timeoutError =
-      cause === undefined
-        ? new TimeoutError(`Execution exceeded timeout of ${this.#timeoutMs}ms`)
-        : new TimeoutError(`Execution exceeded timeout of ${this.#timeoutMs}ms`, { cause })
+  #abort(cause?: unknown) {
+    const timeoutError = new TimeoutError(`Execution exceeded timeout of ${this.#timeoutMs}ms`, {
+      cause,
+    })
 
     if (!this.signal?.aborted) {
       this.#controller?.abort(timeoutError)
@@ -50,7 +43,7 @@ export class TimeoutController {
     return timeoutError
   }
 
-  #getRemaining(): number {
+  get #remaining() {
     const elapsed = Date.now() - this.#startedAt
 
     return this.#timeoutMs - elapsed
@@ -58,7 +51,7 @@ export class TimeoutController {
 
   checkDidTimeout(cause?: unknown): TimeoutError | undefined {
     if (!this.signal) {
-      return undefined
+      return
     }
 
     if (this.signal.aborted) {
@@ -68,17 +61,13 @@ export class TimeoutController {
         return reason
       }
 
-      return cause === undefined && reason === undefined
-        ? new TimeoutError(`Execution exceeded timeout of ${this.#timeoutMs}ms`)
-        : new TimeoutError(`Execution exceeded timeout of ${this.#timeoutMs}ms`, {
-            cause: cause ?? reason,
-          })
+      return new TimeoutError(`Execution exceeded timeout of ${this.#timeoutMs}ms`, {
+        cause: cause ?? reason,
+      })
     }
 
-    const remaining = this.#getRemaining()
-
-    if (remaining > 0) {
-      return undefined
+    if (this.#remaining > 0) {
+      return
     }
 
     return this.#abort(cause)
@@ -89,9 +78,7 @@ export class TimeoutController {
       return promise
     }
 
-    const remaining = this.#getRemaining()
-
-    if (remaining <= 0) {
+    if (this.#remaining <= 0) {
       return this.#abort(cause)
     }
 
@@ -101,14 +88,12 @@ export class TimeoutController {
       return timedOut
     }
 
-    return await raceWithAbortSignal(
+    return await resolveWithAbort(
       this.signal,
       promise,
       () =>
         this.checkDidTimeout(cause) ??
-        (cause === undefined
-          ? new TimeoutError(`Execution exceeded timeout of ${this.#timeoutMs}ms`)
-          : new TimeoutError(`Execution exceeded timeout of ${this.#timeoutMs}ms`, { cause }))
+        new TimeoutError(`Execution exceeded timeout of ${this.#timeoutMs}ms`, { cause })
     )
   }
 

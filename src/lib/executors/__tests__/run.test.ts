@@ -109,7 +109,7 @@ describe("executeRun", () => {
     it("returns TimeoutError when timeout expires during try execution", async () => {
       const result = await executeRun(
         {
-          timeout: { ms: 5, scope: "total" },
+          timeout: 5,
         },
         async () => {
           await sleep(20)
@@ -123,7 +123,7 @@ describe("executeRun", () => {
     it("aborts ctx.signal when timeout expires", async () => {
       const result = await executeRun(
         {
-          timeout: { ms: 5, scope: "total" },
+          timeout: 5,
         },
         async (ctx: TryCtx) => {
           await new Promise((_resolve, reject) => {
@@ -147,7 +147,7 @@ describe("executeRun", () => {
       const result = await executeRun(
         {
           retry: { backoff: "constant", delayMs: 50, limit: 3 },
-          timeout: { ms: 5, scope: "total" },
+          timeout: 5,
         },
         () => {
           throw new Error("boom")
@@ -160,7 +160,7 @@ describe("executeRun", () => {
     it("returns TimeoutError when timeout expires during catch execution", async () => {
       const result = await executeRun(
         {
-          timeout: { ms: 5, scope: "total" },
+          timeout: 5,
         },
         {
           catch: async () => {
@@ -244,7 +244,7 @@ describe("executeRun", () => {
       const pending = executeRun(
         {
           signals: [ac.signal],
-          timeout: { ms: 50, scope: "total" },
+          timeout: 50,
         },
         {
           catch: async () => {
@@ -305,7 +305,7 @@ describe("executeRun", () => {
       const result = await executeRun(
         {
           retry: { backoff: "constant", delayMs: 50, limit: 3 },
-          timeout: { ms: 5, scope: "total" },
+          timeout: 5,
           wraps: [
             async (ctx, next) => {
               events.push(`before:${ctx.retry.attempt}`)
