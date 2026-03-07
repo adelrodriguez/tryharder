@@ -56,6 +56,10 @@ class RunSyncExecution<T, E, Ctx extends BaseTryCtx> extends BaseExecution<T | E
   }
 
   #resolveFailure(error: unknown): E | RunnerError | RetryDirective {
+    if (error instanceof Panic) {
+      throw error
+    }
+
     if (checkIsControlError(error)) {
       return error
     }
