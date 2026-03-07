@@ -5,6 +5,7 @@ import type {
   TimeoutError,
   UnhandledException,
 } from "../errors"
+import type { FlowExit, SettledResult } from "../types"
 import * as try$ from "../index"
 
 type Expect<T extends true> = T
@@ -179,9 +180,7 @@ describe("type inference", () => {
         Equal<typeof result, Promise<number | UnhandledException | CancellationError>>
       >
       type _assertAll = Expect<Equal<typeof allResult, Promise<{ a: 1; b: 1 }>>>
-      type _assertSettled = Expect<
-        Equal<typeof settledResult, Promise<{ a: try$.SettledResult<"ok"> }>>
-      >
+      type _assertSettled = Expect<Equal<typeof settledResult, Promise<{ a: SettledResult<"ok"> }>>>
       type _assertFlow = Expect<Equal<typeof flowResult, Promise<"done">>>
 
       if (typecheckOnly()) {
@@ -604,6 +603,16 @@ describe("type inference", () => {
   })
 
   describe("allSettled", () => {
+    it("exports settled result types from the dedicated types entrypoint", () => {
+      if (typecheckOnly()) return
+
+      const settled = { status: "fulfilled", value: "ok" } as const satisfies SettledResult<"ok">
+
+      type _assert = Expect<
+        Equal<typeof settled, { readonly status: "fulfilled"; readonly value: "ok" }>
+      >
+    })
+
     it("infers settled result types", () => {
       if (typecheckOnly()) return
 
@@ -620,8 +629,8 @@ describe("type inference", () => {
         Equal<
           typeof result,
           Promise<{
-            a: try$.SettledResult<number>
-            b: try$.SettledResult<string>
+            a: SettledResult<number>
+            b: SettledResult<string>
           }>
         >
       >
@@ -691,6 +700,14 @@ describe("type inference", () => {
   })
 
   describe("flow", () => {
+    it("exports flow exit types from the dedicated types entrypoint", () => {
+      if (typecheckOnly()) return
+
+      const exitValue = null as unknown as FlowExit<"done">
+
+      type _assert = Expect<Equal<typeof exitValue, FlowExit<"done">>>
+    })
+
     it("infers union of $exit values", () => {
       const result = try$.flow({
         a() {
@@ -756,8 +773,8 @@ describe("type inference", () => {
         Equal<
           typeof result,
           Promise<{
-            a: try$.SettledResult<1>
-            b: try$.SettledResult<"ok">
+            a: SettledResult<1>
+            b: SettledResult<"ok">
           }>
         >
       >
@@ -773,6 +790,15 @@ describe("type inference", () => {
         void try$.timeout(1000).signal(signal).allSettled
         // @ts-expect-error -- orchestration remains unavailable after retry().timeout().signal()
         void try$.retry(3).timeout(1000).signal(signal).flow
+      }
+    })
+
+    it("does not expose root type exports from the runtime entrypoint", () => {
+      if (typecheckOnly()) {
+        // @ts-expect-error -- settled result types moved to ../types
+        type _settled = try$.SettledResult<"ok">
+        // @ts-expect-error -- flow exit types moved to ../types
+        type _flow = try$.FlowExit<"done">
       }
     })
   })

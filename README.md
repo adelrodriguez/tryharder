@@ -9,6 +9,7 @@
 
 ```ts
 import * as try$ from "hardtry"
+import type { FlowExit, SettledResult } from "hardtry/types"
 
 const result = await try$
   .retry(3)
@@ -276,9 +277,18 @@ From `hardtry/errors`:
 - `UnhandledException`
 - `Panic`
 
+From `hardtry/types`:
+
+- `AllSettledResult`
+- `SettledFulfilled`
+- `SettledRejected`
+- `SettledResult`
+- `FlowExit`
+
 ```ts
 import * as try$ from "hardtry"
 import { Panic, TimeoutError, UnhandledException } from "hardtry/errors"
+import type { FlowExit, SettledResult } from "hardtry/types"
 ```
 
 ### Common signatures
@@ -296,6 +306,7 @@ import { Panic, TimeoutError, UnhandledException } from "hardtry/errors"
 - Timeout scope is total execution.
 - `retry()` and `timeout()` only compose with `run()` / `runSync()`. Use nested `run()` calls inside orchestration tasks for leaf policies.
 - Error classes and `PanicCode` are exported from `hardtry/errors`.
+- Public helper types are exported from `hardtry/types`.
 - `flow` requires at least one `$exit(...)` path; otherwise it throws.
 - Control outcomes have precedence over mapped catch results in racing scenarios.
 - `wrap` is only available from `try$.wrap(...)` and can be chained as `.wrap().wrap()`.
