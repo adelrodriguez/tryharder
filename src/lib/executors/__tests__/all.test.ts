@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { CancellationError, Panic } from "../../errors"
+import { CancellationError, Panic, UnhandledException } from "../../errors"
 import { sleep } from "../../utils"
 import { executeAll } from "../all"
 
@@ -195,22 +195,40 @@ describe("executeAll", () => {
   })
 
   describe("error handling", () => {
-    it("waits for all tasks to settle before returning on failure", async () => {
+    it("rejects after a sibling stops on abort", async () => {
       let slowTaskSettled = false
 
-      await executeAll(
-        {},
-        {
-          a() {
-            throw new Error("boom")
-          },
-          async b() {
-            await sleep(50)
-            slowTaskSettled = true
-          },
-        }
-      ).catch(() => null)
+      const result = await Promise.race([
+        executeAll(
+          {},
+          {
+            a() {
+              throw new Error("boom")
+            },
+            async b(this: { $signal: AbortSignal }) {
+              if (!this.$signal.aborted) {
+                await new Promise<void>((resolve) => {
+                  this.$signal.addEventListener(
+                    "abort",
+                    () => {
+                      resolve()
+                    },
+                    { once: true }
+                  )
+                })
+              }
+              slowTaskSettled = true
+            },
+          }
+        ).then(
+          () => "resolved" as const,
+          (error: unknown) => error
+        ),
+        sleep(50).then(() => "timed-out" as const),
+      ])
 
+      expect(result).toBeInstanceOf(Error)
+      expect((result as Error).message).toBe("boom")
       expect(slowTaskSettled).toBe(true)
     })
 
@@ -234,6 +252,23 @@ describe("executeAll", () => {
       }
     })
 
+    it("normalizes undefined task failures", async () => {
+      try {
+        await executeAll(
+          {},
+          {
+            a() {
+              throw undefined
+            },
+          }
+        )
+        expect.unreachable("should have thrown")
+      } catch (error) {
+        expect(error).toBeInstanceOf(UnhandledException)
+        expect((error as UnhandledException).cause).toBeUndefined()
+      }
+    })
+
     it("propagates errors through task results", async () => {
       try {
         await executeAll(
@@ -252,6 +287,39 @@ describe("executeAll", () => {
       } catch (error) {
         expect((error as Error).message).toBe("a boom")
       }
+    })
+
+    it("maps non-Error task failures before rejecting dependent tasks", async () => {
+      let dependencyError: unknown
+
+      try {
+        await executeAll(
+          {},
+          {
+            async a() {
+              await sleep(5)
+              throw "a boom"
+            },
+            async b() {
+              try {
+                return await this.$result.a
+              } catch (error) {
+                dependencyError = error
+                throw error
+              }
+            },
+          }
+        )
+        expect.unreachable("should have thrown")
+      } catch (error) {
+        expect(error).toBeInstanceOf(UnhandledException)
+        expect((error as Error).message).toBe("Unhandled exception")
+        expect((error as Error).cause).toBe("a boom")
+      }
+
+      expect(dependencyError).toBeInstanceOf(UnhandledException)
+      expect((dependencyError as Error).message).toBe("Unhandled exception")
+      expect((dependencyError as Error).cause).toBe("a boom")
     })
 
     it("rejects with Panic when async catch rejects", async () => {
@@ -487,6 +555,49 @@ describe("executeAll", () => {
         expect(error).toBeInstanceOf(CancellationError)
       }
     })
+
+    it("rejects with CancellationError when signal aborts during sibling unwind after catch resolution", async () => {
+      const controller = new AbortController()
+
+      const promise = executeAll(
+        { signals: [controller.signal] },
+        {
+          a() {
+            throw new Error("boom")
+          },
+          async b() {
+            if (!this.$signal.aborted) {
+              await new Promise<void>((resolve) => {
+                this.$signal.addEventListener(
+                  "abort",
+                  () => {
+                    setTimeout(resolve, 20)
+                  },
+                  { once: true }
+                )
+              })
+            }
+
+            await sleep(20)
+            return 2
+          },
+        },
+        {
+          catch: () => "mapped",
+        }
+      )
+
+      setTimeout(() => {
+        controller.abort(new Error("external abort"))
+      }, 5)
+
+      try {
+        await promise
+        expect.unreachable("should have thrown")
+      } catch (error) {
+        expect(error).toBeInstanceOf(CancellationError)
+      }
+    })
   })
 
   describe("disposer ($disposer)", () => {
@@ -540,6 +651,43 @@ describe("executeAll", () => {
       ).catch(() => null)
 
       expect(cleaned).toBe(true)
+    })
+
+    it("keeps the shared disposer alive until aborted siblings finish unwinding", async () => {
+      const calls: string[] = []
+
+      await executeAll(
+        {},
+        {
+          a() {
+            this.$disposer.defer(() => {
+              calls.push("a-cleanup")
+            })
+            throw new Error("boom")
+          },
+          async b() {
+            if (!this.$signal.aborted) {
+              await new Promise<void>((resolve) => {
+                this.$signal.addEventListener(
+                  "abort",
+                  () => {
+                    resolve()
+                  },
+                  { once: true }
+                )
+              })
+            }
+
+            this.$disposer.defer(() => {
+              calls.push("b-cleanup")
+            })
+
+            return null
+          },
+        }
+      ).catch(() => null)
+
+      expect(calls).toEqual(["b-cleanup", "a-cleanup"])
     })
   })
 

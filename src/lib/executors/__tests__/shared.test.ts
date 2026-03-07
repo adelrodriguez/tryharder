@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { Panic } from "../../errors"
+import { Panic, UnhandledException } from "../../errors"
 import { sleep } from "../../utils"
 import { TaskExecution } from "../shared"
 
@@ -82,6 +82,55 @@ describe("TaskExecution", () => {
     expect(signalAbortedInB).toBe(true)
   })
 
+  it("does not wait for a sibling to settle in fail-fast mode", async () => {
+    await using execution = new TaskExecution(
+      undefined,
+      {
+        a() {
+          throw new Error("boom")
+        },
+        async b() {
+          await new Promise<void>((resolve) => {
+            void resolve
+          })
+          return "never"
+        },
+      },
+      "fail-fast"
+    )
+
+    const result = await Promise.race([
+      execution.execute().then(
+        () => "resolved" as const,
+        (error: unknown) => error
+      ),
+      sleep(25).then(() => "timed-out" as const),
+    ])
+
+    expect(result).toBeInstanceOf(Error)
+    expect((result as Error).message).toBe("boom")
+  })
+
+  it("normalizes undefined fail-fast rejections", async () => {
+    await using execution = new TaskExecution(
+      undefined,
+      {
+        a() {
+          throw undefined
+        },
+      },
+      "fail-fast"
+    )
+
+    try {
+      await execution.execute()
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect(error).toBeInstanceOf(UnhandledException)
+      expect((error as UnhandledException).cause).toBeUndefined()
+    }
+  })
+
   it("collects all outcomes in settled mode without aborting siblings", async () => {
     const error = new Error("boom")
     let signalAbortedInB = false
@@ -130,5 +179,31 @@ describe("TaskExecution", () => {
     expect(result.a.status).toBe("rejected")
     expect(result.a.reason).toBeInstanceOf(Panic)
     expect((result.a.reason as Panic).code).toBe("TASK_UNKNOWN_REFERENCE")
+  })
+
+  it("normalizes queued dependency failures while preserving raw settled reasons", async () => {
+    await using execution = new TaskExecution(
+      undefined,
+      {
+        async a() {
+          await sleep(5)
+          throw "boom"
+        },
+        async b(this: { $result: { a: Promise<unknown> } }) {
+          return await this.$result.a
+        },
+      },
+      "settled"
+    )
+
+    const result = (await execution.execute()) as {
+      a: { reason: unknown; status: string }
+      b: { reason: unknown; status: string }
+    }
+
+    expect(result.a).toEqual({ reason: "boom", status: "rejected" })
+    expect(result.b.status).toBe("rejected")
+    expect(result.b.reason).toBeInstanceOf(UnhandledException)
+    expect((result.b.reason as Error).cause).toBe("boom")
   })
 })
