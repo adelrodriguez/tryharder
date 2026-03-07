@@ -1,7 +1,7 @@
 {
   "name": "hardtry",
   "version": "0.0.0",
-  "description": "A better try-catch",
+  "description": "A better try/catch for TypeScript",
   "keywords": [
     "abort-signal",
     "error-handling",

@@ -1,23 +1,40 @@
 <div align="center">
-    <h1 align="center">🔁 <code>hardtry</code></h1>
+  <h1 align="center">🔁 hardtry</h1>
+
   <p align="center">
-    <strong>Structured, composable execution for TypeScript with retry, timeout, cancellation, and task orchestration.</strong>
+    <strong>A better try/catch for TypeScript</strong>
+  </p>
+
+  <p align="center">
+    <a href="https://www.npmjs.com/package/hardtry"><img src="https://img.shields.io/npm/v/hardtry" alt="npm version" /></a>
+    <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT" /></a>
   </p>
 </div>
 
-`hardtry` gives you a small fluent API for failure-aware execution. You can run sync/async work, map failures, compose retries and timeouts, orchestrate task maps, and early-exit flow pipelines.
+Run sync and async work with retries, timeouts, cancellation, typed failure mapping, and orchestration. Use `hardtry` when plain `try/catch` starts to sprawl and you want a small execution API that scales from single calls to parallel task maps and early-exit pipelines.
 
 ```ts
 import * as try$ from "hardtry"
-import type { FlowExit, SettledResult } from "hardtry/types"
+
+class RequestFailedError extends Error {}
 
 const result = await try$
-  .retry(3)
-  .timeout(1_000)
+  .retry(3) // Retry up to 3 times
+  .timeout(5_000) // Timeout after 5 seconds
   .run({
-    try: async () => fetch("https://example.com"),
-    catch: () => new Error("request failed"),
+    try: async () => {
+      const response = await fetch("https://example.com")
+
+      if (!response.ok) {
+        throw new Error(`request failed: ${response.status}`)
+      }
+
+      return "ok" as const
+    },
+    catch: () => new RequestFailedError("request failed"),
   })
+
+// result is "ok" | RequestFailedError | RetryExhaustedError | TimeoutError
 ```
 
 <details>
@@ -29,28 +46,32 @@ const result = await try$
 - [Quick Start](#quick-start)
 - [Usage](#usage)
   - [run and runSync](#run-and-runsync)
-  - [retry timeout signal wrap](#retry-timeout-signal-wrap)
+  - [retry, timeout, signal](#retry-timeout-signal)
+  - [wrap](#wrap)
   - [all and allSettled](#all-and-allsettled)
-  - [flow and exit](#flow-and-exit)
+  - [flow and $exit](#flow-and-exit)
   - [gen](#gen)
   - [dispose](#dispose)
 - [API Reference](#api-reference)
-- [Notes](#notes)
+- [Common Recipes](#common-recipes)
+- [When not to use hardtry](#when-not-to-use-hardtry)
 - [Contributing](#contributing)
+- [Acknowledgments](#acknowledgments)
 - [License](#license)
 
 </details>
 
 ## Features
 
-- Immutable fluent builder (`retry`, `timeout`, `signal`)
-- Top-level wrap builder (`wrap().wrap()`) for terminal APIs
-- Sync and async execution (`runSync`, `run`)
-- Typed failure mapping in object-form `run({ try, catch })`
-- Parallel task execution with dependency access via `this.$result`
-- Flow orchestration with early-exit via `this.$exit(value)`
-- Resource cleanup with `AsyncDisposableStack`
-- Typed generator composition through `gen`
+- **Composable execution policies** - Chain `retry`, `timeout`, and `signal` around work that may fail or be cancelled.
+- **Typed failure mapping** - Use object-form `run({ try, catch })` to map thrown errors into domain-specific results.
+- **Sync and async entrypoints** - Use `runSync` for synchronous work and `run` for asynchronous work.
+- **Task orchestration** - Coordinate named task maps with `all`, `allSettled`, and `flow`.
+- **Early exit control** - Short-circuit pipelines with `this.$exit(...)` in `flow`.
+- **Middleware-style wrapping** - Observe execution with top-level `wrap(...).wrap(...)` chains.
+- **Generator composition** - Build linear workflows over `run(...)` results with `gen(...)`.
+- **Resource cleanup** - Register cleanup with `dispose()` and `AsyncDisposableStack`.
+- **No runtime dependencies** - The published package ships without runtime dependencies.
 
 ## Installation
 
@@ -61,68 +82,120 @@ bun add hardtry
 # npm
 npm install hardtry
 
-# pnpm
-pnpm add hardtry
-
 # yarn
 yarn add hardtry
+
+# pnpm
+pnpm add hardtry
 ```
 
 ## Core Concepts
 
-| Term                  | Meaning                                                                            |
-| --------------------- | ---------------------------------------------------------------------------------- |
-| `run`                 | Async entrypoint that returns `Promise<value \| error>`                            |
-| `runSync`             | Sync entrypoint for sync-only execution                                            |
-| `retry(limit)`        | Retry policy, where `limit` includes the first attempt                             |
-| `timeout(ms)`         | Total execution timeout (attempts + delays + catch)                                |
-| `signal(abortSignal)` | External cancellation integration                                                  |
-| `wrap(fn)`            | Top-level middleware builder for `run`, `runSync`, `all`, `allSettled`, and `flow` |
-| `all(tasks)`          | Fail-fast parallel named tasks                                                     |
-| `allSettled(tasks)`   | Settled parallel named tasks                                                       |
-| `flow(tasks)`         | Task orchestration with early exit                                                 |
+| Term                  | Meaning                                                                   |
+| --------------------- | ------------------------------------------------------------------------- |
+| `run`                 | Async entrypoint that returns a value, a mapped failure, or config error  |
+| `runSync`             | Sync entrypoint for synchronous work only                                 |
+| `retry(limit)`        | Retry policy where `limit` includes the first attempt                     |
+| `timeout(ms)`         | Total execution timeout across attempts, delays, and catch handling       |
+| `signal(abortSignal)` | External cancellation for `run` and, from the root builder, orchestration |
+| `wrap(fn)`            | Top-level middleware hook around terminal execution APIs                  |
+| `all(tasks)`          | Fail-fast parallel named tasks                                            |
+| `allSettled(tasks)`   | Settled parallel named tasks                                              |
+| `flow(tasks)`         | Ordered task orchestration with early exit                                |
+| `$exit(value)`        | Stop a `flow` early and return `value`                                    |
+
+Not sure if `hardtry` is a good fit for your project? See [When not to use hardtry](#when-not-to-use-hardtry).
 
 ## Quick Start
+
+Use function form when you want thrown failures normalized to `UnhandledException`:
 
 ```ts
 import * as try$ from "hardtry"
 
-const value = await try$.run({
-  try: async () => {
-    return "ok"
-  },
-  catch: () => "mapped-error",
+const result = await try$.run(async () => {
+  return "ok" as const
 })
 
-// value: "ok" | "mapped-error"
+// "ok" | UnhandledException
+```
+
+Use object form when you want to map failures into domain results:
+
+```ts
+import * as try$ from "hardtry"
+
+class ValidationError extends Error {}
+
+const result = await try$.run({
+  try: async () => {
+    throw new Error("boom")
+  },
+  catch: () => new ValidationError("invalid input"),
+})
+
+// ValidationError
+```
+
+In a real application, you usually compose policies before the terminal call:
+
+```ts
+class UpstreamUnavailableError extends Error {}
+
+const result = await try$
+  .retry({ backoff: "constant", delayMs: 100, limit: 3 })
+  .timeout(1_500)
+  .run({
+    try: async () => {
+      const response = await fetch("https://example.com/data")
+
+      if (!response.ok) {
+        throw new Error("upstream failed")
+      }
+
+      return await response.json()
+    },
+    catch: () => new UpstreamUnavailableError("data service unavailable"),
+  })
 ```
 
 ## Usage
 
 ### run and runSync
 
-Function form maps thrown errors to `UnhandledException`.
+Use function form when you want thrown failures wrapped as `UnhandledException`.
 
 ```ts
 const syncValue = try$.runSync(() => 42)
 
-const asyncValue = await try$.run(async () => 42)
+const asyncValue = await try$.run(async () => {
+  return 42
+})
 ```
 
-Object form lets you map failures with `catch`.
+Use object form when you want to map failures yourself.
 
 ```ts
-const result = await try$.run({
-  try: async () => {
-    throw new Error("boom")
-  },
-  catch: () => "fallback" as const,
-})
+class InvalidInputError extends Error {}
+class PermissionDeniedError extends Error {}
 
-// "fallback"
+const result = try$.runSync({
+  try: () => {
+    throw new SyntaxError("bad input")
+  },
+  catch: (error) => {
+    if (error instanceof SyntaxError) {
+      return new InvalidInputError("invalid")
+    }
+
+    return new PermissionDeniedError("denied")
+  },
+})
 ```
 
-### retry timeout signal wrap
+### retry, timeout, signal
+
+Use modifiers to add retry, total timeout, and cancellation around `run(...)`. `signal(...)` can also be applied at the root builder before `all`, `allSettled`, or `flow`.
 
 ```ts
 const controller = new AbortController()
@@ -134,20 +207,29 @@ const result = await try$
   .run(async (ctx) => {
     return `attempt-${ctx.retry.attempt}`
   })
-
-const wrapped = await try$.wrap((ctx, next) => next(ctx)).run(async () => "ok")
-
-// wrap is top-level only
-// valid: try$.wrap(w1).wrap(w2).all(...)
-// invalid: try$.retry(3).wrap(w1)
-// retry/timeout apply to run()/runSync() only
-// valid: try$.signal(controller.signal).all(...)
-// invalid: try$.timeout(1_000).all(...)
 ```
+
+`timeout(ms)` measures total execution time, not just a single attempt.
+
+### wrap
+
+Use `wrap(...)` for observational middleware around terminal APIs. Wraps are top-level only and can be chained as `.wrap().wrap()`.
+
+```ts
+const result = await try$
+  .wrap((ctx, next) => {
+    console.log("starting attempt", ctx.retry.attempt)
+    return next()
+  })
+  .wrap((_ctx, next) => next())
+  .run(async () => "ok")
+```
+
+`wrap(...)` is not available after `retry(...)`, `timeout(...)`, or `signal(...)`.
 
 ### all and allSettled
 
-Fail-fast parallel tasks:
+Use `all(...)` for fail-fast task maps and `allSettled(...)` when you want every task result.
 
 ```ts
 const values = await try$.all({
@@ -163,8 +245,6 @@ const values = await try$.all({
 // { a: 1, b: 2 }
 ```
 
-Settled mode:
-
 ```ts
 const settled = await try$.allSettled({
   fail() {
@@ -176,15 +256,13 @@ const settled = await try$.allSettled({
 })
 ```
 
-### flow and exit
+### flow and $exit
 
-`flow` is ideal for dependent pipeline steps where you may short-circuit early.
-
-Cache hit (early exit in task `a`):
+Use `flow(...)` for dependent pipelines that may short-circuit early. At least one path must call `this.$exit(...)`.
 
 ```ts
-const cacheHit = await try$.flow({
-  a() {
+const result = await try$.flow({
+  cache() {
     const cached: string | null = "cached-value"
 
     if (cached !== null) {
@@ -193,44 +271,19 @@ const cacheHit = await try$.flow({
 
     return null
   },
-  async b() {
+  async api() {
     return "api-value"
   },
-  async c() {
-    const apiValue = await this.$result.b
-    return this.$exit(`${apiValue}-transformed`)
+  async transform() {
+    const value = await this.$result.api
+    return this.$exit(`${value}-transformed`)
   },
 })
-
-// "cached-value"
-```
-
-Cache miss (continue to API + transform):
-
-```ts
-const cacheMiss = await try$.flow({
-  a() {
-    const cached: string | null = null
-
-    if (cached !== null) {
-      return this.$exit(cached)
-    }
-
-    return null
-  },
-  async b() {
-    return "api-value"
-  },
-  async c() {
-    const apiValue = await this.$result.b
-    return this.$exit(`${apiValue}-transformed`)
-  },
-})
-
-// "api-value-transformed"
 ```
 
 ### gen
+
+Use `gen(...)` when you want a more linear style over `run(...)` results.
 
 ```ts
 const value = await try$.gen(function* (use) {
@@ -242,48 +295,58 @@ const value = await try$.gen(function* (use) {
 
 ### dispose
 
+Use `dispose()` to register cleanup for work that spans async boundaries.
+
 ```ts
 await using disposer = try$.dispose()
 
 disposer.defer(() => {
-  // cleanup
+  console.log("cleanup")
 })
 ```
 
 ## API Reference
 
-### Runtime exports
+### Runtime
 
-From `hardtry`:
+| Export         | Description                                 |
+| -------------- | ------------------------------------------- |
+| `run`          | Async execution entrypoint                  |
+| `runSync`      | Sync execution entrypoint                   |
+| `retry`        | Create a retry policy builder               |
+| `retryOptions` | Normalize retry policy input                |
+| `timeout`      | Add a total execution timeout               |
+| `signal`       | Add external cancellation                   |
+| `wrap`         | Add top-level middleware hooks              |
+| `all`          | Run fail-fast parallel named tasks          |
+| `allSettled`   | Run settled parallel named tasks            |
+| `flow`         | Run ordered tasks with early exit           |
+| `gen`          | Compose `run(...)` calls through generators |
+| `dispose`      | Create an `AsyncDisposableStack` helper     |
 
-- `retry`
-- `allSettled`
-- `timeout`
-- `signal`
-- `wrap`
-- `run`
-- `runSync`
-- `all`
-- `flow`
-- `dispose`
-- `gen`
-- `retryOptions`
+### Errors
 
-From `hardtry/errors`:
+Exports from `hardtry/errors`:
 
-- `CancellationError`
-- `TimeoutError`
-- `RetryExhaustedError`
-- `UnhandledException`
-- `Panic`
+| Export                | Description                                               |
+| --------------------- | --------------------------------------------------------- |
+| `CancellationError`   | Returned or thrown when execution is externally cancelled |
+| `TimeoutError`        | Returned when timed execution expires                     |
+| `RetryExhaustedError` | Returned when retry attempts are exhausted                |
+| `UnhandledException`  | Returned when function-form execution throws              |
+| `Panic`               | Thrown for programmer errors and invalid API usage        |
 
-From `hardtry/types`:
+### Types
 
-- `AllSettledResult`
-- `SettledFulfilled`
-- `SettledRejected`
-- `SettledResult`
-- `FlowExit`
+Exports from `hardtry/types`:
+
+| Export             | Description                                          |
+| ------------------ | ---------------------------------------------------- |
+| `AllSettledResult` | Settled result map returned by `allSettled(...)`     |
+| `SettledFulfilled` | Fulfilled branch of a settled task result            |
+| `SettledRejected`  | Rejected branch of a settled task result             |
+| `SettledResult`    | Union of fulfilled and rejected settled task results |
+| `FlowExit`         | Exit marker type used by `flow(...)`                 |
 
 ```ts
 import * as try$ from "hardtry"
@@ -291,65 +354,98 @@ import { Panic, TimeoutError, UnhandledException } from "hardtry/errors"
 import type { FlowExit, SettledResult } from "hardtry/types"
 ```
 
-### Common signatures
+## Common Recipes
 
-- `run(tryFn)` -> `Promise<T | UnhandledException | ConfigErrors>`
-- `run({ try, catch })` -> `Promise<T | C | ConfigErrors>`
-- `runSync(tryFn)` -> `T | UnhandledException`
-- `all(tasks)` -> `Promise<{ [K in keyof T]: Awaited<ReturnType<T[K]>> }>`
-- `allSettled(tasks)` -> settled result map
-- `flow(tasks)` -> `Promise<FlowExitUnion>`
+### Retry a flaky request with timeout
 
-## Notes
+```ts
+const result = await try$
+  .retry({ backoff: "constant", delayMs: 200, limit: 3 })
+  .timeout(2_000)
+  .run(async () => {
+    const response = await fetch("https://example.com")
+    return response.text()
+  })
+```
 
-- Retry `limit` includes the first attempt.
-- Timeout scope is total execution.
-- `retry()` and `timeout()` only compose with `run()` / `runSync()`. Use nested `run()` calls inside orchestration tasks for leaf policies.
-- Error classes and `PanicCode` are exported from `hardtry/errors`.
-- Public helper types are exported from `hardtry/types`.
-- `flow` requires at least one `$exit(...)` path; otherwise it throws.
-- Control outcomes have precedence over mapped catch results in racing scenarios.
-- `wrap` is only available from `try$.wrap(...)` and can be chained as `.wrap().wrap()`.
-- Control outcomes are `CancellationError` and `TimeoutError`.
-- Programmer-error paths throw `Panic`; `run()` and `runSync()` never return it as a result value.
-- `Panic` exposes a `code` for machine-readable diagnostics.
+### Map thrown exceptions into domain results
 
-### Panic codes
+```ts
+class RemoteServiceError extends Error {}
 
-- `WRAP_UNAVAILABLE`
-- `WRAP_INVALID_HANDLER`
-- `RUN_SYNC_UNAVAILABLE`
-- `RUN_SYNC_INVALID_INPUT`
-- `FLOW_NO_EXIT`
-- `GEN_UNAVAILABLE`
-- `GEN_INVALID_FACTORY`
-- `RUN_SYNC_WRAPPED_RESULT_PROMISE`
-- `RUN_SYNC_TRY_PROMISE`
-- `RUN_SYNC_CATCH_PROMISE`
-- `RUN_SYNC_ASYNC_RETRY_POLICY`
-- `RUN_CATCH_HANDLER_THROW`
-- `RUN_CATCH_HANDLER_REJECT`
-- `RUN_SYNC_CATCH_HANDLER_THROW`
-- `ALL_CATCH_HANDLER_THROW`
-- `ALL_CATCH_HANDLER_REJECT`
-- `TASK_INVALID_HANDLER`
-- `TASK_SELF_REFERENCE`
-- `TASK_UNKNOWN_REFERENCE`
-- `UNREACHABLE_RETRY_POLICY_BACKOFF`
+const result = await try$.run({
+  try: async () => {
+    throw new Error("boom")
+  },
+  catch: () => new RemoteServiceError("service failed"),
+})
+```
+
+### Run dependent parallel tasks with all
+
+```ts
+const result = await try$.all({
+  async user() {
+    return { id: "1", name: "Ada" }
+  },
+  async profile() {
+    const user = await this.$result.user
+    return { userId: user.id, plan: "pro" as const }
+  },
+})
+```
+
+### Short-circuit a pipeline with flow
+
+```ts
+const result = await try$.flow({
+  cache() {
+    return this.$exit("cached" as const)
+  },
+  async api() {
+    return "remote"
+  },
+})
+```
+
+### Add per-task retry inside orchestration
+
+`retry(...)` and `timeout(...)` apply to `run(...)` and `runSync(...)`, not directly to `all(...)` or `flow(...)`. When you need per-task policies, wrap leaf work in nested `run(...)` calls.
+
+```ts
+const result = await try$.flow({
+  async fetchUser() {
+    const user = await try$.retry(2).run(async () => {
+      const response = await fetch("https://example.com/user")
+      return await response.json()
+    })
+
+    return this.$exit(user)
+  },
+})
+```
+
+## When not to use hardtry
+
+- **Small scripts or one-off tasks** - Plain `try/catch` is often simpler when you do not need retries, cancellation, or orchestration.
+- **You already use an effect system or result abstraction** - If your codebase already has a consistent execution model, adding `hardtry` may be redundant.
+- **Your workflows are mostly straightforward Promise chains** - `all(...)` and `flow(...)` help when coordination matters; otherwise native composition may be clearer.
+- **Your team prefers explicit `Result` values everywhere** - `hardtry` centers execution wrappers, not a dedicated result data type.
+- **You do not want policy-driven execution behavior** - If retry and timeout semantics are unnecessary overhead, the abstraction may not pay for itself.
 
 ## Contributing
 
-Contributions are welcome. Please run:
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for development workflow, code quality requirements, testing expectations, and changeset guidance.
 
-```bash
-bun run format
-bun run check
-bun run typecheck
-bun run test
-```
+## Acknowledgments
+
+- [`better-result`](https://github.com/dmmulroy/better-result) for typed result-oriented error handling in TypeScript.
+- [`effect`](https://github.com/Effect-TS/effect) for structured, composable models of execution, failure, and concurrency.
+- [`better-all`](https://github.com/shuding/better-all) for task orchestration patterns over object-shaped work graphs.
+- [`errore`](https://errore.org/) for modeling errors as unions instead of tuples.
+
+Made with [🥐 `pastry`](https://github.com/adelrodriguez/pastry)
 
 ## License
 
 [MIT](LICENSE)
-
-Made with [pastry](https://github.com/adelrodriguez/pastry)
