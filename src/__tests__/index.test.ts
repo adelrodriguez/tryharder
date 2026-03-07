@@ -8,12 +8,17 @@ import {
   UnhandledException,
 } from "../errors"
 import * as try$ from "../index"
-import { sleep } from "../lib/utils"
 
 class InvalidInputError extends Error {}
 class PermissionDeniedError extends Error {}
 class NetworkError extends Error {}
 class RemoteServiceError extends Error {}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms)
+  })
+}
 
 function expectPanic(error: unknown, code: PanicCode) {
   expect(error).toBeInstanceOf(Panic)
@@ -73,6 +78,14 @@ describe("entrypoints", () => {
     expect(new RetryExhaustedError()).toBeInstanceOf(Error)
     expect(new TimeoutError()).toBeInstanceOf(Error)
     expect(new UnhandledException()).toBeInstanceOf(Error)
+  })
+
+  it("exposes retryOptions from the root entrypoint", () => {
+    expect(try$.retryOptions(2)).toEqual({
+      backoff: "constant",
+      delayMs: 0,
+      limit: 2,
+    })
   })
 
   it("throws Panic when timeout() receives Infinity", () => {

@@ -5,7 +5,6 @@ import type {
   TimeoutError,
   UnhandledException,
 } from "../errors"
-import type { RetryOptions, RetryPolicy } from "../lib/types/retry"
 import * as try$ from "../index"
 
 type Expect<T extends true> = T
@@ -84,12 +83,6 @@ describe("type inference", () => {
   })
 
   describe("builder entrypoints", () => {
-    it("retryOptions is exposed from the root entrypoint", () => {
-      const normalizeRetry = try$.retryOptions
-
-      type _assert = Expect<Equal<typeof normalizeRetry, (policy: RetryOptions) => RetryPolicy>>
-    })
-
     it("retry(number) preserves runSync() with retry error union", () => {
       const retryBuilder = try$.retry(3)
       const result = retryBuilder.run(() => 1)

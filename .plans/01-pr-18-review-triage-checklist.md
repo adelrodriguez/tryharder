@@ -13,16 +13,17 @@ the correctness changes make them effectively free.
 Ship in this pass:
 
 - Step 1: top-level `runSync()` panic semantics
-- Step 2: wrap-modified context propagation
+- Step 2: observational, read-only wrap semantics
 - Step 3: strict `shouldRetry` runtime validation
 - Step 4: `executeRun()` overload alignment
-- Step 5: `GenResult` public type fix
-- Step 6: shared executor test stabilization
+- Step 5: remove `Panic` from normal run result semantics
+- Step 6: `GenResult` public type fix
+- Step 7: shared executor test stabilization
 
 Defer unless the earlier steps force nearby edits:
 
-- Step 7: `FlowExecution` / `TaskExecution` refactor
-- Step 8: resolver queue cleanup
+- Step 8: `FlowExecution` / `TaskExecution` refactor
+- Step 9: resolver queue cleanup
 
 ## Working Rules
 
@@ -142,8 +143,8 @@ Status:
 Objective:
 
 - Allow async `shouldRetry` for async runs while failing fast on invalid
-  resolved values and rejecting any `runSync()` retry policy that includes
-  `shouldRetry`.
+  resolved values, while keeping `runSync()` limited to sync-safe retry policy
+  shapes by rejecting delayed or jittered retry policies.
 
 Current code paths:
 
@@ -187,10 +188,16 @@ Done when:
 
 - Async `run()` may await `retry.shouldRetry`.
 - Invalid `shouldRetry` results fail deterministically with a framework panic.
-- `runSync()` rejects retry policies that include `shouldRetry`.
+- `runSync()` rejects async-required retry policy shapes such as delayed or
+  jittered retry, while leaving sync `shouldRetry` behavior on the existing
+  runtime path.
 - Retry exhaustion is no longer reachable through non-boolean coercion.
 
 ### Step 4 - Fix `executeRun()` object-form overloads
+
+Status:
+
+- Completed on 2026-03-07.
 
 Objective:
 
@@ -219,7 +226,58 @@ Done when:
 - The overload resolution for object-form `executeRun()` matches runtime
   behavior.
 
-### Step 5 - Add `UnhandledException` to public `GenResult`
+### Step 5 - Remove `Panic` from normal run result semantics
+
+Objective:
+
+- Ensure `Panic` remains an exceptional failure path instead of appearing in
+  resolved async run result unions or control-error helpers.
+
+Current code paths:
+
+- `src/lib/executors/base.ts`
+- `src/lib/executors/run.ts`
+- `src/lib/utils.ts`
+- `src/lib/executors/__tests__/run.test.ts`
+- `src/lib/__tests__/utils.test.ts`
+- `src/__tests__/index.test.ts`
+
+Implementation approach:
+
+- Remove `Panic` from the `RunnerError` alias in `src/lib/executors/base.ts`.
+- Stop classifying `Panic` as a control error in `checkIsControlError(...)` so
+  async run failure handling does not treat it like cancellation or timeout.
+- Update async `executeRun()` failure handling in `src/lib/executors/run.ts`
+  so user-thrown or forwarded `Panic` values are rethrown instead of being
+  returned as resolved results, matching the sync executor behavior from
+  Step 1.
+- Keep catch-handler panics as exceptional rejections; this step is about
+  making direct or forwarded `Panic` values behave consistently, not about
+  converting thrown panics into mapped results.
+
+Regression coverage:
+
+- Add direct async executor tests proving function-form and object-form
+  execution rethrow `Panic` values unchanged.
+- Add root-level `try$.run(...)` coverage proving async entrypoints rethrow
+  direct and forwarded `Panic` values.
+- Update utility tests so `checkIsControlError(new Panic(...))` no longer
+  returns `true`.
+
+Done when:
+
+- `RunnerError` no longer includes `Panic`.
+- Async `executeRun()` and `try$.run(...)` rethrow direct and forwarded
+  `Panic` values.
+- `checkIsControlError(...)` only treats cancellation and timeout as control
+  errors.
+
+Dependency note:
+
+- Land this before widening any additional public async result types so
+  `Panic` does not leak into exported unions as a normal return case.
+
+### Step 6 - Add `UnhandledException` to public `GenResult`
 
 Objective:
 
@@ -249,7 +307,7 @@ Done when:
 - Public `GenResult` includes `UnhandledException` in both sync and async
   variants where appropriate.
 
-### Step 6 - Stabilize and simplify shared executor tests
+### Step 7 - Stabilize and simplify shared executor tests
 
 Objective:
 
@@ -274,7 +332,7 @@ Done when:
 - `shared.test.ts` no longer depends on timing to observe fail-fast abort.
 - The file no longer carries unnecessary local async return annotations.
 
-### Step 7 - Decide whether to keep `FlowExecution` / `TaskExecution` duplication
+### Step 8 - Decide whether to keep `FlowExecution` / `TaskExecution` duplication
 
 Status:
 
@@ -282,7 +340,7 @@ Status:
 
 Decision rule:
 
-- If Steps 1-6 do not require touching both implementations, leave the
+- If Steps 1-7 do not require touching both implementations, leave the
   duplication alone for now.
 - If nearby correctness work exposes the same bug in both paths, capture a
   separate refactor plan or pull the refactor into the same change only if it
@@ -293,7 +351,7 @@ Expected output:
 - Explicitly mark this item as deferred or completed when closing the follow-up
   work.
 
-### Step 8 - Optional cleanup: remove redundant resolver queue null check
+### Step 9 - Optional cleanup: remove redundant resolver queue null check
 
 Status:
 
@@ -325,9 +383,11 @@ After each step:
 This follow-up is complete when:
 
 - top-level `try$.runSync(...)` matches standalone panic behavior
-- wrap-replaced context objects reach terminal execution
+- wrap hooks are observational and context-read-only
 - `shouldRetry` rejects non-boolean runtime values
+- `runSync()` rejects delayed or jittered retry policy shapes
 - `executeRun()` object-form typing matches runtime returns
+- async run paths rethrow `Panic` instead of returning it
 - `GenResult` includes `UnhandledException`
 - `shared.test.ts` no longer depends on timing-based abort observation
-- Steps 7 and 8 are either explicitly deferred or deliberately completed
+- Steps 8 and 9 are either explicitly deferred or deliberately completed

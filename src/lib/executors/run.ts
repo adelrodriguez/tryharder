@@ -141,10 +141,6 @@ export function executeRun<T, Ctx extends BaseTryCtx>(
 export function executeRun<T, E, Ctx extends BaseTryCtx>(
   config: BuilderConfig,
   input: AsyncRunInput<T, E, Ctx>
-): Promise<T | E>
-export function executeRun<T, E, Ctx extends BaseTryCtx>(
-  config: BuilderConfig,
-  input: AsyncRunInput<T, E, Ctx>
 ): Promise<T | E | RunnerError>
 export async function executeRun<T, E, Ctx extends BaseTryCtx>(
   config: BuilderConfig,
