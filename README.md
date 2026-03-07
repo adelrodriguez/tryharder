@@ -261,9 +261,8 @@ disposer.defer(() => {
 - `flow`
 - `dispose`
 - `gen`
-- `retryOptions`
+- `createRetryPolicy`
 - `CancellationError`
-- `ConfigurationError`
 - `TimeoutError`
 - `RetryExhaustedError`
 - `UnhandledException`
@@ -285,7 +284,31 @@ disposer.defer(() => {
 - `flow` requires at least one `$exit(...)` path; otherwise it throws.
 - Control outcomes have precedence over mapped catch results in racing scenarios.
 - `wrap` is only available from `try$.wrap(...)` and can be chained as `.wrap().wrap()`.
-- Invalid builder order/config usage throws `ConfigurationError`.
+- Programmer-error paths throw `Panic`, not a returned error value.
+- `Panic` exposes a `code` for machine-readable diagnostics.
+
+### Panic codes
+
+- `WRAP_UNAVAILABLE`
+- `WRAP_INVALID_HANDLER`
+- `RUN_SYNC_UNAVAILABLE`
+- `RUN_SYNC_INVALID_INPUT`
+- `FLOW_NO_EXIT`
+- `GEN_UNAVAILABLE`
+- `GEN_INVALID_FACTORY`
+- `RUN_SYNC_WRAPPED_RESULT_PROMISE`
+- `RUN_SYNC_TRY_PROMISE`
+- `RUN_SYNC_CATCH_PROMISE`
+- `RUN_SYNC_ASYNC_RETRY_POLICY`
+- `RUN_CATCH_HANDLER_THROW`
+- `RUN_CATCH_HANDLER_REJECT`
+- `RUN_SYNC_CATCH_HANDLER_THROW`
+- `ALL_CATCH_HANDLER_THROW`
+- `ALL_CATCH_HANDLER_REJECT`
+- `TASK_INVALID_HANDLER`
+- `TASK_SELF_REFERENCE`
+- `TASK_UNKNOWN_REFERENCE`
+- `UNREACHABLE_RETRY_POLICY_BACKOFF`
 
 ## Contributing
 

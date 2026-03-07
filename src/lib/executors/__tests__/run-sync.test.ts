@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test"
 import type { TryCtx } from "../../types/core"
-import { CancellationError, ConfigurationError, Panic, UnhandledException } from "../../errors"
-import { executeRunSync } from "../run-sync"
+import { CancellationError, Panic, UnhandledException } from "../../errors"
+import { executeRunSync, runSync } from "../run-sync"
 
 describe("executeRunSync", () => {
   describe("function form", () => {
@@ -19,10 +19,16 @@ describe("executeRunSync", () => {
       expect(result).toBeInstanceOf(UnhandledException)
     })
 
-    it("throws ConfigurationError when sync runner returns a promise via unsafe cast", () => {
+    it("throws Panic when sync runner returns a promise via unsafe cast", () => {
       const unsafeSyncFn = (() => Promise.resolve("ok")) as unknown as () => string
 
-      expect(() => executeRunSync({}, unsafeSyncFn)).toThrow(ConfigurationError)
+      try {
+        executeRunSync({}, unsafeSyncFn)
+        expect.unreachable("should have thrown")
+      } catch (error) {
+        expect(error).toBeInstanceOf(Panic)
+        expect((error as Panic).code).toBe("RUN_SYNC_TRY_PROMISE")
+      }
     })
   })
 
@@ -42,7 +48,7 @@ describe("executeRunSync", () => {
     })
 
     it("throws Panic when catch throws", () => {
-      expect(() =>
+      try {
         executeRunSync(
           {},
           {
@@ -54,7 +60,28 @@ describe("executeRunSync", () => {
             },
           }
         )
-      ).toThrow(Panic)
+        expect.unreachable("should have thrown")
+      } catch (error) {
+        expect(error).toBeInstanceOf(Panic)
+        expect((error as Panic).code).toBe("RUN_SYNC_CATCH_HANDLER_THROW")
+      }
+    })
+
+    it("rethrows RUN_SYNC_CATCH_PROMISE unchanged when catch returns a promise", () => {
+      const unsafeCatch = (() => Promise.resolve("mapped")) as unknown as (error: unknown) => string
+
+      try {
+        runSync({
+          catch: unsafeCatch,
+          try: () => {
+            throw new Error("boom")
+          },
+        })
+        expect.unreachable("should have thrown")
+      } catch (error) {
+        expect(error).toBeInstanceOf(Panic)
+        expect((error as Panic).code).toBe("RUN_SYNC_CATCH_PROMISE")
+      }
     })
   })
 

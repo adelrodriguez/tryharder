@@ -10,10 +10,6 @@ export class SignalController {
     }
   }
 
-  #createCancellationError(cause?: unknown): CancellationError {
-    return new CancellationError({ cause: cause ?? this.signal?.reason })
-  }
-
   checkDidCancel(cause?: unknown): CancellationError | undefined {
     if (!this.signal?.aborted) {
       return undefined
@@ -23,7 +19,7 @@ export class SignalController {
       return undefined
     }
 
-    return this.#createCancellationError(cause)
+    return new CancellationError(undefined, { cause: cause ?? this.signal.reason })
   }
 
   async race<V>(promise: PromiseLike<V>, cause?: unknown): Promise<V | CancellationError> {
@@ -37,8 +33,10 @@ export class SignalController {
       return promise
     }
 
-    return await raceWithAbortSignal(this.signal, promise, () =>
-      this.#createCancellationError(cause)
+    return await raceWithAbortSignal(
+      this.signal,
+      promise,
+      () => new CancellationError(undefined, { cause: cause ?? this.signal?.reason })
     )
   }
 

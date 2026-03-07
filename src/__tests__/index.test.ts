@@ -7,6 +7,11 @@ class PermissionDeniedError extends Error {}
 class NetworkError extends Error {}
 class RemoteServiceError extends Error {}
 
+function expectPanic(error: unknown, code: try$.PanicCode) {
+  expect(error).toBeInstanceOf(try$.Panic)
+  expect((error as try$.Panic).code).toBe(code)
+}
+
 function runCacheFlow(cachedValue: string | null) {
   return try$.flow({
     a() {
@@ -44,11 +49,16 @@ describe("runSync", () => {
       expect(result).toBeInstanceOf(try$.UnhandledException)
     })
 
-    it("throws ConfigurationError when sync run receives a Promise-returning function via unsafe cast", () => {
+    it("throws Panic when sync run receives a Promise-returning function via unsafe cast", () => {
       const unsafeRun = try$.runSync as unknown as (tryFn: () => number) => number
       const unsafeTry = (() => Promise.resolve(42)) as unknown as () => number
 
-      expect(() => unsafeRun(unsafeTry)).toThrow(try$.ConfigurationError)
+      try {
+        unsafeRun(unsafeTry)
+        expect.unreachable("should have thrown")
+      } catch (error) {
+        expectPanic(error, "RUN_SYNC_TRY_PROMISE")
+      }
     })
   })
 
@@ -65,7 +75,7 @@ describe("runSync", () => {
     })
 
     it("throws Panic when catch throws", () => {
-      expect(() =>
+      try {
         try$.runSync({
           catch: () => {
             throw new Error("catch failed")
@@ -74,7 +84,10 @@ describe("runSync", () => {
             throw new Error("boom")
           },
         })
-      ).toThrow(try$.Panic)
+        expect.unreachable("should have thrown")
+      } catch (error) {
+        expectPanic(error, "RUN_SYNC_CATCH_HANDLER_THROW")
+      }
     })
 
     it("supports multiple mapped error variants in sync object form", () => {
@@ -169,7 +182,7 @@ describe("run", () => {
         await result
         throw new Error("Expected Panic rejection")
       } catch (error) {
-        expect(error).toBeInstanceOf(try$.Panic)
+        expectPanic(error, "RUN_CATCH_HANDLER_REJECT")
       }
     })
 
@@ -258,12 +271,17 @@ describe("builder helpers", () => {
     expect(result).toBe(42)
   })
 
-  it("throws ConfigurationError when runSync is called after retry via unsafe cast", () => {
+  it("throws Panic when runSync is called after retry via unsafe cast", () => {
     const unsafeBuilder = try$.retry(3) as unknown as {
       runSync: typeof try$.runSync
     }
 
-    expect(() => unsafeBuilder.runSync(() => 42)).toThrow(try$.ConfigurationError)
+    try {
+      unsafeBuilder.runSync(() => 42)
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expectPanic(error, "RUN_SYNC_UNAVAILABLE")
+    }
   })
 
   it("supports multiple wraps in top-level wrap chain", async () => {
@@ -288,12 +306,17 @@ describe("builder helpers", () => {
     expect(events).toEqual(["outer-before", "inner-before", "inner-after", "outer-after"])
   })
 
-  it("throws ConfigurationError when wrap is called after retry", () => {
+  it("throws Panic when wrap is called after retry", () => {
     const retried = try$.retry(3) as unknown as {
       wrap: (fn: Parameters<typeof try$.wrap>[0]) => unknown
     }
 
-    expect(() => retried.wrap((ctx, next) => next(ctx))).toThrow(try$.ConfigurationError)
+    try {
+      retried.wrap((ctx, next) => next(ctx))
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expectPanic(error, "WRAP_UNAVAILABLE")
+    }
   })
 
   it("applies wrap around all", async () => {
@@ -372,7 +395,7 @@ describe("builder helpers", () => {
         })
       expect.unreachable("should have thrown")
     } catch (error) {
-      expect((error as Error).message).toBe("Flow completed without exit")
+      expectPanic(error, "FLOW_NO_EXIT")
       expect(wrapCalls).toBe(1)
     }
   })
@@ -411,16 +434,19 @@ describe("builder helpers", () => {
     expect(wrapCalls).toBe(1)
   })
 
-  it("throws ConfigurationError when gen is called after timeout via unsafe cast", () => {
+  it("throws Panic when gen is called after timeout via unsafe cast", () => {
     const unsafeBuilder = try$.timeout(10) as unknown as {
       gen: typeof try$.gen
     }
 
-    expect(() =>
+    try {
       unsafeBuilder.gen(function* (use) {
         return yield* use(1)
       })
-    ).toThrow(try$.ConfigurationError)
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expectPanic(error, "GEN_UNAVAILABLE")
+    }
   })
 
   it("keeps root run isolated from retry chains", async () => {
@@ -478,7 +504,7 @@ describe("flow", () => {
       })
       expect.unreachable("should have thrown")
     } catch (error) {
-      expect((error as Error).message).toBe("Flow completed without exit")
+      expectPanic(error, "FLOW_NO_EXIT")
     }
   })
 
@@ -625,7 +651,7 @@ describe("flow", () => {
       })
       expect.unreachable("should have thrown")
     } catch (error) {
-      expect((error as Error).message).toContain("cannot await its own result")
+      expectPanic(error, "TASK_SELF_REFERENCE")
     }
   })
 
@@ -640,7 +666,7 @@ describe("flow", () => {
       })
       expect.unreachable("should have thrown")
     } catch (error) {
-      expect((error as Error).message).toContain("Unknown task")
+      expectPanic(error, "TASK_UNKNOWN_REFERENCE")
     }
   })
 })
@@ -875,7 +901,7 @@ describe("all", () => {
       )
       expect.unreachable("should have thrown")
     } catch (error) {
-      expect(error).toBeInstanceOf(try$.Panic)
+      expectPanic(error, "ALL_CATCH_HANDLER_THROW")
     }
   })
 
@@ -896,7 +922,7 @@ describe("all", () => {
       )
       expect.unreachable("should have thrown")
     } catch (error) {
-      expect(error).toBeInstanceOf(try$.Panic)
+      expectPanic(error, "ALL_CATCH_HANDLER_REJECT")
     }
   })
 

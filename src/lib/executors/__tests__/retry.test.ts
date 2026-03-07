@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { ConfigurationError, RetryExhaustedError, TimeoutError } from "../../errors"
+import { Panic, RetryExhaustedError, TimeoutError } from "../../errors"
 import { executeRun } from "../run"
 import { executeRunSync } from "../run-sync"
 
@@ -172,8 +172,8 @@ describe("executeRun retry", () => {
     expect(mapped).toBe(false)
   })
 
-  it("throws ConfigurationError when sync runner is used with async-required retry policy", () => {
-    expect(() =>
+  it("throws Panic when sync runner is used with async-required retry policy", () => {
+    try {
       executeRunSync(
         {
           retry: { backoff: "linear", delayMs: 10, limit: 3 },
@@ -182,11 +182,15 @@ describe("executeRun retry", () => {
           throw new Error("boom")
         }
       )
-    ).toThrow(ConfigurationError)
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect(error).toBeInstanceOf(Panic)
+      expect((error as Panic).code).toBe("RUN_SYNC_ASYNC_RETRY_POLICY")
+    }
   })
 
-  it("throws ConfigurationError when sync runner is used with jittered constant retry", () => {
-    expect(() =>
+  it("throws Panic when sync runner is used with jittered constant retry", () => {
+    try {
       executeRunSync(
         {
           retry: { backoff: "constant", delayMs: 0, jitter: true, limit: 3 },
@@ -195,7 +199,11 @@ describe("executeRun retry", () => {
           throw new Error("boom")
         }
       )
-    ).toThrow(ConfigurationError)
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect(error).toBeInstanceOf(Panic)
+      expect((error as Panic).code).toBe("RUN_SYNC_ASYNC_RETRY_POLICY")
+    }
   })
 
   it("applies linear backoff delays between retries", async () => {

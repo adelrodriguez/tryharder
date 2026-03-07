@@ -1,8 +1,8 @@
 import type { ResultProxy, TaskRecord } from "../types/all"
 import type { BuilderConfig } from "../types/builder"
 import type { FlowResult, FlowTaskContext, InferredFlowTaskContext } from "../types/flow"
-import { CancellationError, RetryExhaustedError, TimeoutError, UnhandledException } from "../errors"
-import { checkIsControlError } from "../utils"
+import { Panic, RetryExhaustedError, UnhandledException } from "../errors"
+import { checkIsControlError, invariant } from "../utils"
 import { BaseExecution } from "./base"
 
 class FlowExitSignal extends Error {
@@ -13,10 +13,6 @@ class FlowExitSignal extends Error {
     this.name = "FlowExitSignal"
     this.value = value
   }
-}
-
-function checkIsFlowExitSignal(value: unknown): value is FlowExitSignal {
-  return value instanceof FlowExitSignal
 }
 
 class FlowExecution<T extends TaskRecord> {
@@ -50,9 +46,9 @@ class FlowExecution<T extends TaskRecord> {
 
     try {
       await Promise.all(promises)
-      throw new Error("Flow completed without exit")
+      throw new Panic("FLOW_NO_EXIT")
     } catch (error) {
-      if (checkIsFlowExitSignal(error)) {
+      if (error instanceof FlowExitSignal) {
         return error.value as FlowResult<T>
       }
 
@@ -62,11 +58,19 @@ class FlowExecution<T extends TaskRecord> {
 
   #waitForResult(taskName: keyof T, requesterTaskName?: keyof T): Promise<unknown> {
     if (requesterTaskName === taskName) {
-      return Promise.reject(new Error(`Task "${String(taskName)}" cannot await its own result`))
+      return Promise.reject(
+        new Panic("TASK_SELF_REFERENCE", {
+          message: `Task "${String(taskName)}" cannot await its own result`,
+        })
+      )
     }
 
     if (!Object.hasOwn(this.#tasks, taskName)) {
-      return Promise.reject(new Error(`Unknown task "${String(taskName)}"`))
+      return Promise.reject(
+        new Panic("TASK_UNKNOWN_REFERENCE", {
+          message: `Unknown task "${String(taskName)}"`,
+        })
+      )
     }
 
     if (this.#results.has(taskName)) {
@@ -76,12 +80,14 @@ class FlowExecution<T extends TaskRecord> {
     if (this.#errors.has(taskName)) {
       const resultError = this.#errors.get(taskName)
 
-      if (checkIsFlowExitSignal(resultError)) {
+      if (resultError instanceof FlowExitSignal) {
         return Promise.reject(resultError)
       }
 
       return Promise.reject(
-        resultError instanceof Error ? resultError : new UnhandledException({ cause: resultError })
+        resultError instanceof Error
+          ? resultError
+          : new UnhandledException(undefined, { cause: resultError })
       )
     }
 
@@ -130,9 +136,12 @@ class FlowExecution<T extends TaskRecord> {
     try {
       const taskFn = this.#tasks[taskName]
 
-      if (typeof taskFn !== "function") {
-        throw new Error(`Task "${String(taskName)}" is not a function`)
-      }
+      invariant(
+        typeof taskFn === "function",
+        new Panic("TASK_INVALID_HANDLER", {
+          message: `Task "${String(taskName)}" is not a function`,
+        })
+      )
 
       const resultProxy = new Proxy({} as ResultProxy<T>, {
         get: (_, referencedTaskName: string) =>
@@ -185,11 +194,11 @@ class FlowRunnerExecution<T extends TaskRecord> extends BaseExecution<Promise<Fl
 
       try {
         // oxlint-disable-next-line no-await-in-loop
-        const raced = await this.#executeAttempt()
-        const result = FlowRunnerExecution.resolveRacedResult(raced)
+        const result = await this.#executeAttempt()
+        const controlAfterAttempt = this.checkDidControlFail()
 
-        if (result instanceof CancellationError || result instanceof TimeoutError) {
-          throw result
+        if (controlAfterAttempt) {
+          throw controlAfterAttempt
         }
 
         return result
@@ -208,7 +217,7 @@ class FlowRunnerExecution<T extends TaskRecord> extends BaseExecution<Promise<Fl
 
         if (!retryDecision.shouldAttemptRetry) {
           if (retryDecision.isRetryExhausted) {
-            throw new RetryExhaustedError({ cause: error })
+            throw new RetryExhaustedError(undefined, { cause: error })
           }
 
           throw error
@@ -226,9 +235,9 @@ class FlowRunnerExecution<T extends TaskRecord> extends BaseExecution<Promise<Fl
     }
   }
 
-  async #executeAttempt(): Promise<FlowResult<T> | CancellationError | TimeoutError> {
+  async #executeAttempt(): Promise<FlowResult<T>> {
     await using execution = new FlowExecution(this.signal.signal, this.#tasks)
-    return await this.race(execution.execute())
+    return (await this.race(execution.execute())) as FlowResult<T>
   }
 }
 

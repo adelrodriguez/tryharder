@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { TimeoutError } from "../../errors"
+import { CancellationError, Panic, TimeoutError } from "../../errors"
 import { sleep } from "../../utils"
 import { executeAll } from "../all"
 
@@ -156,8 +156,8 @@ describe("executeAll", () => {
         )
         expect.unreachable("should have thrown")
       } catch (error) {
-        expect(error).toBeInstanceOf(Error)
-        expect((error as Error).message).toContain("Unknown task")
+        expect(error).toBeInstanceOf(Panic)
+        expect((error as Panic).code).toBe("TASK_UNKNOWN_REFERENCE")
       }
     })
 
@@ -173,8 +173,23 @@ describe("executeAll", () => {
         )
         expect.unreachable("should have thrown")
       } catch (error) {
-        expect(error).toBeInstanceOf(Error)
-        expect((error as Error).message).toContain("cannot await its own result")
+        expect(error).toBeInstanceOf(Panic)
+        expect((error as Panic).code).toBe("TASK_SELF_REFERENCE")
+      }
+    })
+
+    it("rejects with TASK_INVALID_HANDLER when a task is not a function", async () => {
+      try {
+        await executeAll({}, {
+          a: 123,
+        } as unknown as {
+          a(): number
+        })
+        expect.unreachable("should have thrown")
+      } catch (error) {
+        expect(error).toBeInstanceOf(Panic)
+        expect((error as Panic).code).toBe("TASK_INVALID_HANDLER")
+        expect((error as Error).message).toContain('Task "a" is not a function')
       }
     })
   })
@@ -217,6 +232,29 @@ describe("executeAll", () => {
         expect.unreachable("should have thrown")
       } catch (error) {
         expect((error as Error).message).toBe("a boom")
+      }
+    })
+
+    it("rejects with Panic when async catch rejects", async () => {
+      try {
+        await executeAll(
+          {},
+          {
+            a() {
+              throw new Error("boom")
+            },
+          },
+          {
+            catch: async () => {
+              await Promise.resolve()
+              throw new Error("catch failed")
+            },
+          }
+        )
+        expect.unreachable("should have thrown")
+      } catch (error) {
+        expect(error).toBeInstanceOf(Panic)
+        expect((error as Panic).code).toBe("ALL_CATCH_HANDLER_REJECT")
       }
     })
   })
@@ -340,6 +378,33 @@ describe("executeAll", () => {
         expect(error).toBeInstanceOf(TimeoutError)
       }
     })
+
+    it("rejects with TimeoutError when timeout expires during catch execution", async () => {
+      try {
+        await executeAll(
+          {
+            timeout: {
+              ms: 5,
+              scope: "total",
+            },
+          },
+          {
+            a() {
+              throw new Error("boom")
+            },
+          },
+          {
+            catch: async () => {
+              await sleep(20)
+              return "mapped"
+            },
+          }
+        )
+        expect.unreachable("should have thrown")
+      } catch (error) {
+        expect(error).toBeInstanceOf(TimeoutError)
+      }
+    })
   })
 
   describe("abort signal ($signal)", () => {
@@ -404,6 +469,36 @@ describe("executeAll", () => {
       await promise.catch(() => null)
       await sleep(60)
       expect(taskSignalAborted).toBe(true)
+    })
+
+    it("rejects with CancellationError when signal aborts during catch execution", async () => {
+      const controller = new AbortController()
+
+      const promise = executeAll(
+        { signals: [controller.signal] },
+        {
+          a() {
+            throw new Error("boom")
+          },
+        },
+        {
+          catch: async () => {
+            await sleep(20)
+            return "mapped"
+          },
+        }
+      )
+
+      setTimeout(() => {
+        controller.abort(new Error("external abort"))
+      }, 5)
+
+      try {
+        await promise
+        expect.unreachable("should have thrown")
+      } catch (error) {
+        expect(error).toBeInstanceOf(CancellationError)
+      }
     })
 
     it("handles already-aborted external signal", async () => {

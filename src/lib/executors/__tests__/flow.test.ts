@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { CancellationError, RetryExhaustedError, TimeoutError } from "../../errors"
+import { CancellationError, Panic, RetryExhaustedError, TimeoutError } from "../../errors"
 import { executeFlow } from "../flow"
 
 function sleep(ms: number): Promise<void> {
@@ -25,7 +25,8 @@ describe("executeFlow", () => {
       )
       expect.unreachable("should have thrown")
     } catch (error) {
-      expect((error as Error).message).toBe("Flow completed without exit")
+      expect(error).toBeInstanceOf(Panic)
+      expect((error as Panic).code).toBe("FLOW_NO_EXIT")
     }
   })
 
@@ -44,6 +45,36 @@ describe("executeFlow", () => {
     )
 
     expect(result).toBe("done")
+  })
+
+  it("treats $exit(new TimeoutError()) as a returned exit value", async () => {
+    const timeout = new TimeoutError("returned value")
+
+    const result = await executeFlow(
+      {},
+      {
+        a() {
+          return this.$exit(timeout)
+        },
+      }
+    )
+
+    expect(result).toBe(timeout)
+  })
+
+  it("treats $exit(new CancellationError()) as a returned exit value", async () => {
+    const cancellation = new CancellationError("returned value")
+
+    const result = await executeFlow(
+      {},
+      {
+        a() {
+          return this.$exit(cancellation)
+        },
+      }
+    )
+
+    expect(result).toBe(cancellation)
   })
 
   it("returns early when a dependent task reads a task that already exited", async () => {
@@ -168,6 +199,8 @@ describe("executeFlow", () => {
       )
       expect.unreachable("should have thrown")
     } catch (error) {
+      expect(error).toBeInstanceOf(Panic)
+      expect((error as Panic).code).toBe("TASK_SELF_REFERENCE")
       expect((error as Error).message).toContain("cannot await its own result")
     }
   })
@@ -186,7 +219,24 @@ describe("executeFlow", () => {
       )
       expect.unreachable("should have thrown")
     } catch (error) {
+      expect(error).toBeInstanceOf(Panic)
+      expect((error as Panic).code).toBe("TASK_UNKNOWN_REFERENCE")
       expect((error as Error).message).toContain("Unknown task")
+    }
+  })
+
+  it("rejects with TASK_INVALID_HANDLER when a task is not a function", async () => {
+    try {
+      await executeFlow({}, {
+        a: 123,
+      } as unknown as {
+        a(): number
+      })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect(error).toBeInstanceOf(Panic)
+      expect((error as Panic).code).toBe("TASK_INVALID_HANDLER")
+      expect((error as Error).message).toContain('Task "a" is not a function')
     }
   })
 
@@ -328,7 +378,8 @@ describe("executeFlow", () => {
       )
       expect.unreachable("should have thrown")
     } catch (error) {
-      expect((error as Error).message).toContain("Unknown task")
+      expect(error).toBeInstanceOf(Panic)
+      expect((error as Panic).code).toBe("TASK_UNKNOWN_REFERENCE")
     }
   })
 

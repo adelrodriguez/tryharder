@@ -37,19 +37,15 @@ export class RunExecution<T, E, Ctx extends BaseTryCtx> extends BaseExecution<
       try {
         mapped = this.#catchFn(error)
       } catch (catchError) {
-        throw new Panic({ cause: catchError })
+        throw new Panic("RUN_CATCH_HANDLER_THROW", { cause: catchError })
       }
 
       if (checkIsPromiseLike(mapped)) {
-        const mappedWithPanic = (async (): Promise<E> => {
-          try {
-            return await mapped
-          } catch (catchError) {
-            throw new Panic({ cause: catchError })
-          }
-        })()
-
-        return await this.race(mappedWithPanic, error)
+        try {
+          return await this.race(mapped, error)
+        } catch (catchError) {
+          throw new Panic("RUN_CATCH_HANDLER_REJECT", { cause: catchError })
+        }
       }
 
       const controlError = this.checkDidControlFail(error)
@@ -67,7 +63,7 @@ export class RunExecution<T, E, Ctx extends BaseTryCtx> extends BaseExecution<
       return controlError
     }
 
-    return new UnhandledException({ cause: error })
+    return new UnhandledException(undefined, { cause: error })
   }
 
   /** Resolve an attempt error into either a terminal result or a retry decision. */
@@ -86,7 +82,7 @@ export class RunExecution<T, E, Ctx extends BaseTryCtx> extends BaseExecution<
 
     if (!retryDecision.shouldAttemptRetry) {
       if (retryDecision.isRetryExhausted) {
-        return new RetryExhaustedError({ cause: error })
+        return new RetryExhaustedError(undefined, { cause: error })
       }
 
       return await this.#finalizeFailure(error)
@@ -126,7 +122,7 @@ export class RunExecution<T, E, Ctx extends BaseTryCtx> extends BaseExecution<
         if (checkIsPromiseLike(result)) {
           // oxlint-disable-next-line no-await-in-loop
           const raced = await this.race(Promise.resolve(result))
-          return RunExecution.resolveRacedResult(raced)
+          return raced
         }
 
         return this.resolveSyncSuccess(result)

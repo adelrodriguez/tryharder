@@ -26,7 +26,7 @@ async function executeAsyncGenerator<TYield, TReturn>(
   try {
     currentValue = await initialValue
   } catch (error) {
-    return new UnhandledException({ cause: error }) as GenErrors<TYield>
+    return new UnhandledException(undefined, { cause: error }) as GenErrors<TYield>
   }
 
   if (currentValue instanceof Error) {
@@ -40,7 +40,7 @@ async function executeAsyncGenerator<TYield, TReturn>(
     try {
       step = iterator.next(currentValue)
     } catch (error) {
-      return new UnhandledException({ cause: error }) as GenErrors<TYield>
+      return new UnhandledException(undefined, { cause: error }) as GenErrors<TYield>
     }
 
     if (step.done) {
@@ -49,7 +49,7 @@ async function executeAsyncGenerator<TYield, TReturn>(
           // oxlint-disable-next-line no-await-in-loop
           return (await step.value) as Awaited<TReturn>
         } catch (error) {
-          return new UnhandledException({ cause: error }) as GenErrors<TYield>
+          return new UnhandledException(undefined, { cause: error }) as GenErrors<TYield>
         }
       }
 
@@ -61,7 +61,7 @@ async function executeAsyncGenerator<TYield, TReturn>(
         // oxlint-disable-next-line no-await-in-loop
         currentValue = await step.value
       } catch (error) {
-        return new UnhandledException({ cause: error }) as GenErrors<TYield>
+        return new UnhandledException(undefined, { cause: error }) as GenErrors<TYield>
       }
     } else {
       currentValue = step.value
@@ -81,7 +81,7 @@ export function executeGen<TYield, TReturn>(
   try {
     iterator = factory(use)
   } catch (error) {
-    return new UnhandledException({ cause: error }) as GenResult<TYield, TReturn>
+    return new UnhandledException(undefined, { cause: error }) as GenResult<TYield, TReturn>
   }
 
   let currentValue: unknown = undefined
@@ -93,7 +93,7 @@ export function executeGen<TYield, TReturn>(
     try {
       step = iterator.next(currentValue)
     } catch (error) {
-      return new UnhandledException({ cause: error }) as GenResult<TYield, TReturn>
+      return new UnhandledException(undefined, { cause: error }) as GenResult<TYield, TReturn>
     }
 
     if (step.done) {

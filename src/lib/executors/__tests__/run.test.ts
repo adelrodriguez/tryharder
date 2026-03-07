@@ -61,6 +61,7 @@ describe("executeRun", () => {
         throw new Error("Expected Panic rejection")
       } catch (error) {
         expect(error).toBeInstanceOf(Panic)
+        expect((error as Panic).code).toBe("RUN_CATCH_HANDLER_REJECT")
       }
     })
   })

@@ -7,7 +7,7 @@ import type {
   TaskValidation,
 } from "../types/all"
 import type { BuilderConfig } from "../types/builder"
-import { Panic, TimeoutError } from "../errors"
+import { CancellationError, Panic, TimeoutError } from "../errors"
 import { checkIsPromiseLike } from "../utils"
 import { BaseExecution } from "./base"
 import { TaskExecution } from "./shared"
@@ -45,17 +45,33 @@ class AllExecution<T extends TaskRecord, C> extends BaseExecution<Promise<AllVal
         signal: execution.signal,
       }
 
+      let mapped: C | Promise<C>
+
       try {
-        const mapped = catchFn(error, context)
-
-        if (checkIsPromiseLike(mapped)) {
-          return await mapped
-        }
-
-        return mapped
+        mapped = catchFn(error, context)
       } catch (catchError) {
-        throw new Panic({ cause: catchError })
+        throw new Panic("ALL_CATCH_HANDLER_THROW", { cause: catchError })
       }
+
+      if (checkIsPromiseLike(mapped)) {
+        try {
+          const raced = await this.race(mapped, error)
+
+          if (raced instanceof CancellationError || raced instanceof TimeoutError) {
+            throw raced
+          }
+
+          return raced
+        } catch (catchError) {
+          if (catchError instanceof CancellationError || catchError instanceof TimeoutError) {
+            throw catchError
+          }
+
+          throw new Panic("ALL_CATCH_HANDLER_REJECT", { cause: catchError })
+        }
+      }
+
+      return mapped
     }
   }
 }

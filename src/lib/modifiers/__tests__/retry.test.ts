@@ -2,11 +2,10 @@ import { describe, expect, it } from "bun:test"
 import type { BuilderConfig } from "../../types/builder"
 import type { TryCtx } from "../../types/core"
 import {
+  createRetryPolicy,
   calculateRetryDelay,
   checkIsRetryExhausted,
   checkShouldAttemptRetry,
-  normalizeRetryPolicy,
-  retryOptions,
 } from "../retry"
 
 function createTestCtx(attempt: number, config: BuilderConfig): TryCtx {
@@ -21,9 +20,9 @@ function createTestCtx(attempt: number, config: BuilderConfig): TryCtx {
 
 const shouldRetry = () => true
 
-describe("normalizeRetryPolicy", () => {
+describe("createRetryPolicy", () => {
   it("normalizes number shorthand to constant backoff", () => {
-    expect(normalizeRetryPolicy(3)).toEqual({
+    expect(createRetryPolicy(3)).toEqual({
       backoff: "constant",
       delayMs: 0,
       limit: 3,
@@ -31,7 +30,7 @@ describe("normalizeRetryPolicy", () => {
   })
 
   it("normalizes linear policy with default delay", () => {
-    expect(normalizeRetryPolicy({ backoff: "linear", limit: 2 })).toEqual({
+    expect(createRetryPolicy({ backoff: "linear", limit: 2 })).toEqual({
       backoff: "linear",
       delayMs: 0,
       jitter: undefined,
@@ -42,7 +41,7 @@ describe("normalizeRetryPolicy", () => {
 
   it("normalizes exponential policy and preserves maxDelayMs", () => {
     expect(
-      normalizeRetryPolicy({
+      createRetryPolicy({
         backoff: "exponential",
         limit: 4,
         maxDelayMs: 1000,
@@ -59,7 +58,7 @@ describe("normalizeRetryPolicy", () => {
 
   it("preserves optional retry controls", () => {
     expect(
-      normalizeRetryPolicy({
+      createRetryPolicy({
         backoff: "constant",
         delayMs: 25,
         jitter: true,
@@ -74,11 +73,9 @@ describe("normalizeRetryPolicy", () => {
       shouldRetry,
     })
   })
-})
 
-describe("retryOptions", () => {
-  it("returns normalized retry policy", () => {
-    expect(retryOptions(2)).toEqual({
+  it("returns normalized retry policy for root helper usage", () => {
+    expect(createRetryPolicy(2)).toEqual({
       backoff: "constant",
       delayMs: 0,
       limit: 2,

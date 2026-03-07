@@ -10,10 +10,6 @@ export function normalizeTimeoutOptions(options: TimeoutOptions): TimeoutPolicy 
   return { ...options }
 }
 
-function createTimeoutCause(timeoutMs: number): Error {
-  return new Error(`Execution exceeded timeout of ${timeoutMs}ms`)
-}
-
 export class TimeoutController {
   readonly signal?: AbortSignal
   readonly #controller?: AbortController
@@ -41,12 +37,11 @@ export class TimeoutController {
     }, this.#timeoutMs)
   }
 
-  #createTimeoutError(cause?: unknown): TimeoutError {
-    return new TimeoutError({ cause: cause ?? createTimeoutCause(this.#timeoutMs) })
-  }
-
   #abort(cause?: unknown): TimeoutError {
-    const timeoutError = this.#createTimeoutError(cause)
+    const timeoutError =
+      cause === undefined
+        ? new TimeoutError(`Execution exceeded timeout of ${this.#timeoutMs}ms`)
+        : new TimeoutError(`Execution exceeded timeout of ${this.#timeoutMs}ms`, { cause })
 
     if (!this.signal?.aborted) {
       this.#controller?.abort(timeoutError)
@@ -73,7 +68,11 @@ export class TimeoutController {
         return reason
       }
 
-      return this.#createTimeoutError(cause ?? reason)
+      return cause === undefined && reason === undefined
+        ? new TimeoutError(`Execution exceeded timeout of ${this.#timeoutMs}ms`)
+        : new TimeoutError(`Execution exceeded timeout of ${this.#timeoutMs}ms`, {
+            cause: cause ?? reason,
+          })
     }
 
     const remaining = this.#getRemaining()
@@ -105,7 +104,11 @@ export class TimeoutController {
     return await raceWithAbortSignal(
       this.signal,
       promise,
-      () => this.checkDidTimeout(cause) ?? this.#createTimeoutError(cause)
+      () =>
+        this.checkDidTimeout(cause) ??
+        (cause === undefined
+          ? new TimeoutError(`Execution exceeded timeout of ${this.#timeoutMs}ms`)
+          : new TimeoutError(`Execution exceeded timeout of ${this.#timeoutMs}ms`, { cause }))
     )
   }
 

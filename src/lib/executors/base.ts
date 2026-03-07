@@ -37,14 +37,6 @@ export class RetryDirective {
   }
 }
 
-function extractControlResult(value: unknown): CancellationError | TimeoutError | undefined {
-  if (value instanceof CancellationError || value instanceof TimeoutError) {
-    return value
-  }
-
-  return undefined
-}
-
 export abstract class BaseExecution<TResult = unknown> {
   protected readonly config: BuilderConfig
   protected readonly ctx: TryCtx
@@ -102,12 +94,6 @@ export abstract class BaseExecution<TResult = unknown> {
     return this.checkDidControlFail() ?? value
   }
 
-  protected static resolveRacedResult<V>(
-    value: V | CancellationError | TimeoutError
-  ): V | CancellationError | TimeoutError {
-    return extractControlResult(value) ?? value
-  }
-
   protected async race<V>(
     promise: PromiseLike<V>,
     cause?: unknown
@@ -133,7 +119,12 @@ export abstract class BaseExecution<TResult = unknown> {
     }
 
     const sleepResult = await this.race(sleep(delay))
-    return extractControlResult(sleepResult)
+
+    if (sleepResult instanceof CancellationError || sleepResult instanceof TimeoutError) {
+      return sleepResult
+    }
+
+    return undefined
   }
 
   protected shouldAttemptRetry(error: unknown): boolean {

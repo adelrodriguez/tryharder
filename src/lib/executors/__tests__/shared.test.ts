@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test"
+import { Panic } from "../../errors"
 import { sleep } from "../../utils"
 import { TaskExecution } from "../shared"
 
@@ -111,6 +112,7 @@ describe("TaskExecution", () => {
     }
 
     expect(result.a.status).toBe("rejected")
-    expect((result.a.reason as Error).message).toContain("Unknown task")
+    expect(result.a.reason).toBeInstanceOf(Panic)
+    expect((result.a.reason as Panic).code).toBe("TASK_UNKNOWN_REFERENCE")
   })
 })

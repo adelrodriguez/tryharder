@@ -3,7 +3,7 @@ import type { TryCtx } from "../types/core"
 import type { RetryOptions, RetryPolicy } from "../types/retry"
 import { assertUnreachable } from "../utils"
 
-export function normalizeRetryPolicy(policy: RetryOptions): RetryPolicy {
+export function createRetryPolicy(policy: RetryOptions): RetryPolicy {
   if (typeof policy === "number") {
     return {
       backoff: "constant",
@@ -26,12 +26,8 @@ export function normalizeRetryPolicy(policy: RetryOptions): RetryPolicy {
     case "exponential":
       return { ...base, backoff: policy.backoff, maxDelayMs: policy.maxDelayMs }
     default:
-      return assertUnreachable(policy)
+      return assertUnreachable(policy, "UNREACHABLE_RETRY_POLICY_BACKOFF")
   }
-}
-
-export function retryOptions(policy: RetryOptions): RetryPolicy {
-  return normalizeRetryPolicy(policy)
 }
 
 export function calculateRetryDelay(attempt: number, config: BuilderConfig): number {

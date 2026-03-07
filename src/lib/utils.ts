@@ -1,7 +1,13 @@
-import { CancellationError, Panic, TimeoutError } from "./errors"
+import { CancellationError, Panic, TimeoutError, type PanicCode } from "./errors"
 
-export function assertUnreachable(value: never): never {
-  throw new Panic({ message: `Unreachable case: ${String(value)}` })
+export function assertUnreachable(value: never, code: PanicCode): never {
+  throw new Panic(code, { message: `Unreachable case: ${String(value)}` })
+}
+
+export function invariant(condition: unknown, error: Error): asserts condition {
+  if (!condition) {
+    throw error
+  }
 }
 
 export function sleep(ms: number): Promise<void> {

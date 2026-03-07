@@ -1,5 +1,6 @@
 import type { ResultProxy, TaskContext, TaskRecord } from "../types/all"
-import { UnhandledException } from "../errors"
+import { Panic, UnhandledException } from "../errors"
+import { invariant } from "../utils"
 
 type ResolverPair = [(value: unknown) => void, (reason?: unknown) => void]
 
@@ -57,11 +58,19 @@ export class TaskExecution<T extends TaskRecord> {
 
   #waitForResult(taskName: keyof T, requesterTaskName?: keyof T): Promise<unknown> {
     if (requesterTaskName === taskName) {
-      return Promise.reject(new Error(`Task "${String(taskName)}" cannot await its own result`))
+      return Promise.reject(
+        new Panic("TASK_SELF_REFERENCE", {
+          message: `Task "${String(taskName)}" cannot await its own result`,
+        })
+      )
     }
 
     if (!Object.hasOwn(this.#tasks, taskName)) {
-      return Promise.reject(new Error(`Unknown task "${String(taskName)}"`))
+      return Promise.reject(
+        new Panic("TASK_UNKNOWN_REFERENCE", {
+          message: `Unknown task "${String(taskName)}"`,
+        })
+      )
     }
 
     if (this.#results.has(taskName)) {
@@ -72,7 +81,9 @@ export class TaskExecution<T extends TaskRecord> {
       const resultError = this.#errors.get(taskName)
 
       return Promise.reject(
-        resultError instanceof Error ? resultError : new UnhandledException({ cause: resultError })
+        resultError instanceof Error
+          ? resultError
+          : new UnhandledException(undefined, { cause: resultError })
       )
     }
 
@@ -132,9 +143,12 @@ export class TaskExecution<T extends TaskRecord> {
     try {
       const taskFn = this.#tasks[taskName]
 
-      if (typeof taskFn !== "function") {
-        throw new Error(`Task "${String(taskName)}" is not a function`)
-      }
+      invariant(
+        typeof taskFn === "function",
+        new Panic("TASK_INVALID_HANDLER", {
+          message: `Task "${String(taskName)}" is not a function`,
+        })
+      )
 
       const resultProxy = new Proxy({} as ResultProxy<T>, {
         get: (_, referencedTaskName: string) =>

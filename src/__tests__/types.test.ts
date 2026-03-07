@@ -150,6 +150,24 @@ describe("type inference", () => {
     })
   })
 
+  describe("panic", () => {
+    it("exports PanicCode and removes ConfigurationError", () => {
+      if (typecheckOnly()) {
+        const panic = new try$.Panic("FLOW_NO_EXIT")
+        const taskCodes: try$.PanicCode[] = [
+          "FLOW_NO_EXIT",
+          "TASK_SELF_REFERENCE",
+          "TASK_UNKNOWN_REFERENCE",
+        ]
+        type _assert = Expect<Equal<typeof panic.code, try$.PanicCode>>
+        void taskCodes
+
+        // @ts-expect-error -- ConfigurationError was removed in favor of coded Panic
+        void try$.ConfigurationError
+      }
+    })
+  })
+
   describe("with retry", () => {
     it("constant zero-delay retry run returns Promise union", () => {
       const result = try$.retry(3).run(() => 42)

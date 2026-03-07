@@ -6,7 +6,7 @@ import {
   TimeoutError,
   UnhandledException,
 } from "../errors"
-import { assertUnreachable, checkIsControlError, checkIsPromiseLike } from "../utils"
+import { assertUnreachable, checkIsControlError, checkIsPromiseLike, invariant } from "../utils"
 
 describe("checkIsControlError", () => {
   it("returns true for CancellationError", () => {
@@ -14,7 +14,7 @@ describe("checkIsControlError", () => {
   })
 
   it("returns true for Panic", () => {
-    expect(checkIsControlError(new Panic())).toBe(true)
+    expect(checkIsControlError(new Panic("RUN_CATCH_HANDLER_THROW"))).toBe(true)
   })
 
   it("returns true for TimeoutError", () => {
@@ -58,8 +58,34 @@ describe("checkIsPromiseLike", () => {
   })
 })
 
+describe("invariant", () => {
+  it("does nothing when the condition is truthy", () => {
+    expect(() => {
+      invariant(true, new Error("boom"))
+    }).not.toThrow()
+  })
+
+  it("throws the provided error when the condition is falsy", () => {
+    const error = new Panic("RUN_SYNC_TRY_PROMISE")
+
+    expect(() => {
+      invariant(false, error)
+    }).toThrow(error)
+  })
+})
+
 describe("assertUnreachable", () => {
   it("throws with the unreachable value", () => {
-    expect(() => assertUnreachable("unexpected" as never)).toThrow("Unreachable case: unexpected")
+    let error: unknown
+
+    try {
+      assertUnreachable("unexpected" as never, "UNREACHABLE_RETRY_POLICY_BACKOFF")
+    } catch (caughtError) {
+      error = caughtError
+    }
+
+    expect(error).toBeInstanceOf(Panic)
+    expect((error as Panic).code).toBe("UNREACHABLE_RETRY_POLICY_BACKOFF")
+    expect((error as Error).message).toBe("Unreachable case: unexpected")
   })
 })

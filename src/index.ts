@@ -1,13 +1,12 @@
 import { RunBuilder, createWrappedBuilder } from "./lib/builder"
 import {
   CancellationError,
-  ConfigurationError,
   Panic,
   RetryExhaustedError,
   TimeoutError,
   UnhandledException,
 } from "./lib/errors"
-import { retryOptions } from "./lib/modifiers/retry"
+import { createRetryPolicy } from "./lib/modifiers/retry"
 
 const root: RunBuilder = new RunBuilder()
 
@@ -25,15 +24,9 @@ export const gen: RunBuilder["gen"] = root.gen.bind(root)
 
 export { dispose } from "./lib/dispose"
 
-export { retryOptions }
-export {
-  CancellationError,
-  ConfigurationError,
-  Panic,
-  RetryExhaustedError,
-  TimeoutError,
-  UnhandledException,
-}
+export { createRetryPolicy }
+export { CancellationError, Panic, RetryExhaustedError, TimeoutError, UnhandledException }
+export type { PanicCode } from "./lib/errors"
 
 export type {
   AllSettledResult,

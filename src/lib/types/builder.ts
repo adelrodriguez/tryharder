@@ -28,14 +28,6 @@ export type TimeoutOptions = number | TimeoutPolicy
  */
 export type WrapFn = (ctx: TryCtx, next: RunTryFn<unknown, TryCtx>) => unknown
 
-export const BuilderErrors = {
-  GEN_UNAVAILABLE:
-    "gen() is unavailable after retry(), timeout(), or signal(). Start a new builder chain or use top-level gen().",
-  RUN_SYNC_UNAVAILABLE:
-    "runSync() is unavailable after retry(), timeout(), or signal(). Use run() or start a new builder chain.",
-  WRAP_UNAVAILABLE: "wrap() is unavailable after retry(), timeout(), or signal().",
-} as const
-
 export interface BuilderConfig {
   /**
    * Retry configuration applied to the run.

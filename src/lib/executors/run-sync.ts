@@ -2,8 +2,8 @@ import type { BuilderConfig } from "../types/builder"
 import type { BaseTryCtx, NonPromise } from "../types/core"
 import type { RetryPolicy } from "../types/retry"
 import type { RunnerError } from "./base"
-import { ConfigurationError, Panic, RetryExhaustedError, UnhandledException } from "../errors"
-import { checkIsControlError, checkIsPromiseLike } from "../utils"
+import { Panic, RetryExhaustedError, UnhandledException, type PanicCode } from "../errors"
+import { checkIsControlError, checkIsPromiseLike, invariant } from "../utils"
 import { BaseExecution, RetryDirective } from "./base"
 
 export type SyncRunTryFn<T, Ctx extends BaseTryCtx = BaseTryCtx> = (ctx: Ctx) => NonPromise<T>
@@ -28,10 +28,15 @@ export interface RunSyncOptions<T, E> {
 
 export type RunSyncInput<T, E> = RunSyncTryFn<T> | RunSyncOptions<T, E>
 
-function throwIfPromiseLike(value: unknown, message: string): void {
-  if (checkIsPromiseLike(value)) {
-    throw new ConfigurationError({ message })
-  }
+function assertNotPromiseLike<T>(
+  value: T,
+  code: PanicCode,
+  message?: string
+): asserts value is NonPromise<T> {
+  invariant(
+    !checkIsPromiseLike(value),
+    new Panic(code, message === undefined ? undefined : { message })
+  )
 }
 
 function checkIsSyncSafeRetryPolicy(retryPolicy: RetryPolicy | undefined): boolean {
@@ -63,7 +68,7 @@ class RunSyncExecution<T, E, Ctx extends BaseTryCtx> extends BaseExecution<T | E
 
   override execute(): T | E | RunnerError {
     const result = super.execute()
-    throwIfPromiseLike(result, "runSync() cannot handle Promise values. Use run() instead.")
+    assertNotPromiseLike(result, "RUN_SYNC_WRAPPED_RESULT_PROMISE")
     return result
   }
 
@@ -82,10 +87,10 @@ class RunSyncExecution<T, E, Ctx extends BaseTryCtx> extends BaseExecution<T | E
       try {
         mapped = this.#catchFn(error)
       } catch (catchError) {
-        throw new Panic({ cause: catchError })
+        throw new Panic("RUN_SYNC_CATCH_HANDLER_THROW", { cause: catchError })
       }
 
-      throwIfPromiseLike(mapped, "runSync() catch cannot return a Promise. Use run() instead.")
+      assertNotPromiseLike(mapped, "RUN_SYNC_CATCH_PROMISE")
 
       const controlError = this.checkDidControlFail(error)
 
@@ -102,7 +107,7 @@ class RunSyncExecution<T, E, Ctx extends BaseTryCtx> extends BaseExecution<T | E
       return controlError
     }
 
-    return new UnhandledException({ cause: error })
+    return new UnhandledException(undefined, { cause: error })
   }
 
   #resolveFailure(error: unknown): E | RunnerError | RetryDirective {
@@ -120,7 +125,7 @@ class RunSyncExecution<T, E, Ctx extends BaseTryCtx> extends BaseExecution<T | E
 
     if (!retryDecision.shouldAttemptRetry) {
       if (retryDecision.isRetryExhausted) {
-        return new RetryExhaustedError({ cause: error })
+        return new RetryExhaustedError(undefined, { cause: error })
       }
 
       return this.#finalizeFailure(error)
@@ -151,9 +156,7 @@ class RunSyncExecution<T, E, Ctx extends BaseTryCtx> extends BaseExecution<T | E
 
         if (resolved instanceof RetryDirective) {
           if (resolved.decision.delay > 0) {
-            throw new ConfigurationError({
-              message: "This retry policy may run asynchronously. Use run() instead.",
-            })
+            throw new Panic("RUN_SYNC_ASYNC_RETRY_POLICY")
           }
 
           currentAttempt += 1
@@ -163,7 +166,7 @@ class RunSyncExecution<T, E, Ctx extends BaseTryCtx> extends BaseExecution<T | E
         return resolved
       }
 
-      throwIfPromiseLike(result, "The try function returned a Promise. Use run() instead.")
+      assertNotPromiseLike(result, "RUN_SYNC_TRY_PROMISE")
 
       return this.resolveSyncSuccess(result)
     }
@@ -182,11 +185,7 @@ export function executeRunSync<T, E, Ctx extends BaseTryCtx>(
   config: BuilderConfig,
   input: SyncRunInput<T, E, Ctx>
 ): T | E | RunnerError {
-  if (!checkIsSyncSafeRetryPolicy(config.retry)) {
-    throw new ConfigurationError({
-      message: "This retry policy may run asynchronously. Use run() instead.",
-    })
-  }
+  invariant(checkIsSyncSafeRetryPolicy(config.retry), new Panic("RUN_SYNC_ASYNC_RETRY_POLICY"))
 
   using execution = new RunSyncExecution<T, E, Ctx>(config, input)
   return execution.execute()
@@ -201,23 +200,27 @@ export function runSync<T, E>(input: RunSyncInput<T, E>): T | E | UnhandledExcep
 
   try {
     const result = tryFn()
-    throwIfPromiseLike(result, "runSync() cannot handle Promise values. Use run() instead.")
+    assertNotPromiseLike(result, "RUN_SYNC_TRY_PROMISE")
     return result
   } catch (error) {
-    if (error instanceof Panic || error instanceof ConfigurationError) {
+    if (error instanceof Panic) {
       throw error
     }
 
     if (!catchFn) {
-      return new UnhandledException({ cause: error })
+      return new UnhandledException(undefined, { cause: error })
     }
 
     try {
       const mapped = catchFn(error)
-      throwIfPromiseLike(mapped, "runSync() catch cannot return a Promise. Use run() instead.")
+      assertNotPromiseLike(mapped, "RUN_SYNC_CATCH_PROMISE")
       return mapped
     } catch (catchError) {
-      throw new Panic({ cause: catchError })
+      if (catchError instanceof Panic && catchError.code === "RUN_SYNC_CATCH_PROMISE") {
+        throw catchError
+      }
+
+      throw new Panic("RUN_SYNC_CATCH_HANDLER_THROW", { cause: catchError })
     }
   }
 }

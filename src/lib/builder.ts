@@ -1,5 +1,6 @@
 import type {
   CancellationError,
+  PanicMessages,
   RetryExhaustedError,
   TimeoutError,
   UnhandledException,
@@ -14,6 +15,7 @@ import type {
 } from "./executors/all"
 import type { FlowResult, InferredFlowTaskContext } from "./executors/flow"
 import type { GenResult, GenUse } from "./executors/gen"
+import type { BuilderConfig, TimeoutOptions, WrapFn } from "./types/builder"
 import type {
   BuilderState,
   DefaultBuilderState,
@@ -25,22 +27,17 @@ import type {
 } from "./types/core"
 import type { RetryOptions } from "./types/retry"
 import type { AsyncRunInput, RunTryFn } from "./types/run"
-import { ConfigurationError as ConfigurationErrorClass } from "./errors"
+import { Panic } from "./errors"
 import { executeAll } from "./executors/all"
 import { executeAllSettled } from "./executors/all-settled"
 import { executeFlow } from "./executors/flow"
 import { executeGen } from "./executors/gen"
 import { executeRun } from "./executors/run"
 import { executeRunSync, type SyncRunInput, type SyncRunTryFn } from "./executors/run-sync"
-import { normalizeRetryPolicy } from "./modifiers/retry"
+import { createRetryPolicy } from "./modifiers/retry"
 import { normalizeTimeoutOptions } from "./modifiers/timeout"
 import { executeWithWraps } from "./modifiers/wrap"
-import {
-  BuilderErrors,
-  type BuilderConfig,
-  type TimeoutOptions,
-  type WrapFn,
-} from "./types/builder"
+import { invariant } from "./utils"
 
 type ConfigRunErrors = RetryExhaustedError | TimeoutError | CancellationError
 type WithRetry<CtxProperties extends TryCtxProperties> = SetTryCtxFeature<CtxProperties, "retry">
@@ -74,7 +71,7 @@ export class RunBuilder<
     return new RunBuilder(
       {
         ...this.#config,
-        retry: normalizeRetryPolicy(policy),
+        retry: createRetryPolicy(policy),
       },
       {
         ...this.#state,
@@ -117,22 +114,13 @@ export class RunBuilder<
   }
 
   wrap(
-    fn: State["canWrap"] extends true ? WrapFn : typeof BuilderErrors.WRAP_UNAVAILABLE
+    fn: State["canWrap"] extends true ? WrapFn : PanicMessages["WRAP_UNAVAILABLE"]
   ): RunBuilder<E, CtxProperties, MarkWrapped<State>>
   wrap(
-    fn: WrapFn | typeof BuilderErrors.WRAP_UNAVAILABLE
+    fn: WrapFn | PanicMessages["WRAP_UNAVAILABLE"]
   ): RunBuilder<E, CtxProperties, MarkWrapped<State>> {
-    if (!this.#state.canWrap) {
-      throw new ConfigurationErrorClass({
-        message: BuilderErrors.WRAP_UNAVAILABLE,
-      })
-    }
-
-    if (typeof fn !== "function") {
-      throw new ConfigurationErrorClass({
-        message: BuilderErrors.WRAP_UNAVAILABLE,
-      })
-    }
+    invariant(this.#state.canWrap, new Panic("WRAP_UNAVAILABLE"))
+    invariant(typeof fn === "function", new Panic("WRAP_INVALID_HANDLER"))
 
     return new RunBuilder(
       {
@@ -155,27 +143,18 @@ export class RunBuilder<
   runSync<T>(
     tryFn: State["canSync"] extends true
       ? SyncRunTryFn<T, TryCtxFor<CtxProperties>>
-      : typeof BuilderErrors.RUN_SYNC_UNAVAILABLE
+      : PanicMessages["RUN_SYNC_UNAVAILABLE"]
   ): T | UnhandledException | E
   runSync<T, C>(
     input: State["canSync"] extends true
       ? SyncRunInput<T, C, TryCtxFor<CtxProperties>>
-      : typeof BuilderErrors.RUN_SYNC_UNAVAILABLE
+      : PanicMessages["RUN_SYNC_UNAVAILABLE"]
   ): T | C | E
   runSync<T, C>(
-    input: SyncRunInput<T, C, TryCtxFor<CtxProperties>> | typeof BuilderErrors.RUN_SYNC_UNAVAILABLE
+    input: SyncRunInput<T, C, TryCtxFor<CtxProperties>> | PanicMessages["RUN_SYNC_UNAVAILABLE"]
   ) {
-    if (!this.#state.canSync) {
-      throw new ConfigurationErrorClass({
-        message: BuilderErrors.RUN_SYNC_UNAVAILABLE,
-      })
-    }
-
-    if (typeof input === "string") {
-      throw new ConfigurationErrorClass({
-        message: BuilderErrors.RUN_SYNC_UNAVAILABLE,
-      })
-    }
+    invariant(this.#state.canSync, new Panic("RUN_SYNC_UNAVAILABLE"))
+    invariant(typeof input !== "string", new Panic("RUN_SYNC_INVALID_INPUT"))
 
     return executeRunSync(this.#config, input)
   }
@@ -202,19 +181,10 @@ export class RunBuilder<
   gen<TYield, TReturn>(
     factory: State["canSync"] extends true
       ? (useFn: GenUse) => Generator<TYield, TReturn, unknown>
-      : typeof BuilderErrors.GEN_UNAVAILABLE
+      : PanicMessages["GEN_UNAVAILABLE"]
   ) {
-    if (!this.#state.canSync) {
-      throw new ConfigurationErrorClass({
-        message: BuilderErrors.GEN_UNAVAILABLE,
-      })
-    }
-
-    if (typeof factory !== "function") {
-      throw new ConfigurationErrorClass({
-        message: BuilderErrors.GEN_UNAVAILABLE,
-      })
-    }
+    invariant(this.#state.canSync, new Panic("GEN_UNAVAILABLE"))
+    invariant(typeof factory === "function", new Panic("GEN_INVALID_FACTORY"))
 
     return executeWithWraps(
       this.#config.wraps,
@@ -231,6 +201,8 @@ export function createWrappedBuilder(
   DefaultTryCtxProperties,
   SetBuilderState<DefaultBuilderState, "isWrapped", true>
 > {
+  invariant(typeof fn === "function", new Panic("WRAP_INVALID_HANDLER"))
+
   return new RunBuilder(
     { wraps: [fn] },
     {
