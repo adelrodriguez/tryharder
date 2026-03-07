@@ -69,6 +69,36 @@ describe("executeFlow", () => {
     expect(result).toBe("done")
   })
 
+  it("does not wait for a sibling's original work after $exit if it stops on abort", async () => {
+    const result = await Promise.race([
+      executeFlow(
+        {},
+        {
+          a() {
+            return this.$exit("done" as const)
+          },
+          async b() {
+            if (!this.$signal.aborted) {
+              await new Promise<void>((resolve) => {
+                this.$signal.addEventListener(
+                  "abort",
+                  () => {
+                    resolve()
+                  },
+                  { once: true }
+                )
+              })
+            }
+            return "never"
+          },
+        }
+      ),
+      sleep(50).then(() => "timed-out" as const),
+    ])
+
+    expect(result).toBe("done")
+  })
+
   it("treats $exit(new TimeoutError()) as a returned exit value", async () => {
     const timeout = new TimeoutError("returned value")
 
@@ -181,6 +211,7 @@ describe("executeFlow", () => {
             })
           }
 
+          await sleep(20)
           return null
         },
       }
@@ -342,6 +373,46 @@ describe("executeFlow", () => {
     }
   })
 
+  it("re-checks external cancellation after sibling unwind", async () => {
+    const controller = new AbortController()
+
+    const pending = executeFlow(
+      { signals: [controller.signal] },
+      {
+        a() {
+          return this.$exit("done" as const)
+        },
+        async b() {
+          if (!this.$signal.aborted) {
+            await new Promise<void>((resolve) => {
+              this.$signal.addEventListener(
+                "abort",
+                () => {
+                  setTimeout(resolve, 20)
+                },
+                { once: true }
+              )
+            })
+          }
+
+          await sleep(20)
+          return null
+        },
+      }
+    )
+
+    setTimeout(() => {
+      controller.abort(new Error("stop"))
+    }, 5)
+
+    try {
+      await pending
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect(error).toBeInstanceOf(CancellationError)
+    }
+  })
+
   it("throws when accessing an unknown task result", async () => {
     try {
       await executeFlow(
@@ -394,6 +465,79 @@ describe("executeFlow", () => {
     } catch (error) {
       expect((error as Error).message).toBe("fast error")
     }
+  })
+
+  it("does not wait for a sibling's original work after an early error if it stops on abort", async () => {
+    const result = await Promise.race([
+      executeFlow(
+        {},
+        {
+          a() {
+            throw new Error("boom")
+          },
+          async b() {
+            if (!this.$signal.aborted) {
+              await new Promise<void>((resolve) => {
+                this.$signal.addEventListener(
+                  "abort",
+                  () => {
+                    resolve()
+                  },
+                  { once: true }
+                )
+              })
+            }
+            return "never"
+          },
+        }
+      ).then(
+        () => "resolved" as const,
+        (error: unknown) => error
+      ),
+      sleep(50).then(() => "timed-out" as const),
+    ])
+
+    expect(result).toBeInstanceOf(Error)
+    expect((result as Error).message).toBe("boom")
+  })
+
+  it("keeps the shared disposer alive until aborted siblings finish unwinding", async () => {
+    const calls: string[] = []
+
+    const result = await executeFlow(
+      {},
+      {
+        a() {
+          this.$disposer.defer(() => {
+            calls.push("a-cleanup")
+          })
+
+          return this.$exit("done" as const)
+        },
+        async b() {
+          if (!this.$signal.aborted) {
+            await new Promise<void>((resolve) => {
+              this.$signal.addEventListener(
+                "abort",
+                () => {
+                  resolve()
+                },
+                { once: true }
+              )
+            })
+          }
+
+          this.$disposer.defer(() => {
+            calls.push("b-cleanup")
+          })
+
+          return null
+        },
+      }
+    )
+
+    expect(result).toBe("done")
+    expect(calls).toEqual(["b-cleanup", "a-cleanup"])
   })
 
   it("aborts sibling task signal after early exit", async () => {

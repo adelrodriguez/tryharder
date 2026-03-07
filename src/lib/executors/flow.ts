@@ -1,9 +1,8 @@
 import type { ResultProxy, TaskRecord } from "../types/all"
 import type { BuilderConfig } from "../types/builder"
 import type { FlowResult, FlowTaskContext, InferredFlowTaskContext } from "../types/flow"
-import { Panic, UnhandledException } from "../errors"
-import { invariant } from "../utils"
-import { OrchestrationExecution } from "./shared"
+import { Panic } from "../errors"
+import { OrchestrationExecution, TaskGraphExecutionBase } from "./shared"
 
 class FlowExitSignal extends Error {
   readonly value: unknown
@@ -15,162 +14,80 @@ class FlowExitSignal extends Error {
   }
 }
 
-class FlowExecution<T extends TaskRecord> {
-  readonly #tasks: T
-  readonly #taskNames: Array<keyof T & string>
-  readonly #results = new Map<keyof T, unknown>()
-  readonly #errors = new Map<keyof T, unknown>()
-  readonly #resolvers = new Map<
-    keyof T,
-    Array<[(value: unknown) => void, (reason?: unknown) => void]>
-  >()
-  readonly #signal: AbortSignal
-  readonly #internalController = new AbortController()
-  readonly #disposer = new AsyncDisposableStack()
-  #firstRejection: unknown
-
-  constructor(signal: AbortSignal | undefined, tasks: T) {
-    this.#tasks = tasks
-    this.#taskNames = Object.keys(tasks) as Array<keyof T & string>
-
-    this.#signal = signal
-      ? AbortSignal.any([signal, this.#internalController.signal])
-      : this.#internalController.signal
-  }
-
-  async [Symbol.asyncDispose](): Promise<void> {
-    await this.#disposer.disposeAsync()
-  }
+class FlowExecution<T extends TaskRecord> extends TaskGraphExecutionBase<T, FlowTaskContext<T>> {
+  #firstRejectionWaiters: Array<() => void> = []
+  #settledPromise: Promise<Array<PromiseSettledResult<void>>> | undefined
 
   async execute(): Promise<FlowResult<T>> {
-    const promises = this.#taskNames.map(async (name) => this.#runTask(name))
+    const promises = this.taskNames.map(async (name) => this.runTask(name))
+    this.#settledPromise = Promise.allSettled(promises)
 
-    await Promise.allSettled(promises)
+    // Race Promise.allSettled() against the first rejection recorded by runTask().
+    await Promise.race([this.#settledPromise, this.waitForFirstRejection()])
 
-    if (this.#firstRejection !== undefined) {
-      if (this.#firstRejection instanceof FlowExitSignal) {
-        return this.#firstRejection.value as FlowResult<T>
+    if (this.firstRejection !== undefined) {
+      if (this.firstRejection instanceof FlowExitSignal) {
+        return this.firstRejection.value as FlowResult<T>
       }
 
-      throw this.#firstRejection
+      throw this.firstRejection
     }
 
     throw new Panic("FLOW_NO_EXIT")
   }
 
-  #waitForResult(taskName: keyof T, requesterTaskName?: keyof T): Promise<unknown> {
-    if (requesterTaskName === taskName) {
-      return Promise.reject(
-        new Panic("TASK_SELF_REFERENCE", {
-          message: `Task "${String(taskName)}" cannot await its own result`,
-        })
-      )
+  async waitForTasksToSettle(): Promise<void> {
+    await this.#settledPromise
+  }
+
+  protected override setFirstRejection(error: unknown): void {
+    const hadFirstRejection = this.firstRejection !== undefined
+
+    super.setFirstRejection(error)
+
+    if (hadFirstRejection || this.firstRejection === undefined) {
+      return
     }
 
-    if (!Object.hasOwn(this.#tasks, taskName)) {
-      return Promise.reject(
-        new Panic("TASK_UNKNOWN_REFERENCE", {
-          message: `Unknown task "${String(taskName)}"`,
-        })
-      )
+    for (const resolve of this.#firstRejectionWaiters) {
+      resolve()
     }
 
-    if (this.#results.has(taskName)) {
-      return Promise.resolve(this.#results.get(taskName))
+    this.#firstRejectionWaiters = []
+  }
+
+  protected override createTaskContext(resultProxy: ResultProxy<T>): FlowTaskContext<T> {
+    return {
+      $disposer: this.disposer,
+      $exit: (value) => {
+        throw new FlowExitSignal(value)
+      },
+      $result: resultProxy,
+      $signal: this.taskSignal,
+    }
+  }
+
+  protected override mapStoredError(error: unknown): Error {
+    if (error instanceof FlowExitSignal) {
+      return error
     }
 
-    if (this.#errors.has(taskName)) {
-      const resultError = this.#errors.get(taskName)
+    return super.mapStoredError(error)
+  }
 
-      if (resultError instanceof FlowExitSignal) {
-        return Promise.reject(resultError)
-      }
+  protected override shouldAbortOnTaskError(): boolean {
+    void this.taskNames
+    return true
+  }
 
-      return Promise.reject(
-        resultError instanceof Error
-          ? resultError
-          : new UnhandledException(undefined, { cause: resultError })
-      )
+  private waitForFirstRejection(): Promise<void> {
+    if (this.firstRejection !== undefined) {
+      return Promise.resolve()
     }
 
-    return new Promise((resolve, reject) => {
-      if (!this.#resolvers.has(taskName)) {
-        this.#resolvers.set(taskName, [])
-      }
-
-      const queue = this.#resolvers.get(taskName)
-
-      if (queue) {
-        queue.push([resolve, reject])
-      }
+    return new Promise((resolve) => {
+      this.#firstRejectionWaiters.push(resolve)
     })
-  }
-
-  #handleResult(taskName: keyof T, value: unknown): void {
-    this.#results.set(taskName, value)
-
-    const fulfilled = this.#resolvers.get(taskName)
-
-    if (fulfilled) {
-      for (const [resolve] of fulfilled) {
-        resolve(value)
-      }
-
-      this.#resolvers.delete(taskName)
-    }
-  }
-
-  #handleError(taskName: keyof T, error: unknown): void {
-    this.#errors.set(taskName, error)
-
-    const rejected = this.#resolvers.get(taskName)
-
-    if (rejected) {
-      for (const [, reject] of rejected) {
-        reject(error)
-      }
-
-      this.#resolvers.delete(taskName)
-    }
-  }
-
-  async #runTask(taskName: keyof T): Promise<void> {
-    try {
-      const taskFn = this.#tasks[taskName]
-
-      invariant(
-        typeof taskFn === "function",
-        new Panic("TASK_INVALID_HANDLER", {
-          message: `Task "${String(taskName)}" is not a function`,
-        })
-      )
-
-      const resultProxy = new Proxy({} as ResultProxy<T>, {
-        get: (_, referencedTaskName: string) =>
-          this.#waitForResult(referencedTaskName as keyof T, taskName),
-      })
-
-      const context: FlowTaskContext<T> = {
-        $disposer: this.#disposer,
-        $exit: (value) => {
-          throw new FlowExitSignal(value)
-        },
-        $result: resultProxy,
-        $signal: this.#signal,
-      }
-
-      const result = await (taskFn as (this: FlowTaskContext<T>) => unknown).call(context)
-      this.#handleResult(taskName, result)
-    } catch (error) {
-      this.#firstRejection ??= error
-      this.#handleError(taskName, error)
-
-      if (!this.#internalController.signal.aborted) {
-        this.#internalController.abort(error)
-      }
-
-      throw error
-    }
   }
 }
 
@@ -184,14 +101,30 @@ class FlowRunnerExecution<T extends TaskRecord> extends OrchestrationExecution<F
 
   protected override async executeTasks(): Promise<FlowResult<T>> {
     await using execution = new FlowExecution(this.signal.signal, this.#tasks)
-    const result = await this.signal.race(execution.execute())
-    const cancellation = this.signal.checkDidCancel()
+    let result!: FlowResult<T>
+    let threw = false
+    let thrownError: unknown
+
+    try {
+      result = (await this.signal.race(execution.execute())) as FlowResult<T>
+    } catch (error) {
+      threw = true
+      thrownError = error
+    } finally {
+      await execution.waitForTasksToSettle()
+    }
+
+    const cancellation = this.signal.checkDidCancel(thrownError)
 
     if (cancellation) {
       throw cancellation
     }
 
-    return result as FlowResult<T>
+    if (threw) {
+      throw thrownError
+    }
+
+    return result
   }
 }
 

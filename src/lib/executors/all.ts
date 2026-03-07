@@ -23,64 +23,70 @@ class AllExecution<T extends TaskRecord, C> extends OrchestrationExecution<AllVa
 
   protected override async executeTasks(): Promise<AllValue<T> | C> {
     await using execution = new TaskExecution(this.signal.signal, this.#tasks, "fail-fast")
+    let result!: AllValue<T> | C
+    let threw = false
+    let thrownError: unknown
 
     try {
-      const result = await this.signal.race(execution.execute())
-      const cancellation = this.signal.checkDidCancel()
-
-      if (cancellation) {
-        throw cancellation
-      }
-
-      return result as AllValue<T>
+      result = (await this.signal.race(execution.execute())) as AllValue<T>
     } catch (error) {
       const controlAfterFailure = this.checkDidControlFail(error)
+      const catchFn = this.#options?.catch
 
       if (controlAfterFailure) {
-        throw controlAfterFailure
-      }
-
-      if (!this.#options?.catch) {
-        throw error
-      }
-
-      const catchFn = this.#options.catch
-      const context = {
-        failedTask: execution.failedTask,
-        partial: execution.returnValue as Partial<AllValue<T>>,
-        signal: execution.signal,
-      }
-
-      let mapped: C | Promise<C>
-
-      try {
-        mapped = catchFn(error, context)
-      } catch (catchError) {
-        throw new Panic("ALL_CATCH_HANDLER_THROW", { cause: catchError })
-      }
-
-      if (checkIsPromiseLike(mapped)) {
-        const raced = await this.signal.race(
-          Promise.resolve(mapped).catch((catchError: unknown) => {
-            if (catchError instanceof CancellationError) {
-              throw catchError
-            }
-
-            throw new Panic("ALL_CATCH_HANDLER_REJECT", { cause: catchError })
-          }),
-          error
-        )
-        const cancellation = this.signal.checkDidCancel(error)
-
-        if (cancellation) {
-          throw cancellation
+        threw = true
+        thrownError = controlAfterFailure
+      } else if (catchFn) {
+        const context = {
+          failedTask: execution.failedTask,
+          partial: execution.returnValue as Partial<AllValue<T>>,
+          signal: execution.signal,
         }
 
-        return raced as C
-      }
+        try {
+          const mapped = catchFn(error, context)
+          if (checkIsPromiseLike(mapped)) {
+            try {
+              result = (await this.signal.race(
+                Promise.resolve(mapped).catch((catchError: unknown) => {
+                  if (catchError instanceof CancellationError) {
+                    throw catchError
+                  }
 
-      return mapped
+                  throw new Panic("ALL_CATCH_HANDLER_REJECT", { cause: catchError })
+                }),
+                error
+              )) as C
+            } catch (mappedError) {
+              threw = true
+              thrownError = mappedError
+            }
+          } else {
+            result = mapped
+          }
+        } catch (catchError) {
+          threw = true
+          thrownError = new Panic("ALL_CATCH_HANDLER_THROW", { cause: catchError })
+        }
+      } else {
+        threw = true
+        thrownError = error
+      }
+    } finally {
+      await execution.waitForTasksToSettle()
     }
+
+    const cancellation = this.signal.checkDidCancel(thrownError)
+
+    if (cancellation) {
+      throw cancellation
+    }
+
+    if (threw) {
+      throw thrownError
+    }
+
+    return result
   }
 }
 

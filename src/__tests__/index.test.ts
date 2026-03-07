@@ -1008,6 +1008,57 @@ describe("all", () => {
     }
   })
 
+  it("rejects after a sibling stops on abort", async () => {
+    let slowTaskSettled = false
+
+    const result = await Promise.race([
+      try$
+        .all({
+          a() {
+            throw new Error("boom")
+          },
+          async b() {
+            if (!this.$signal.aborted) {
+              await new Promise<void>((resolve) => {
+                this.$signal.addEventListener(
+                  "abort",
+                  () => {
+                    resolve()
+                  },
+                  { once: true }
+                )
+              })
+            }
+            slowTaskSettled = true
+            return 2
+          },
+        })
+        .then(
+          () => "resolved" as const,
+          (error: unknown) => error
+        ),
+      sleep(50).then(() => "timed-out" as const),
+    ])
+
+    expect(result).toBeInstanceOf(Error)
+    expect((result as Error).message).toBe("boom")
+    expect(slowTaskSettled).toBe(true)
+  })
+
+  it("normalizes undefined task failures", async () => {
+    try {
+      await try$.all({
+        a() {
+          throw undefined
+        },
+      })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect(error).toBeInstanceOf(UnhandledException)
+      expect((error as UnhandledException).cause).toBeUndefined()
+    }
+  })
+
   it("returns mapped value when catch handles failure", async () => {
     const result = await try$.all(
       {
@@ -1026,7 +1077,7 @@ describe("all", () => {
     expect(result).toBe("mapped")
   })
 
-  it("passes failed task and partial results to catch", async () => {
+  it("passes failed task and currently available partial results to catch", async () => {
     const result = await try$.all(
       {
         async a() {
@@ -1049,7 +1100,7 @@ describe("all", () => {
     expect(result).toEqual({
       failedTask: "b",
       hasSignal: true,
-      partialA: 1,
+      partialA: undefined,
     })
   })
 
