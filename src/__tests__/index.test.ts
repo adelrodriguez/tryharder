@@ -157,6 +157,41 @@ describe("runSync", () => {
         expectPanic(error, "RUN_SYNC_TRY_PROMISE")
       }
     })
+
+    it("rethrows user-thrown Panic in function form", () => {
+      const panic = new Panic("FLOW_NO_EXIT")
+      let thrown: unknown
+
+      try {
+        try$.runSync(() => {
+          throw panic
+        })
+      } catch (error) {
+        thrown = error
+      }
+
+      expect(thrown).toBe(panic)
+    })
+
+    it("rethrows forwarded Panic from nested try$.runSync", () => {
+      const unsafeCatch = (() => Promise.resolve("mapped")) as unknown as (error: unknown) => string
+      let thrown: unknown
+
+      try {
+        try$.runSync(() =>
+          try$.runSync({
+            catch: unsafeCatch,
+            try: () => {
+              throw new Error("boom")
+            },
+          })
+        )
+      } catch (error) {
+        thrown = error
+      }
+
+      expectPanic(thrown, "RUN_SYNC_CATCH_PROMISE")
+    })
   })
 
   describe("object form", () => {

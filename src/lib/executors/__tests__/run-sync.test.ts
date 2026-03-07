@@ -30,6 +30,19 @@ describe("executeRunSync", () => {
         expect((error as Panic).code).toBe("RUN_SYNC_TRY_PROMISE")
       }
     })
+
+    it("rethrows user-thrown Panic in function form", () => {
+      const panic = new Panic("FLOW_NO_EXIT")
+
+      try {
+        executeRunSync({}, () => {
+          throw panic
+        })
+        expect.unreachable("should have thrown")
+      } catch (error) {
+        expect(error).toBe(panic)
+      }
+    })
   })
 
   describe("object form", () => {
