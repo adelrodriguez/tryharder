@@ -1,5 +1,5 @@
 {
-  "name": "hardtry",
+  "name": "tryharder",
   "version": "0.0.0",
   "description": "A better try/catch for TypeScript",
   "keywords": [
@@ -9,15 +9,15 @@
     "timeout",
     "try-catch"
   ],
-  "homepage": "https://github.com/adelrodriguez/hardtry#readme",
+  "homepage": "https://github.com/adelrodriguez/tryharder#readme",
   "bugs": {
-    "url": "https://github.com/adelrodriguez/hardtry/issues"
+    "url": "https://github.com/adelrodriguez/tryharder/issues"
   },
   "license": "MIT",
   "author": "Adel Rodríguez",
   "repository": {
     "type": "git",
-    "url": "https://github.com/adelrodriguez/hardtry.git"
+    "url": "https://github.com/adelrodriguez/tryharder.git"
   },
   "files": [
     "dist"

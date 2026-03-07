@@ -1,20 +1,20 @@
 <div align="center">
-  <h1 align="center">🔁 hardtry</h1>
+  <h1 align="center">🔁 tryharder</h1>
 
   <p align="center">
     <strong>A better try/catch for TypeScript</strong>
   </p>
 
   <p align="center">
-    <a href="https://www.npmjs.com/package/hardtry"><img src="https://img.shields.io/npm/v/hardtry" alt="npm version" /></a>
+    <a href="https://www.npmjs.com/package/tryharder"><img src="https://img.shields.io/npm/v/tryharder" alt="npm version" /></a>
     <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT" /></a>
   </p>
 </div>
 
-Run sync and async work with retries, timeouts, cancellation, typed failure mapping, and orchestration. Use `hardtry` when plain `try/catch` starts to sprawl and you want a small execution API that scales from single calls to parallel task maps and early-exit pipelines.
+Run sync and async work with retries, timeouts, cancellation, typed failure mapping, and orchestration. Use `tryharder` when plain `try/catch` starts to sprawl and you want a small execution API that scales from single calls to parallel task maps and early-exit pipelines.
 
 ```ts
-import * as try$ from "hardtry"
+import * as try$ from "tryharder"
 
 class RequestFailedError extends Error {}
 
@@ -42,6 +42,7 @@ const result = await try$
 
 - [Features](#features)
 - [Installation](#installation)
+- [Migration from hardtry](#migration-from-hardtry)
 - [Core Concepts](#core-concepts)
 - [Quick Start](#quick-start)
 - [Usage](#usage)
@@ -54,7 +55,7 @@ const result = await try$
   - [dispose](#dispose)
 - [API Reference](#api-reference)
 - [Common Recipes](#common-recipes)
-- [When not to use hardtry](#when-not-to-use-hardtry)
+- [When not to use tryharder](#when-not-to-use-tryharder)
 - [Contributing](#contributing)
 - [Acknowledgments](#acknowledgments)
 - [License](#license)
@@ -77,17 +78,33 @@ const result = await try$
 
 ```bash
 # bun
-bun add hardtry
+bun add tryharder
 
 # npm
-npm install hardtry
+npm install tryharder
 
 # yarn
-yarn add hardtry
+yarn add tryharder
 
 # pnpm
-pnpm add hardtry
+pnpm add tryharder
 ```
+
+## Migration from hardtry
+
+Replace import specifiers only:
+
+- `hardtry` -> `tryharder`
+- `hardtry/errors` -> `tryharder/errors`
+- `hardtry/types` -> `tryharder/types`
+
+You can keep the same namespace alias in your code:
+
+```ts
+import * as try$ from "tryharder"
+```
+
+No runtime API names changed.
 
 ## Core Concepts
 
@@ -104,14 +121,14 @@ pnpm add hardtry
 | `flow(tasks)`         | Ordered task orchestration with early exit                                |
 | `$exit(value)`        | Stop a `flow` early and return `value`                                    |
 
-Not sure if `hardtry` is a good fit for your project? See [When not to use hardtry](#when-not-to-use-hardtry).
+Not sure if `tryharder` is a good fit for your project? See [When not to use tryharder](#when-not-to-use-tryharder).
 
 ## Quick Start
 
 Use function form when you want thrown failures normalized to `UnhandledException`:
 
 ```ts
-import * as try$ from "hardtry"
+import * as try$ from "tryharder"
 
 const result = await try$.run(async () => {
   return "ok" as const
@@ -123,7 +140,7 @@ const result = await try$.run(async () => {
 Use object form when you want to map failures into domain results:
 
 ```ts
-import * as try$ from "hardtry"
+import * as try$ from "tryharder"
 
 class ValidationError extends Error {}
 
@@ -326,7 +343,7 @@ disposer.defer(() => {
 
 ### Errors
 
-Exports from `hardtry/errors`:
+Exports from `tryharder/errors`:
 
 | Export                | Description                                               |
 | --------------------- | --------------------------------------------------------- |
@@ -338,7 +355,7 @@ Exports from `hardtry/errors`:
 
 ### Types
 
-Exports from `hardtry/types`:
+Exports from `tryharder/types`:
 
 | Export             | Description                                          |
 | ------------------ | ---------------------------------------------------- |
@@ -349,9 +366,9 @@ Exports from `hardtry/types`:
 | `FlowExit`         | Exit marker type used by `flow(...)`                 |
 
 ```ts
-import * as try$ from "hardtry"
-import { Panic, TimeoutError, UnhandledException } from "hardtry/errors"
-import type { FlowExit, SettledResult } from "hardtry/types"
+import * as try$ from "tryharder"
+import { Panic, TimeoutError, UnhandledException } from "tryharder/errors"
+import type { FlowExit, SettledResult } from "tryharder/types"
 ```
 
 ## Common Recipes
@@ -425,12 +442,12 @@ const result = await try$.flow({
 })
 ```
 
-## When not to use hardtry
+## When not to use tryharder
 
 - **Small scripts or one-off tasks** - Plain `try/catch` is often simpler when you do not need retries, cancellation, or orchestration.
-- **You already use an effect system or result abstraction** - If your codebase already has a consistent execution model, adding `hardtry` may be redundant.
+- **You already use an effect system or result abstraction** - If your codebase already has a consistent execution model, adding `tryharder` may be redundant.
 - **Your workflows are mostly straightforward Promise chains** - `all(...)` and `flow(...)` help when coordination matters; otherwise native composition may be clearer.
-- **Your team prefers explicit `Result` values everywhere** - `hardtry` centers execution wrappers, not a dedicated result data type.
+- **Your team prefers explicit `Result` values everywhere** - `tryharder` centers execution wrappers, not a dedicated result data type.
 - **You do not want policy-driven execution behavior** - If retry and timeout semantics are unnecessary overhead, the abstraction may not pay for itself.
 
 ## Contributing

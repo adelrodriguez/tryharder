@@ -1,6 +1,6 @@
-# Contributing to hardtry
+# Contributing to tryharder
 
-Thank you for your interest in contributing to hardtry. This document provides the development workflow and contribution expectations for the project.
+Thank you for your interest in contributing to tryharder. This document provides the development workflow and contribution expectations for the project.
 
 ## Development Setup
 
@@ -14,8 +14,8 @@ Thank you for your interest in contributing to hardtry. This document provides t
 1. Fork the repository
 2. Clone your fork:
    ```bash
-   git clone https://github.com/your-username/hardtry.git
-   cd hardtry
+   git clone https://github.com/your-username/tryharder.git
+   cd tryharder
    ```
 3. Install dependencies:
    ```bash
@@ -210,7 +210,7 @@ Pull requests should pass:
 
 ## Getting Help
 
-- Open an [issue](https://github.com/adelrodriguez/hardtry/issues) for bug reports or feature requests
+- Open an [issue](https://github.com/adelrodriguez/tryharder/issues) for bug reports or feature requests
 - Check existing issues before creating a new one
 - Include enough context and a minimal reproduction when possible
 
@@ -220,4 +220,4 @@ Be respectful, constructive, and precise in review and discussion.
 
 ## License
 
-By contributing to hardtry, you agree that your contributions will be licensed under the MIT License.
+By contributing to tryharder, you agree that your contributions will be licensed under the MIT License.
