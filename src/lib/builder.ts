@@ -193,22 +193,3 @@ export class RunBuilder<
     ) as GenResult<TYield, TReturn>
   }
 }
-
-export function createWrappedBuilder(
-  fn: WrapFn
-): RunBuilder<
-  never,
-  DefaultTryCtxProperties,
-  SetBuilderState<DefaultBuilderState, "isWrapped", true>
-> {
-  invariant(typeof fn === "function", new Panic("WRAP_INVALID_HANDLER"))
-
-  return new RunBuilder(
-    { wraps: [fn] },
-    {
-      canSync: true,
-      canWrap: true,
-      isWrapped: true,
-    }
-  )
-}
