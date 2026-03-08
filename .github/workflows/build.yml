@@ -28,11 +28,3 @@ jobs:
 
       - name: Build
         run: bun run build
-
-      - name: Upload release build artifact
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-dist
-          path: dist
-          if-no-files-found: error
