@@ -49,7 +49,6 @@
     "dev": "bunup --watch",
     "fix": "adamantite fix",
     "release": "changeset publish",
-    "release:ci": "bun run build && npm pack --dry-run && changeset publish",
     "test": "bun test",
     "test:coverage": "bun test --coverage",
     "test:watch": "bun test --watch",

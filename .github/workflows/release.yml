@@ -1,4 +1,4 @@
-name: Release
+name: release
 
 on:
   push:
@@ -106,6 +106,12 @@ jobs:
       - name: Setup Bun
         uses: ./.github/actions/setup-bun
 
+      - name: Build
+        run: bun run build
+
+      - name: Verify package contents
+        run: npm pack --dry-run
+
       - name: Configure npm authentication
         run: echo '//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}' >> .npmrc
 
@@ -113,7 +119,7 @@ jobs:
         id: changesets
         uses: changesets/action@v1
         with:
-          publish: bun run release:ci
+          publish: bun run release
           version: bun run version
           title: "chore: release"
         env:
