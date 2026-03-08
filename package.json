@@ -17,7 +17,7 @@
   "author": "Adel Rodríguez",
   "repository": {
     "type": "git",
-    "url": "https://github.com/adelrodriguez/tryharder.git"
+    "url": "git+https://github.com/adelrodriguez/tryharder.git"
   },
   "files": [
     "dist"
