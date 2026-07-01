@@ -68,13 +68,14 @@ class FlowExecution<T extends TaskRecord> extends TaskGraphExecutionBase<T, Flow
   }
 
   protected override setFirstRejection(error: unknown): void {
-    const hadFirstRejection = this.firstRejection !== undefined
-
-    super.setFirstRejection(error)
-
-    if (hadFirstRejection || this.firstRejection === undefined) {
+    if (this.firstRejection !== undefined) {
       return
     }
+
+    // Store the mapped rejection so `firstRejection` is always a non-undefined
+    // value once set. This keeps `firstRejection !== undefined` a sound signal
+    // even when a task throws `undefined`, which maps to an UnhandledException.
+    super.setFirstRejection(this.mapStoredError(error))
 
     for (const resolve of this.#firstRejectionWaiters) {
       resolve()
