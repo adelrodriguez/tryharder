@@ -145,9 +145,9 @@ export abstract class BaseExecution<TResult = unknown> implements Disposable {
         }
       },
       set: () => false,
-    }) as WrapCtx["retry"]
+    })
 
-    return new Proxy(ctx, {
+    const handler: ProxyHandler<TryCtx> = {
       defineProperty: () => false,
       deleteProperty: () => false,
       get(target, property, receiver) {
@@ -155,7 +155,8 @@ export abstract class BaseExecution<TResult = unknown> implements Disposable {
           return retry
         }
 
-        return Reflect.get(target, property, receiver) as unknown
+        const value: unknown = Reflect.get(target, property, receiver)
+        return value
       },
       getOwnPropertyDescriptor(target, property) {
         const descriptor = Reflect.getOwnPropertyDescriptor(target, property)
@@ -178,7 +179,9 @@ export abstract class BaseExecution<TResult = unknown> implements Disposable {
         }
       },
       set: () => false,
-    }) as WrapCtx
+    }
+
+    return new Proxy(ctx, handler)
   }
 
   protected checkDidCancel(cause?: unknown): CancellationError | undefined {

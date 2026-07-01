@@ -15,15 +15,9 @@ describe("builder chaining", () => {
       .wrap((ctx, next) => {
         retryDescriptor = Object.getOwnPropertyDescriptor(ctx, "retry")
         signalDescriptor = Object.getOwnPropertyDescriptor(ctx, "signal")
-        missingCtxDescriptor = Object.getOwnPropertyDescriptor(
-          ctx as unknown as Record<string, unknown>,
-          "missing"
-        )
+        missingCtxDescriptor = Object.getOwnPropertyDescriptor(ctx, "missing")
         attemptDescriptor = Object.getOwnPropertyDescriptor(ctx.retry, "attempt")
-        missingRetryDescriptor = Object.getOwnPropertyDescriptor(
-          ctx.retry as unknown as Record<string, unknown>,
-          "missing"
-        )
+        missingRetryDescriptor = Object.getOwnPropertyDescriptor(ctx.retry, "missing")
         return next()
       })
       .run(() => 1)

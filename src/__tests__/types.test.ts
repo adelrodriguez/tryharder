@@ -467,49 +467,61 @@ describe("type inference", () => {
   })
 
   describe("gen", () => {
-    class UserNotFound extends Error {}
-    class ProjectNotFound extends Error {}
-    class PermissionDenied extends Error {}
+    class UserNotFoundError extends Error {
+      override name = "UserNotFoundError"
+    }
+
+    class ProjectNotFoundError extends Error {
+      override name = "ProjectNotFoundError"
+    }
+
+    class PermissionDeniedError extends Error {
+      override name = "PermissionDeniedError"
+    }
 
     it("returns sync union for sync yielded values", () => {
       const result = try$.gen(function* (use) {
-        const value = yield* use(Math.random() > 0.5 ? 1 : new UserNotFound("missing"))
+        const value = yield* use(Math.random() > 0.5 ? 1 : new UserNotFoundError("missing"))
         return value
       })
 
-      type _assert = Expect<Equal<typeof result, number | UserNotFound>>
+      type _assert = Expect<Equal<typeof result, number | UserNotFoundError>>
     })
 
     it("returns Promise union when yielded values include Promise", () => {
       const result = try$.gen(function* (use) {
-        const userId = yield* use(Promise.resolve(Math.random() > 0.5 ? 1 : new UserNotFound("u")))
+        const userId = yield* use(
+          Promise.resolve(Math.random() > 0.5 ? 1 : new UserNotFoundError("u"))
+        )
         void userId
         const project = yield* use(
-          Promise.resolve(Math.random() > 0.5 ? "project" : new ProjectNotFound("p"))
+          Promise.resolve(Math.random() > 0.5 ? "project" : new ProjectNotFoundError("p"))
         )
 
         return project
       })
 
-      type _assert = Expect<Equal<typeof result, Promise<string | UserNotFound | ProjectNotFound>>>
+      type _assert = Expect<
+        Equal<typeof result, Promise<string | UserNotFoundError | ProjectNotFoundError>>
+      >
     })
 
     it("preserves explicit returned error values in result union", () => {
       const result = try$.gen(function* (use) {
         void (yield* use(1))
-        return Math.random() > 0.5 ? "ok" : new ProjectNotFound("missing")
+        return Math.random() > 0.5 ? "ok" : new ProjectNotFoundError("missing")
       })
 
-      type _assert = Expect<Equal<typeof result, "ok" | ProjectNotFound>>
+      type _assert = Expect<Equal<typeof result, "ok" | ProjectNotFoundError>>
     })
 
     it("preserves explicit async returned error values in result union", () => {
       const result = try$.gen(function* (use) {
         void (yield* use(Promise.resolve(1)))
-        return Promise.resolve(Math.random() > 0.5 ? "ok" : new ProjectNotFound("missing"))
+        return Promise.resolve(Math.random() > 0.5 ? "ok" : new ProjectNotFoundError("missing"))
       })
 
-      type _assert = Expect<Equal<typeof result, Promise<string | ProjectNotFound>>>
+      type _assert = Expect<Equal<typeof result, Promise<string | ProjectNotFoundError>>>
     })
 
     it("composes multiple try$ run functions and accumulates their error unions", () => {
@@ -518,19 +530,19 @@ describe("type inference", () => {
 
       const getUser = () =>
         try$.run({
-          catch: (error): UserNotFound | PermissionDenied => {
+          catch: (error): UserNotFoundError | PermissionDeniedError => {
             if (error instanceof TypeError) {
-              return new PermissionDenied("denied")
+              return new PermissionDeniedError("denied")
             }
 
-            return new UserNotFound("missing user")
+            return new UserNotFoundError("missing user")
           },
           try: (): Promise<User> => Promise.resolve({ id: "u_1" }),
         })
 
       const getProject = (userId: string) =>
         try$.run({
-          catch: (): ProjectNotFound => new ProjectNotFound("missing project"),
+          catch: (): ProjectNotFoundError => new ProjectNotFoundError("missing project"),
           try: (): Promise<Project> => Promise.resolve({ id: `p_${userId}` }),
         })
 
@@ -544,7 +556,13 @@ describe("type inference", () => {
       type _assert = Expect<
         Equal<
           typeof result,
-          Promise<string | UserNotFound | PermissionDenied | ProjectNotFound | UnhandledException>
+          Promise<
+            | string
+            | UserNotFoundError
+            | PermissionDeniedError
+            | ProjectNotFoundError
+            | UnhandledException
+          >
         >
       >
     })
@@ -655,6 +673,57 @@ describe("type inference", () => {
           },
         }
       )
+    })
+
+    it("preserves literal task keys through result and catch types", () => {
+      if (typecheckOnly()) return
+
+      const result = try$.all(
+        {
+          async "load-profile"() {
+            const user = await this.$result["load-user"]
+
+            type _assertUser = Expect<Equal<typeof user, { id: "user_1" }>>
+
+            return { displayName: "Ada" as const, userId: user.id }
+          },
+          "load-user"() {
+            return { id: "user_1" as const }
+          },
+        },
+        {
+          catch: (_error, ctx) => {
+            const failedTask = ctx.failedTask
+            const partialUser = ctx.partial["load-user"]
+            const partialProfile = ctx.partial["load-profile"]
+
+            type _assertFailedTask = Expect<
+              Equal<typeof failedTask, "load-user" | "load-profile" | undefined>
+            >
+            type _assertPartialUser = Expect<
+              Equal<typeof partialUser, { id: "user_1" } | undefined>
+            >
+            type _assertPartialProfile = Expect<
+              Equal<typeof partialProfile, { userId: "user_1"; displayName: "Ada" } | undefined>
+            >
+
+            return "fallback" as const
+          },
+        }
+      )
+
+      type _assertResult = Expect<
+        Equal<
+          typeof result,
+          Promise<
+            | {
+                "load-user": { id: "user_1" }
+                "load-profile": { userId: "user_1"; displayName: "Ada" }
+              }
+            | "fallback"
+          >
+        >
+      >
     })
   })
 

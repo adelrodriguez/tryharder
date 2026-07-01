@@ -25,8 +25,8 @@ import { retryOptions } from "./modifiers/retry"
 import { invariant } from "./utils"
 
 /**
- * Wraps are observational hooks: they can inspect execution context and
- * surround execution, but they must not mutate context or replace it.
+ * Wraps are observational hooks: they can inspect execution context and surround execution, but
+ * they must not mutate context or replace it.
  */
 export type WrapCtx = Readonly<Omit<TryCtx, "retry">> & {
   readonly retry: Readonly<TryCtx["retry"]>

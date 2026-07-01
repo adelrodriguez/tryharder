@@ -2,8 +2,13 @@ import { describe, expect, it } from "bun:test"
 import { CancellationError, Panic, TimeoutError, UnhandledException } from "../errors"
 import * as try$ from "../index"
 
-class UserNotFound extends Error {}
-class ProjectNotFound extends Error {}
+class UserNotFoundError extends Error {
+  override name = "UserNotFoundError"
+}
+
+class ProjectNotFoundError extends Error {
+  override name = "ProjectNotFoundError"
+}
 
 describe("gen", () => {
   it("returns sync success value when all yielded values are sync", () => {
@@ -19,7 +24,7 @@ describe("gen", () => {
   it("short-circuits sync execution on yielded Error", () => {
     let didRunAfterError = false
 
-    const maybeUser = new UserNotFound("missing") as number | UserNotFound
+    const maybeUser = new UserNotFoundError("missing") as number | UserNotFoundError
 
     const result = try$.gen(function* (use) {
       const user = yield* use(maybeUser)
@@ -28,7 +33,7 @@ describe("gen", () => {
       return 42
     })
 
-    expect(result).toBeInstanceOf(UserNotFound)
+    expect(result).toBeInstanceOf(UserNotFoundError)
     expect(didRunAfterError).toBe(false)
   })
 
@@ -50,7 +55,9 @@ describe("gen", () => {
   it("short-circuits async execution on resolved Error", async () => {
     let didRunAfterError = false
 
-    const maybeProject = Promise.resolve(new ProjectNotFound("missing") as number | ProjectNotFound)
+    const maybeProject = Promise.resolve(
+      new ProjectNotFoundError("missing") as number | ProjectNotFoundError
+    )
 
     const result = await try$.gen(function* (use) {
       const project = yield* use(maybeProject)
@@ -59,7 +66,7 @@ describe("gen", () => {
       return 42
     })
 
-    expect(result).toBeInstanceOf(ProjectNotFound)
+    expect(result).toBeInstanceOf(ProjectNotFoundError)
     expect(didRunAfterError).toBe(false)
   })
 
@@ -181,10 +188,10 @@ describe("gen", () => {
   it("returns explicit error values without throwing", () => {
     const result = try$.gen(function* (use) {
       void (yield* use(1))
-      return new ProjectNotFound("from return")
+      return new ProjectNotFoundError("from return")
     })
 
-    expect(result).toBeInstanceOf(ProjectNotFound)
+    expect(result).toBeInstanceOf(ProjectNotFoundError)
     expect(result.message).toBe("from return")
   })
 
@@ -192,18 +199,19 @@ describe("gen", () => {
     const result = try$.gen(function* (use) {
       const value = yield* use(Promise.resolve(1))
       void value
-      return Promise.resolve(new ProjectNotFound("async return"))
+      return Promise.resolve(new ProjectNotFoundError("async return"))
     })
 
     const resolved = await result
 
-    expect(resolved).toBeInstanceOf(ProjectNotFound)
+    expect(resolved).toBeInstanceOf(ProjectNotFoundError)
     expect(resolved.message).toBe("async return")
   })
 
   it("throws raw non-Error values without wrapping", () => {
     try {
       try$.gen(() => {
+        // oxlint-disable-next-line no-throw-literal, typescript/only-throw-error -- Intentional coverage for raw non-Error generator failures.
         throw "string error"
       })
       expect.unreachable("should have thrown")
@@ -305,7 +313,7 @@ describe("gen", () => {
   it("handles sync yield after entering async path", async () => {
     const result = await try$.gen(function* (use) {
       const a = yield* use(Promise.resolve(10))
-      const b = yield* use(32 as number)
+      const b = yield* use(32)
       return a + b
     })
 
@@ -317,13 +325,15 @@ describe("gen", () => {
 
     const result = await try$.gen(function* (use) {
       void (yield* use(Promise.resolve(1)))
-      const value = yield* use(new UserNotFound("sync error in async") as number | UserNotFound)
+      const value = yield* use(
+        new UserNotFoundError("sync error in async") as number | UserNotFoundError
+      )
       void value
       didRunAfterError = true
       return 42
     })
 
-    expect(result).toBeInstanceOf(UserNotFound)
+    expect(result).toBeInstanceOf(UserNotFoundError)
     expect(didRunAfterError).toBe(false)
   })
 
@@ -340,9 +350,17 @@ describe("gen", () => {
 })
 
 describe("gen composition", () => {
-  class PermissionDenied extends Error {}
-  class UserNotFoundInFlow extends Error {}
-  class ProjectNotFoundInFlow extends Error {}
+  class PermissionDeniedError extends Error {
+    override name = "PermissionDeniedError"
+  }
+
+  class UserNotFoundInFlowError extends Error {
+    override name = "UserNotFoundInFlowError"
+  }
+
+  class ProjectNotFoundInFlowError extends Error {
+    override name = "ProjectNotFoundInFlowError"
+  }
 
   it("short-circuits with error from try$.runSync inside gen", () => {
     const result = try$.gen(function* (use) {
@@ -377,12 +395,12 @@ describe("gen composition", () => {
     const runFlow = (mode: "ok" | "permission-denied" | "project-not-found" | "user-not-found") => {
       const getUser = () =>
         try$.run({
-          catch: (error): PermissionDenied | UserNotFoundInFlow => {
+          catch: (error): PermissionDeniedError | UserNotFoundInFlowError => {
             if (error instanceof TypeError) {
-              return new PermissionDenied("denied")
+              return new PermissionDeniedError("denied")
             }
 
-            return new UserNotFoundInFlow("missing user")
+            return new UserNotFoundInFlowError("missing user")
           },
           try: async () => {
             await Promise.resolve()
@@ -401,7 +419,8 @@ describe("gen composition", () => {
 
       const getProject = (userId: string) =>
         try$.run({
-          catch: (): ProjectNotFoundInFlow => new ProjectNotFoundInFlow("missing project"),
+          catch: (): ProjectNotFoundInFlowError =>
+            new ProjectNotFoundInFlowError("missing project"),
           try: async () => {
             await Promise.resolve()
 
@@ -426,8 +445,8 @@ describe("gen composition", () => {
     const projectNotFound = await runFlow("project-not-found")
 
     expect(ok).toBe("u_1:p_u_1")
-    expect(userNotFound).toBeInstanceOf(UserNotFoundInFlow)
-    expect(permissionDenied).toBeInstanceOf(PermissionDenied)
-    expect(projectNotFound).toBeInstanceOf(ProjectNotFoundInFlow)
+    expect(userNotFound).toBeInstanceOf(UserNotFoundInFlowError)
+    expect(permissionDenied).toBeInstanceOf(PermissionDeniedError)
+    expect(projectNotFound).toBeInstanceOf(ProjectNotFoundInFlowError)
   })
 })

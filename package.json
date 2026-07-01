@@ -41,6 +41,7 @@
     }
   },
   "scripts": {
+    "analyze": "adamantite analyze",
     "bench": "bun run build && bun --expose-gc bench/index.ts",
     "bench:ci": "bun run build && bun --expose-gc bench/index.ts --json | bun bench/report.ts",
     "build": "bunup",
@@ -48,26 +49,24 @@
     "check": "adamantite check",
     "dev": "bunup --watch",
     "fix": "adamantite fix",
+    "format": "adamantite format",
     "release": "changeset publish",
     "test": "bun test",
     "test:coverage": "bun test --coverage",
     "test:watch": "bun test --watch",
-    "typecheck": "adamantite typecheck",
-    "version": "changeset version && bun run format",
-    "format": "adamantite format",
-    "analyze": "adamantite analyze"
+    "version": "changeset version && bun run format"
   },
   "devDependencies": {
     "@changesets/cli": "2.29.8",
     "@clack/prompts": "1.0.1",
     "@types/bun": "1.3.9",
-    "adamantite": "^0.29.1",
+    "adamantite": "0.32.3",
     "bunup": "0.16.29",
-    "knip": "5.85.0",
+    "knip": "6.23.0",
     "mitata": "^1.0.34",
-    "oxfmt": "0.34.0",
-    "oxlint": "1.49.0",
-    "oxlint-tsgolint": "0.14.2",
+    "oxfmt": "0.57.0",
+    "oxlint": "1.72.0",
+    "oxlint-tsgolint": "0.24.0",
     "typescript": "5.9.3"
   },
   "packageManager": "bun@1.3.1"

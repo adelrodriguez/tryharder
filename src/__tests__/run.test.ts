@@ -9,10 +9,21 @@ import {
 import * as try$ from "../index"
 import { createRandomGenerator, expectPanic, sleep } from "./test-utils"
 
-class InvalidInputError extends Error {}
-class PermissionDeniedError extends Error {}
-class NetworkError extends Error {}
-class RemoteServiceError extends Error {}
+class InvalidInputError extends Error {
+  override name = "InvalidInputError"
+}
+
+class PermissionDeniedError extends Error {
+  override name = "PermissionDeniedError"
+}
+
+class NetworkError extends Error {
+  override name = "NetworkError"
+}
+
+class RemoteServiceError extends Error {
+  override name = "RemoteServiceError"
+}
 
 describe("runSync", () => {
   describe("function form", () => {

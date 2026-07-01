@@ -31,12 +31,12 @@ export type InferredFlowTaskContext<T extends TaskRecord> = InferredTaskContext<
 
 export type FlowResult<T extends TaskRecord> = FlowExitValue<T>
 
-class FlowExitSignal extends Error {
+class FlowExitSignalError extends Error {
   readonly value: unknown
 
   constructor(value: unknown) {
     super("Flow exited")
-    this.name = "FlowExitSignal"
+    this.name = "FlowExitSignalError"
     this.value = value
   }
 }
@@ -57,10 +57,11 @@ class FlowExecution<T extends TaskRecord> extends TaskGraphExecutionBase<T, Flow
     await Promise.race([this.#settledPromise, this.waitForFirstRejection()])
 
     if (this.firstRejection !== undefined) {
-      if (this.firstRejection instanceof FlowExitSignal) {
+      if (this.firstRejection instanceof FlowExitSignalError) {
         return this.firstRejection.value as FlowResult<T>
       }
 
+      // oxlint-disable-next-line typescript/only-throw-error -- Preserve raw task failures for callers/tests.
       throw this.firstRejection
     }
 
@@ -92,7 +93,7 @@ class FlowExecution<T extends TaskRecord> extends TaskGraphExecutionBase<T, Flow
     return {
       $disposer: this.disposer,
       $exit: (value) => {
-        throw new FlowExitSignal(value)
+        throw new FlowExitSignalError(value)
       },
       $result: resultProxy,
       $signal: this.taskSignal,
@@ -100,7 +101,7 @@ class FlowExecution<T extends TaskRecord> extends TaskGraphExecutionBase<T, Flow
   }
 
   protected override mapStoredError(error: unknown): Error {
-    if (error instanceof FlowExitSignal) {
+    if (error instanceof FlowExitSignalError) {
       return error
     }
 
@@ -153,6 +154,7 @@ class FlowRunnerExecution<T extends TaskRecord> extends OrchestrationExecution<F
     }
 
     if (threw) {
+      // oxlint-disable-next-line no-throw-literal -- Preserve raw task failures for callers/tests.
       throw thrownError
     }
 

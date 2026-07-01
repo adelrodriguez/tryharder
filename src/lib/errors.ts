@@ -39,8 +39,15 @@ export const PanicMessages = {
 } as const satisfies Record<PanicCode, string>
 export type PanicMessages = typeof PanicMessages
 
-/** @internal */
-export class ControlError extends Error {}
+/**
+ * @internal
+ */
+export class ControlError extends Error {
+  constructor(message?: string, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "ControlError"
+  }
+}
 
 export class CancellationError extends ControlError {
   constructor(message = "Execution was cancelled", options?: ErrorOptions) {
@@ -63,6 +70,7 @@ export class RetryExhaustedError extends Error {
   }
 }
 
+// oxlint-disable-next-line unicorn/custom-error-definition -- Public error name is intentional.
 export class UnhandledException extends Error {
   constructor(message = "Unhandled exception", options?: ErrorOptions) {
     super(message, options)
@@ -70,6 +78,7 @@ export class UnhandledException extends Error {
   }
 }
 
+// oxlint-disable-next-line unicorn/custom-error-definition -- Public error name is intentional.
 export class Panic extends Error {
   readonly code: PanicCode
 
