@@ -49,7 +49,11 @@ class FlowExecution<T extends TaskRecord> extends TaskGraphExecutionBase<T, Flow
     const promises = this.taskNames.map(async (name) => this.runTask(name))
     this.#settledPromise = Promise.allSettled(promises)
 
-    // Race Promise.allSettled() against the first rejection recorded by runTask().
+    // A flow terminates on the first exit or error, but Promise.allSettled()
+    // never rejects, so it cannot signal that early completion on its own.
+    // Racing it against a manual first-rejection waiter lets execute() react to
+    // the first $exit/error immediately, while #settledPromise is retained so
+    // the orchestration layer can still await full task teardown afterwards.
     await Promise.race([this.#settledPromise, this.waitForFirstRejection()])
 
     if (this.firstRejection !== undefined) {

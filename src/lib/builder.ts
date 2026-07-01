@@ -87,18 +87,6 @@ export class RunBuilder<
     this.config = config
   }
 
-  protected buildRetryConfig(policy: RetryOptions): BuilderConfig {
-    const limit = typeof policy === "number" ? policy : policy.limit
-
-    invariant(Number.isFinite(limit), new Panic("RETRY_INVALID_LIMIT"))
-    invariant(limit >= 0, new Panic("RETRY_INVALID_LIMIT"))
-
-    return {
-      ...this.config,
-      retry: retryOptions(policy),
-    }
-  }
-
   protected buildTimeoutConfig(ms: number): BuilderConfig {
     invariant(Number.isFinite(ms), new Panic("TIMEOUT_INVALID_MS"))
     invariant(ms >= 0, new Panic("TIMEOUT_INVALID_MS"))
@@ -119,7 +107,10 @@ export class RunBuilder<
   retry(policy: number): ExecutionBuilderSurface<E | RetryExhaustedError, true>
   retry(policy: RetryOptions): AsyncExecutionBuilderSurface<E | RetryExhaustedError, true>
   retry(policy: RetryOptions): ExecutionBuilderSurface<E | RetryExhaustedError, true> {
-    return new ExecutionBuilder(this.buildRetryConfig(policy))
+    return new ExecutionBuilder({
+      ...this.config,
+      retry: retryOptions(policy),
+    })
   }
 
   timeout(ms: number): AsyncExecutionBuilderSurface<E | TimeoutError, HasRetry> {
