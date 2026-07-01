@@ -210,6 +210,10 @@ export abstract class BaseExecution<TResult = unknown> implements Disposable {
       return this.raceWithCancellation(promise, cause)
     }
 
+    // Nest cancellation inside the timeout race so cancellation takes priority
+    // when both fire: if cancellation wins, the inner promise already resolves
+    // with a CancellationError; if timeout wins, re-check cancellation here so a
+    // near-simultaneous cancel is still reported over the timeout.
     return Promise.resolve(
       timeoutController.race(this.raceWithCancellation(promise, cause), cause)
     ).then((raced) => {

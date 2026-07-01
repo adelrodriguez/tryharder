@@ -43,6 +43,9 @@ export class SignalController {
   }
 
   dispose(): void {
+    // Intentionally a no-op: AbortSignal.any() does not create resources that
+    // need explicit teardown, so nothing needs to be released here. The method
+    // exists to satisfy the Disposable interface shared with TimeoutController.
     void this.signal
   }
 }
