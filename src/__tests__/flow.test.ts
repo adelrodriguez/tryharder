@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { CancellationError, TimeoutError } from "../errors"
+import { CancellationError, TimeoutError, UnhandledException } from "../errors"
 import * as try$ from "../index"
 import { expectPanic, sleep } from "./test-utils"
 
@@ -458,6 +458,19 @@ describe("flow", () => {
       expect.unreachable("should have thrown")
     } catch (error) {
       expect((error as Error).message).toBe("fast error")
+    }
+  })
+
+  it("surfaces a task that throws undefined", async () => {
+    try {
+      await try$.flow({
+        a() {
+          throw undefined
+        },
+      })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect(error).toBeInstanceOf(UnhandledException)
     }
   })
 
