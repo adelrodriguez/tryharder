@@ -143,7 +143,7 @@ export abstract class TaskGraphExecutionBase<
 
   constructor(signal: AbortSignal | undefined, tasks: T) {
     this.tasks = tasks
-    this.taskNames = Object.keys(tasks) as Array<keyof T & string>
+    this.taskNames = Object.keys(tasks)
     this.results = new Map<keyof T, unknown>()
     this.errors = new Map<keyof T, unknown>()
     this.resolvers = new Map<keyof T, ResolverPair[]>()
@@ -172,7 +172,7 @@ export abstract class TaskGraphExecutionBase<
   protected createResultProxy(requesterTaskName: keyof T): ResultProxy<T> {
     return new Proxy({} as ResultProxy<T>, {
       get: (_, referencedTaskName: string) =>
-        this.waitForResult(referencedTaskName as keyof T, requesterTaskName),
+        this.waitForResult(referencedTaskName, requesterTaskName),
     })
   }
 
@@ -372,11 +372,8 @@ export class TaskExecution<T extends TaskRecord> extends TaskGraphExecutionBase<
   }
 
   protected override onTaskResult(taskName: keyof T, value: unknown): void {
-    if (this.#mode === "settled") {
-      this.#returnValue[taskName as string] = { status: "fulfilled", value }
-    } else {
-      this.#returnValue[taskName as string] = value
-    }
+    this.#returnValue[taskName as string] =
+      this.#mode === "settled" ? { status: "fulfilled", value } : value
   }
 
   protected override onTaskError(taskName: keyof T, error: unknown): void {

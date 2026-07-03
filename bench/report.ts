@@ -113,8 +113,7 @@ export function renderBenchmarkSummary(artifact: BenchmarkArtifact) {
     return lines.join("\n")
   }
 
-  lines.push("| Group | Name | Avg ns/iter | Hz | Samples |")
-  lines.push("| --- | --- | ---: | ---: | ---: |")
+  lines.push("| Group | Name | Avg ns/iter | Hz | Samples |", "| --- | --- | ---: | ---: | ---: |")
 
   for (const benchmarkCase of artifact.cases.toSorted(compareBenchmarkCases)) {
     lines.push(

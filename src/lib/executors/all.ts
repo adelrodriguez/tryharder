@@ -83,6 +83,7 @@ class AllExecution<T extends TaskRecord, C> extends OrchestrationExecution<AllVa
     }
 
     if (threw) {
+      // oxlint-disable-next-line no-throw-literal -- Preserve raw task failures for callers/tests.
       throw thrownError
     }
 
@@ -96,5 +97,5 @@ export async function executeAll<T extends TaskRecord, C = never>(
   options?: AllOptions<T, C>
 ): Promise<{ [K in keyof T]: TaskResult<T[K]> } | C> {
   using execution = new AllExecution(config, tasks, options)
-  return (await execution.execute()) as { [K in keyof T]: TaskResult<T[K]> } | C
+  return await execution.execute()
 }

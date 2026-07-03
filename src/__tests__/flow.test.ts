@@ -465,6 +465,7 @@ describe("flow", () => {
     try {
       await try$.flow({
         a() {
+          // oxlint-disable-next-line no-throw-literal, typescript/only-throw-error -- Intentional coverage for undefined task failures.
           throw undefined
         },
       })

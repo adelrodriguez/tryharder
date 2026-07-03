@@ -19,7 +19,9 @@ export type AsyncRunInput<T, E, Ctx extends BaseTryCtx = BaseTryCtx> =
   | RunTryFn<T, Ctx>
   | RunAsyncOptions<T, E, Ctx>
 
-/** Encapsulates the shared mutable state and logic for a single run execution. */
+/**
+ * Encapsulates the shared mutable state and logic for a single run execution.
+ */
 class RunExecution<T, E, Ctx extends BaseTryCtx> extends BaseExecution<
   Promise<T | E | RunnerError>
 > {
@@ -37,7 +39,9 @@ class RunExecution<T, E, Ctx extends BaseTryCtx> extends BaseExecution<
     return this.#runAttemptLoop(1)
   }
 
-  /** Resolve an attempt error into either a terminal result or a retry decision. */
+  /**
+   * Resolve an attempt error into either a terminal result or a retry decision.
+   */
   async #resolveFailure(error: unknown): Promise<E | RunnerError | RetryDirective> {
     if (error instanceof Panic) {
       throw error
@@ -121,8 +125,6 @@ class RunExecution<T, E, Ctx extends BaseTryCtx> extends BaseExecution<
         if (delayControlResult) {
           return delayControlResult
         }
-
-        currentDecision = undefined
       }
 
       this.ctx.retry.attempt = currentAttempt

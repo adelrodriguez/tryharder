@@ -204,6 +204,7 @@ describe("all", () => {
     try {
       await try$.all({
         a() {
+          // oxlint-disable-next-line no-throw-literal, typescript/only-throw-error -- Intentional coverage for undefined task failures.
           throw undefined
         },
       })
@@ -221,6 +222,7 @@ describe("all", () => {
       await try$.all({
         async a() {
           await sleep(5)
+          // oxlint-disable-next-line no-throw-literal, typescript/only-throw-error -- Intentional coverage for non-Error task failures.
           throw "a boom"
         },
         async b() {

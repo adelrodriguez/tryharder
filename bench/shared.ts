@@ -1,6 +1,6 @@
 import { bench, do_not_optimize } from "mitata"
-import * as try$ from "../src/index"
-import { BENCHMARK_SUITE_VERSION } from "./constants"
+
+export * as try$ from "../src/index"
 
 type BenchmarkGroup = "core" | "orchestration" | "policies"
 
@@ -31,9 +31,6 @@ export function registerAsyncBenchmark(
 export function getBenchmarkGroups() {
   return Object.fromEntries(benchmarkGroups)
 }
-
-export { BENCHMARK_SUITE_VERSION }
-export { try$ }
 
 function assertUniqueBenchmarkName(group: BenchmarkGroup, name: string) {
   if (benchmarkGroups.has(name)) {

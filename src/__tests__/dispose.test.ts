@@ -194,6 +194,7 @@ describe("dispose", () => {
 
     disposer.add(() => {
       calls.push("second")
+      // oxlint-disable-next-line typescript/only-throw-error -- Intentional coverage for frozen Error disposal failures.
       throw Object.freeze(new Error("second"))
     })
 
