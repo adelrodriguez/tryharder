@@ -1,5 +1,12 @@
 # tryharder
 
+## 0.1.2
+
+### Patch Changes
+
+- 08224eb: Fix `flow` failing to surface tasks that throw `undefined`. The first rejection is now stored as its mapped (non-undefined) value, keeping `firstRejection !== undefined` a sound signal even when a task throws `undefined` (which maps to an `UnhandledException`).
+- 1108548: Inline `buildRetryConfig` into `retry` and add clarifying comments to the execution logic. No behavior change; this simplifies the builder internals and documents the timeout/cancellation race, flow first-rejection handling, and the intentionally no-op `SignalController.dispose`.
+
 ## 0.1.1
 
 ### Patch Changes
@@ -17,6 +24,7 @@
 - b014c61: Launch `tryharder` as the first public minor release.
 
   `tryharder` is a typed execution layer for TypeScript that makes failure and execution policy explicit in return types and builder chains. This initial release includes:
+
   - terminal execution APIs with `run()` and `runSync()`
   - execution policies with `retry()`, `timeout()`, and `signal()`
   - observational middleware with `wrap()`
