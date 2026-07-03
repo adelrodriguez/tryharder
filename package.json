@@ -1,6 +1,6 @@
 {
   "name": "tryharder",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "A better try/catch for TypeScript",
   "keywords": [
     "abort-signal",
