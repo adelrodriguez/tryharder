@@ -34,28 +34,32 @@ describe("type inference", () => {
       type _assert = Expect<Equal<typeof result, Promise<number | "err">>>
     })
 
-    it("dispose returns AsyncDisposer", () => {
-      const disposer = try$.dispose()
+    it("disposer returns AsyncDisposer", () => {
+      const disposer = try$.disposer()
       type _assert = Expect<Equal<typeof disposer, AsyncDisposer>>
     })
 
-    it("dispose exposes cleanup alias", () => {
-      const disposer = try$.dispose()
-      const cleanupResult = disposer.cleanup()
-      type _assert = Expect<Equal<typeof cleanupResult, Promise<void>>>
-    })
+    it("disposer exposes only defer, use, and dispose", () => {
+      const disposer = try$.disposer()
+      const disposeResult = disposer.dispose()
+      type _assert = Expect<Equal<typeof disposeResult, Promise<void>>>
+      type _assertDefer = Expect<Equal<ReturnType<typeof disposer.defer>, void>>
 
-    it("dispose exposes add alias", () => {
-      const disposer = try$.dispose()
-      type _assert = Expect<Equal<ReturnType<typeof disposer.add>, void>>
-    })
-
-    it("dispose add/defer reject non-callables at the type level", () => {
       if (typecheckOnly()) {
-        const disposer = try$.dispose()
+        // @ts-expect-error -- add() was removed; use defer()
+        void disposer.add
 
-        // @ts-expect-error -- add() only accepts cleanup callbacks
-        disposer.add(123)
+        // @ts-expect-error -- cleanup() was removed; use dispose()
+        void disposer.cleanup
+
+        // @ts-expect-error -- disposeAsync() was removed; use dispose()
+        void disposer.disposeAsync
+      }
+    })
+
+    it("disposer defer rejects non-callables at the type level", () => {
+      if (typecheckOnly()) {
+        const disposer = try$.disposer()
 
         // @ts-expect-error -- defer() only accepts cleanup callbacks
         disposer.defer(123)
@@ -265,6 +269,30 @@ describe("type inference", () => {
         void signalBuilder.runSync
         // @ts-expect-error -- gen() is unavailable after retry(), timeout(), or signal()
         void signalBuilder.gen
+      }
+    })
+  })
+
+  describe("retry limit validation", () => {
+    it("rejects invalid literal limits at the type level", () => {
+      if (typecheckOnly()) {
+        // @ts-expect-error -- zero is not a valid retry limit
+        void try$.retry(0)
+
+        // @ts-expect-error -- negative limits are invalid
+        void try$.retry(-1)
+
+        // @ts-expect-error -- fractional limits are invalid
+        void try$.retry(2.5)
+
+        // @ts-expect-error -- zero is not a valid retry limit in policy form
+        void try$.retry({ backoff: "constant", limit: 0 })
+
+        // @ts-expect-error -- fractional limits are invalid in policy form
+        void try$.retry({ backoff: "exponential", limit: 1.5 })
+
+        // Non-literal numbers pass type checking; runtime validates instead.
+        void try$.retry(1 as number)
       }
     })
   })
