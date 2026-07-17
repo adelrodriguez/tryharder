@@ -1,7 +1,15 @@
 import { describe, expect, it } from "bun:test"
 import { CancellationError, RetryExhaustedError, TimeoutError, UnhandledException } from "../errors"
 import * as try$ from "../index"
-import { sleep } from "./test-utils"
+import { expectPanic, sleep } from "./test-utils"
+
+function succeedOnSecondAttempt(ctx: { retry: { attempt: number } }) {
+  if (ctx.retry.attempt < 2) {
+    throw new Error("boom")
+  }
+
+  return ctx.retry.attempt
+}
 
 describe("builder chaining", () => {
   it("exposes read-only descriptors on wrap ctx and retry metadata", async () => {
@@ -30,13 +38,63 @@ describe("builder chaining", () => {
     expect(missingRetryDescriptor).toBeUndefined()
   })
 
-  it("removes orchestration methods from retry()/timeout() builders at runtime", () => {
-    const signal = new AbortController().signal
+  it("panics at execution when orchestration is invoked after retry() via casts", async () => {
+    const unsafeRetryBuilder = try$.retry(3) as unknown as { all: typeof try$.all }
 
-    expect((try$.retry(3) as unknown as { all?: unknown }).all).toBeUndefined()
-    expect((try$.timeout(100) as unknown as { allSettled?: unknown }).allSettled).toBeUndefined()
-    expect((try$.retry(3).signal(signal) as unknown as { flow?: unknown }).flow).toBeUndefined()
-    expect(typeof (try$.signal(signal) as unknown as { all?: unknown }).all).toBe("function")
+    try {
+      await unsafeRetryBuilder.all({
+        a() {
+          return 1
+        },
+      })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expectPanic(error, "ORCHESTRATION_UNSUPPORTED_POLICY")
+    }
+  })
+
+  it("panics at execution when orchestration is invoked after timeout() via casts", async () => {
+    const unsafeTimeoutBuilder = try$.timeout(100) as unknown as {
+      allSettled: typeof try$.allSettled
+    }
+
+    try {
+      await unsafeTimeoutBuilder.allSettled({
+        a() {
+          return 1
+        },
+      })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expectPanic(error, "ORCHESTRATION_UNSUPPORTED_POLICY")
+    }
+  })
+
+  it("treats wrap after retry as behavior-identical to wrap before retry", async () => {
+    let wrapBeforeCalls = 0
+    const wrapBeforeResult = await try$
+      .wrap((_, next) => {
+        wrapBeforeCalls += 1
+        return next()
+      })
+      .retry(2)
+      .run(succeedOnSecondAttempt)
+
+    let wrapAfterCalls = 0
+    const unsafeRetryBuilder = try$.retry(2) as unknown as {
+      wrap(fn: Parameters<typeof try$.wrap>[0]): ReturnType<typeof try$.retry<2>>
+    }
+    const wrapAfterResult = await unsafeRetryBuilder
+      .wrap((_, next) => {
+        wrapAfterCalls += 1
+        return next()
+      })
+      .run(succeedOnSecondAttempt)
+
+    expect(wrapBeforeResult).toBe(2)
+    expect(wrapAfterResult).toBe(2)
+    expect(wrapBeforeCalls).toBe(1)
+    expect(wrapAfterCalls).toBe(1)
   })
 
   it("applies wrap around all", async () => {
