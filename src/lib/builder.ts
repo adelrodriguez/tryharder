@@ -112,30 +112,31 @@ export class RunBuilder<
     }
   }
 
+  // Runtime note: there is a single builder class. Policy misuse that the
+  // narrowed type surfaces prevent (e.g. calling all() after retry() from
+  // untyped code) is guarded at execution time by OrchestrationExecution's
+  // ORCHESTRATION_UNSUPPORTED_POLICY panic, and wrap ordering is
+  // behavior-invariant (wraps always cover the full retry scope), so no
+  // runtime method-hiding is needed.
+
   retry<N extends number>(policy: N & ValidateRetryLimit<N>): ExecutionBuilderSurface<E, true>
   retry<N extends number>(
     policy: RetryPolicy & { limit: N & ValidateRetryLimit<N> }
   ): AsyncExecutionBuilderSurface<E, true>
   retry(policy: RetryOptions): ExecutionBuilderSurface<E, true> {
-    return new ExecutionBuilder({
+    return new RunBuilder({
       ...this.config,
       retry: retryOptions(policy),
     })
   }
 
   timeout(ms: number): AsyncExecutionBuilderSurface<E | TimeoutError, HasRetry> {
-    return new ExecutionBuilder(this.buildTimeoutConfig(ms))
+    return new RunBuilder(this.buildTimeoutConfig(ms))
   }
 
   signal(
     signal: AbortSignal
   ): SignalBuilderSurface<E | CancellationError, HasRetry, SupportsOrchestration> {
-    if (this instanceof ExecutionBuilder) {
-      return new ExecutionBuilder(
-        this.buildSignalConfig(signal)
-      ) as unknown as SignalBuilderSurface<E | CancellationError, HasRetry, SupportsOrchestration>
-    }
-
     return new RunBuilder(this.buildSignalConfig(signal)) as unknown as SignalBuilderSurface<
       E | CancellationError,
       HasRetry,
@@ -196,23 +197,5 @@ export class RunBuilder<
     tasks: T & ThisType<InferredFlowTaskContext<T>>
   ): Promise<FlowResult<T>> {
     return executeFlow(this.config, tasks)
-  }
-}
-
-class ExecutionBuilder<
-  E extends ConfigRunErrors = never,
-  HasRetry extends boolean = false,
-> extends RunBuilder<E, HasRetry, false> {
-  constructor(config: BuilderConfig = {}) {
-    super(config)
-
-    // Retry/timeout chains must not silently keep orchestration entrypoints at
-    // runtime, even though the type surface already removes them.
-    Object.defineProperties(this, {
-      all: { configurable: true, value: undefined, writable: false },
-      allSettled: { configurable: true, value: undefined, writable: false },
-      flow: { configurable: true, value: undefined, writable: false },
-      wrap: { configurable: true, value: undefined, writable: false },
-    })
   }
 }
