@@ -73,10 +73,10 @@ describe("bundle compatibility", () => {
           'const flowResult = await try$.flow({ a() { return this.$exit("done") } })',
           'if (flowResult !== "done") throw new Error("flow() smoke test failed")',
           "let cleaned = false",
-          "const disposer = try$.dispose()",
-          "disposer.add(() => { cleaned = true })",
-          "await disposer.cleanup()",
-          'if (!cleaned) throw new Error("dispose() smoke test failed")',
+          "const disposer = try$.disposer()",
+          "disposer.defer(() => { cleaned = true })",
+          "await disposer.dispose()",
+          'if (!cleaned) throw new Error("disposer() smoke test failed")',
         ].join("\n")
       )
 

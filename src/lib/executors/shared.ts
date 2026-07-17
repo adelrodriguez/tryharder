@@ -152,8 +152,8 @@ export abstract class TaskGraphExecutionBase<
       : this.internalController.signal
   }
 
-  async disposeAsync(): Promise<void> {
-    await this.disposer.disposeAsync()
+  async dispose(): Promise<void> {
+    await this.disposer.dispose()
   }
 
   protected getTaskHandler(taskName: keyof T) {

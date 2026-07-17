@@ -59,7 +59,7 @@ const result = await try$
   - [all and allSettled](#all-and-allsettled)
   - [flow and $exit](#flow-and-exit)
   - [gen](#gen)
-- [dispose](#dispose)
+- [disposer](#disposer)
 - [API Reference](#api-reference)
 - [Common Recipes](#common-recipes)
 - [When not to use tryharder](#when-not-to-use-tryharder)
@@ -152,7 +152,7 @@ That is the core shift:
 - **Sync and async parity** - Use the same mental model for `runSync(...)` and `run(...)`.
 - **Named task orchestration** - Express concurrent and ordered workflows with object-shaped task graphs instead of positional arrays.
 - **Observable execution hooks** - Add top-level instrumentation with `wrap(...)` without changing task behavior.
-- **Resource cleanup** - Register teardown that survives async boundaries with `dispose()` and task disposers.
+- **Resource cleanup** - Register teardown that survives async boundaries with `disposer()` and task disposers.
 - **No runtime dependencies** - The published package ships without runtime dependencies.
 
 ## Installation
@@ -181,13 +181,13 @@ Policy builders decorate terminal execution. `retry(...)`, `timeout(...)`, and `
 
 Orchestration APIs scale the same model from one operation to a task graph. `all(...)` runs a fail-fast named task map. `allSettled(...)` preserves every settled task outcome. `flow(...)` runs an ordered workflow that must explicitly terminate through `this.$exit(...)`.
 
-`wrap(...)` sits above those execution APIs as observational middleware. It can inspect readonly execution context and surround terminal calls, but it is not available after `retry(...)`, `timeout(...)`, or execution-scoped `signal(...)` chains. `gen(...)` offers a more linear way to compose returned unions. `dispose()` provides cleanup registration for work that spans async boundaries.
+`wrap(...)` sits above those execution APIs as observational middleware. It can inspect readonly execution context and surround terminal calls, but it is not available after `retry(...)`, `timeout(...)`, or execution-scoped `signal(...)` chains. `gen(...)` offers a more linear way to compose returned unions. `disposer()` provides cleanup registration for work that spans async boundaries.
 
 | Term                  | Meaning                                                                        |
 | --------------------- | ------------------------------------------------------------------------------ |
 | `run`                 | Async terminal execution that returns a value, mapped failure, or policy error |
 | `runSync`             | Sync terminal execution for synchronous work only                              |
-| `retry(limit)`        | Retry policy where `limit` includes the first attempt                          |
+| `retry(limit)`        | Retry policy; `limit` is a positive integer counting the first attempt         |
 | `timeout(ms)`         | Total execution timeout across attempts, delays, and catch handling            |
 | `signal(abortSignal)` | External cancellation for `run(...)` and root-level orchestration              |
 | `wrap(fn)`            | Top-level observational middleware around terminal APIs                        |
@@ -490,21 +490,21 @@ const value = await try$.gen(function* (use) {
 })
 ```
 
-### dispose
+### disposer
 
-Use `dispose()` when cleanup should stay colocated with the workflow that allocates the resource, even across async boundaries. The returned `AsyncDisposer` gives you three core operations:
+Use `disposer()` when cleanup should stay colocated with the workflow that allocates the resource, even across async boundaries. The returned `AsyncDisposer` gives you three operations:
 
-- `add(fn)` registers a cleanup callback.
+- `defer(fn)` registers a cleanup callback.
 - `use(resource)` tracks a disposable resource.
-- `cleanup()` runs the registered teardown in reverse order.
+- `dispose()` runs the registered teardown in reverse order (also triggered by leaving an `await using` scope).
 
 ```ts
-await using disposer = try$.dispose()
+await using disposer = try$.disposer()
 
 {
   const connection = await db.connect()
 
-  disposer.add(async () => {
+  disposer.defer(async () => {
     await connection.close()
   })
 
@@ -518,20 +518,20 @@ await using disposer = try$.dispose()
 
 ### Runtime
 
-| Export         | Description                                                             |
-| -------------- | ----------------------------------------------------------------------- |
-| `run`          | Async terminal execution API                                            |
-| `runSync`      | Sync terminal execution API                                             |
-| `retry`        | Create an execution-scoped retry builder                                |
-| `retryOptions` | Normalize retry policy input                                            |
-| `timeout`      | Add a total execution timeout                                           |
-| `signal`       | Add external cancellation to execution or root-level orchestration      |
-| `wrap`         | Add top-level observational middleware                                  |
-| `all`          | Run a fail-fast parallel named task graph                               |
-| `allSettled`   | Run a settled parallel named task graph                                 |
-| `flow`         | Run an ordered workflow with explicit early exit                        |
-| `gen`          | Compose `run(...)` results through generators                           |
-| `dispose`      | Create an `AsyncDisposer` helper with `add()`, `use()`, and `cleanup()` |
+| Export         | Description                                                               |
+| -------------- | ------------------------------------------------------------------------- |
+| `run`          | Async terminal execution API                                              |
+| `runSync`      | Sync terminal execution API                                               |
+| `retry`        | Create an execution-scoped retry builder                                  |
+| `retryOptions` | Normalize retry policy input                                              |
+| `timeout`      | Add a total execution timeout                                             |
+| `signal`       | Add external cancellation to execution or root-level orchestration        |
+| `wrap`         | Add top-level observational middleware                                    |
+| `all`          | Run a fail-fast parallel named task graph                                 |
+| `allSettled`   | Run a settled parallel named task graph                                   |
+| `flow`         | Run an ordered workflow with explicit early exit                          |
+| `gen`          | Compose `run(...)` results through generators                             |
+| `disposer`     | Create an `AsyncDisposer` helper with `defer()`, `use()`, and `dispose()` |
 
 ### Errors
 
@@ -552,7 +552,7 @@ Exports from `tryharder/types`:
 | Export             | Description                                          |
 | ------------------ | ---------------------------------------------------- |
 | `AllSettledResult` | Settled result map returned by `allSettled(...)`     |
-| `AsyncDisposer`    | Async cleanup helper returned by `dispose()`         |
+| `AsyncDisposer`    | Async cleanup helper returned by `disposer()`        |
 | `SettledFulfilled` | Fulfilled branch of a settled task result            |
 | `SettledRejected`  | Rejected branch of a settled task result             |
 | `SettledResult`    | Union of fulfilled and rejected settled task results |

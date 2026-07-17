@@ -14,7 +14,7 @@ import type {
   TryCtx,
   TryCtxFor,
 } from "./executors/shared"
-import type { RetryOptions, RetryPolicy } from "./modifiers/retry"
+import type { RetryOptions, RetryPolicy, ValidateRetryLimit } from "./modifiers/retry"
 import { Panic } from "./errors"
 import { executeAll } from "./executors/all"
 import { executeAllSettled } from "./executors/all-settled"
@@ -112,8 +112,10 @@ export class RunBuilder<
     }
   }
 
-  retry(policy: number): ExecutionBuilderSurface<E, true>
-  retry(policy: RetryOptions): AsyncExecutionBuilderSurface<E, true>
+  retry<N extends number>(policy: N & ValidateRetryLimit<N>): ExecutionBuilderSurface<E, true>
+  retry<N extends number>(
+    policy: RetryPolicy & { limit: N & ValidateRetryLimit<N> }
+  ): AsyncExecutionBuilderSurface<E, true>
   retry(policy: RetryOptions): ExecutionBuilderSurface<E, true> {
     return new ExecutionBuilder({
       ...this.config,
