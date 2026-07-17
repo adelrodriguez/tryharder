@@ -1,6 +1,6 @@
 import type { BuilderConfig } from "../builder"
 import type { BaseTryCtx, NonPromise } from "./shared"
-import { ControlError, Panic, RetryExhaustedError, UnhandledException } from "../errors"
+import { Panic, type UnhandledException } from "../errors"
 import { checkIsPromiseLike } from "../utils"
 import { BaseExecution, RetryDirective, type RetryDecision, type RunnerError } from "./base"
 
@@ -48,50 +48,22 @@ class RunExecution<T, E, Ctx extends BaseTryCtx> extends BaseExecution<
    * Resolve an attempt error into either a terminal result or a retry decision.
    */
   async #resolveFailure(error: unknown): Promise<E | RunnerError | RetryDirective> {
-    if (error instanceof Panic) {
-      throw error
+    const resolved = this.resolveControlOrRetry(error)
+
+    if (resolved) {
+      return resolved
     }
 
-    if (error instanceof ControlError) {
-      return error
-    }
+    const catchFn = this.#catchFn
 
-    const controlError = this.checkDidControlFail(error)
-
-    if (controlError) {
-      return controlError
-    }
-
-    const retryDecision = this.buildRetryDecision(error)
-
-    if (retryDecision.shouldAttemptRetry) {
-      return new RetryDirective(retryDecision)
-    }
-
-    if (!this.#catchFn) {
-      // Even without a catch handler, cancellation/timeout may have won since
-      // the original failure was first observed.
-      const finalizeControlError = this.checkDidControlFail(error)
-
-      if (finalizeControlError) {
-        return finalizeControlError
-      }
-
-      // With retry configured, any give-up (limit exhausted or shouldRetry
-      // declining) is reported uniformly as RetryExhaustedError carrying the
-      // last attempt's error. With a catch handler, the last error is mapped
-      // by catch instead (see below).
-      if (this.config.retry) {
-        return new RetryExhaustedError(undefined, { cause: error })
-      }
-
-      return new UnhandledException(undefined, { cause: error })
+    if (!catchFn) {
+      return this.resolveUnmappedFailure(error)
     }
 
     let mapped: E | Promise<E>
 
     try {
-      mapped = this.#catchFn(error)
+      mapped = catchFn(error)
     } catch (catchError) {
       throw new Panic("RUN_CATCH_HANDLER_THROW", { cause: catchError })
     }
