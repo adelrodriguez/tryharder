@@ -16,6 +16,11 @@ export type SyncRunCatchFn<E> = (error: unknown) => NonPromise<E>
 
 export interface SyncRunOptions<T, E, Ctx extends BaseTryCtx = BaseTryCtx> {
   try: SyncRunTryFn<T, Ctx>
+  /**
+   * Maps errors that originated inside `try` — thrown directly, or carried out of the retry loop as
+   * the last attempt's error once the retry policy gives up. Never invoked for policy outcomes
+   * (timeout, cancellation) or defects (`Panic`).
+   */
   catch: SyncRunCatchFn<E>
 }
 
@@ -72,10 +77,6 @@ class RunSyncExecution<T, E, Ctx extends BaseTryCtx> extends BaseExecution<T | E
       return new RetryDirective(retryDecision)
     }
 
-    if (retryDecision.isRetryExhausted) {
-      return new RetryExhaustedError(undefined, { cause: error })
-    }
-
     if (!this.#catchFn) {
       // Even without a catch handler, cancellation/timeout may have won since
       // the original failure was first observed.
@@ -83,6 +84,14 @@ class RunSyncExecution<T, E, Ctx extends BaseTryCtx> extends BaseExecution<T | E
 
       if (finalizeControlError) {
         return finalizeControlError
+      }
+
+      // With retry configured, any give-up (limit exhausted or shouldRetry
+      // declining) is reported uniformly as RetryExhaustedError carrying the
+      // last attempt's error. With a catch handler, the last error is mapped
+      // by catch instead (see below).
+      if (this.config.retry) {
+        return new RetryExhaustedError(undefined, { cause: error })
       }
 
       return new UnhandledException(undefined, { cause: error })

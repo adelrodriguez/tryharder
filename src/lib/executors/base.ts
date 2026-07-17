@@ -3,11 +3,7 @@ import type { RetryExhaustedError, UnhandledException } from "../errors"
 import type { TryCtx } from "./shared"
 import { defineDisposeAlias, InternalDisposableStack } from "../../shims/disposer"
 import { CancellationError, TimeoutError } from "../errors"
-import {
-  calculateRetryDelay,
-  checkIsRetryExhausted,
-  checkShouldAttemptRetry,
-} from "../modifiers/retry"
+import { calculateRetryDelay, checkShouldAttemptRetry } from "../modifiers/retry"
 import { SignalController } from "../modifiers/signal"
 import { TimeoutController } from "../modifiers/timeout"
 import { sleep } from "../utils"
@@ -18,7 +14,6 @@ interface BaseExecutionOptions {
 
 export type RetryDecision = {
   delay: number
-  isRetryExhausted: boolean
   shouldAttemptRetry: boolean
 }
 
@@ -252,16 +247,11 @@ export abstract class BaseExecution<TResult = unknown> implements Disposable {
     return calculateRetryDelay(this.ctx.retry.attempt, this.config)
   }
 
-  protected checkIsRetryExhaustedCurrentAttempt(): boolean {
-    return checkIsRetryExhausted(this.ctx.retry.attempt, this.config)
-  }
-
   protected buildRetryDecision(error: unknown): RetryDecision {
     const shouldAttemptRetry = this.shouldAttemptRetry(error)
 
     return {
       delay: shouldAttemptRetry ? this.retryDelayForCurrentAttempt() : 0,
-      isRetryExhausted: this.checkIsRetryExhaustedCurrentAttempt(),
       shouldAttemptRetry,
     }
   }
