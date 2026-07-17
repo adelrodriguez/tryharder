@@ -22,11 +22,20 @@ export type AsyncDisposableLike = {
 export type MaybeDisposable = AsyncDisposableLike | DisposableLike | null | undefined
 
 export interface AsyncDisposer extends AsyncDisposable {
-  add(fn: () => void | PromiseLike<void>): void
-  cleanup(): Promise<void>
+  /**
+   * Registers a cleanup callback. Callbacks run in reverse registration order (LIFO) when the
+   * disposer is disposed.
+   */
   defer(fn: () => void | PromiseLike<void>): void
+  /**
+   * Tracks a disposable resource and returns it.
+   */
   use<T extends AsyncDisposable | Disposable | null | undefined>(value: T): T
-  disposeAsync(): Promise<void>
+  /**
+   * Runs all registered teardown in reverse registration order. Equivalent to leaving an `await
+   * using` scope.
+   */
+  dispose(): Promise<void>
 }
 
 export function defineDisposeAlias(prototype: { dispose(): void }): void {
@@ -39,11 +48,11 @@ export function defineDisposeAlias(prototype: { dispose(): void }): void {
   })
 }
 
-export function defineAsyncDisposeAlias(prototype: { disposeAsync(): Promise<void> }): void {
+export function defineAsyncDisposeAlias(prototype: { dispose(): Promise<void> }): void {
   Object.defineProperty(prototype, ASYNC_DISPOSE, {
     configurable: true,
-    async value(this: { disposeAsync(): Promise<void> }) {
-      await this.disposeAsync()
+    async value(this: { dispose(): Promise<void> }) {
+      await this.dispose()
     },
     writable: true,
   })
@@ -173,10 +182,6 @@ class AsyncDisposerStack implements AsyncDisposer {
   #stack: AsyncDisposerFn[] = []
   declare [Symbol.asyncDispose]: () => Promise<void>
 
-  add(fn: AsyncDisposerFn): void {
-    this.defer(fn)
-  }
-
   defer(fn: AsyncDisposerFn): void {
     checkCanRegister(this.#disposed, "AsyncDisposableStack")
     if (typeof fn !== "function") {
@@ -198,12 +203,8 @@ class AsyncDisposerStack implements AsyncDisposer {
     return value
   }
 
-  async disposeAsync(): Promise<void> {
+  async dispose(): Promise<void> {
     await this.#disposeAllAsync()
-  }
-
-  async cleanup(): Promise<void> {
-    await this.disposeAsync()
   }
 
   async #disposeAllAsync(): Promise<void> {
