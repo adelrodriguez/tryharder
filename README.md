@@ -38,7 +38,7 @@ const result = await try$
     catch: () => new RequestFailedError("request failed"),
   })
 
-// result is OrderStatus | RequestFailedError | RetryExhaustedError | TimeoutError
+// result is OrderStatus | RequestFailedError | TimeoutError
 ```
 
 <details>
@@ -133,7 +133,7 @@ const result = await try$
   })
 
 // result is
-// User | UserUnavailableError | RetryExhaustedError | TimeoutError | CancellationError
+// User | UserUnavailableError | TimeoutError | CancellationError
 ```
 
 That is the core shift:
@@ -142,7 +142,8 @@ That is the core shift:
 - `tryharder` exposes execution policy in the builder chain and failure shape in the return type.
 - `run(fn)` returns `T | UnhandledException`.
 - `run({ try, catch })` returns `T | C`.
-- Adding `retry(...)`, `timeout(...)`, and `signal(...)` widens the union with `RetryExhaustedError`, `TimeoutError`, and `CancellationError`.
+- Adding `timeout(...)` and `signal(...)` widens the union with `TimeoutError` and `CancellationError`.
+- Adding `retry(...)` changes how persistent failure is reported: with `catch`, the last attempt's error is mapped by `catch`; without `catch`, it surfaces as `RetryExhaustedError` (last error as `cause`) instead of `UnhandledException`.
 
 ## Features
 
@@ -169,22 +170,6 @@ yarn add tryharder
 # pnpm
 pnpm add tryharder
 ```
-
-## Migration from hardtry
-
-Replace import specifiers only:
-
-- `hardtry` -> `tryharder`
-- `hardtry/errors` -> `tryharder/errors`
-- `hardtry/types` -> `tryharder/types`
-
-You can keep the same namespace alias in your code:
-
-```ts
-import * as try$ from "tryharder"
-```
-
-No runtime API names changed.
 
 ## Execution Model
 
@@ -237,10 +222,20 @@ const result = await try$
   })
 
 // result is
-// ValidationError | RetryExhaustedError | TimeoutError
+// ValidationError | TimeoutError
 ```
 
-That inferred union is the contract. A caller can see whether a function returns a domain error, whether retries may exhaust, and whether a deadline may fire, without reading the implementation body.
+That inferred union is the contract. A caller can see whether a function returns a domain error and whether a deadline may fire, without reading the implementation body.
+
+The `catch` contract is strict: `catch` maps errors that originated inside `try` — thrown directly, or carried out of the retry loop as the last attempt's error once the retry policy gives up. Policy outcomes (`TimeoutError`, `CancellationError`) never pass through `catch`; they surface typed in the union so you can handle them at the call site:
+
+```ts
+if (result instanceof TimeoutError) {
+  // deadline expired; map or handle it here
+}
+```
+
+Without `catch`, unmapped failures are wrapped: `RetryExhaustedError` when a retry policy gave up (for any reason — limit exhausted or `shouldRetry` declining), `UnhandledException` otherwise. The original error is always available as `cause`.
 
 `Panic` is intentionally separate from that model. It signals programmer errors such as invalid builder usage or invalid task graphs, not expected business-domain failures.
 
@@ -542,13 +537,13 @@ await using disposer = try$.dispose()
 
 Exports from `tryharder/errors`:
 
-| Export                | Description                                               |
-| --------------------- | --------------------------------------------------------- |
-| `CancellationError`   | Returned or thrown when execution is externally cancelled |
-| `TimeoutError`        | Returned when timed execution expires                     |
-| `RetryExhaustedError` | Returned when retry attempts are exhausted                |
-| `UnhandledException`  | Returned when function-form execution throws              |
-| `Panic`               | Thrown for programmer errors and invalid API usage        |
+| Export                | Description                                                                                               |
+| --------------------- | --------------------------------------------------------------------------------------------------------- |
+| `CancellationError`   | Returned or thrown when execution is externally cancelled                                                 |
+| `TimeoutError`        | Returned when timed execution expires                                                                     |
+| `RetryExhaustedError` | Returned when a retry policy gives up and no `catch` is provided; the last attempt's error is the `cause` |
+| `UnhandledException`  | Returned when function-form execution throws                                                              |
+| `Panic`               | Thrown for programmer errors and invalid API usage                                                        |
 
 ### Types
 
