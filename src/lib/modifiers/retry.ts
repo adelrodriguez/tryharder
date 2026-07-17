@@ -161,7 +161,3 @@ export function checkShouldAttemptRetry(
 
   return policy.shouldRetry(error, ctx)
 }
-
-export function checkIsRetryExhausted(attempt: number, config: BuilderConfig): boolean {
-  return config.retry !== undefined && attempt >= config.retry.limit
-}
