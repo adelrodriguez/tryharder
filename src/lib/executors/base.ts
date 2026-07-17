@@ -1,8 +1,14 @@
 import type { BuilderConfig, WrapCtx } from "../builder"
-import type { RetryExhaustedError, UnhandledException } from "../errors"
 import type { TryCtx } from "./shared"
 import { defineDisposeAlias, InternalDisposableStack } from "../../shims/disposer"
-import { CancellationError, TimeoutError } from "../errors"
+import {
+  CancellationError,
+  ControlError,
+  Panic,
+  RetryExhaustedError,
+  TimeoutError,
+  UnhandledException,
+} from "../errors"
 import { calculateRetryDelay, checkShouldAttemptRetry } from "../modifiers/retry"
 import { SignalController } from "../modifiers/signal"
 import { TimeoutController } from "../modifiers/timeout"
@@ -254,6 +260,57 @@ export abstract class BaseExecution<TResult = unknown> implements Disposable {
       delay: shouldAttemptRetry ? this.retryDelayForCurrentAttempt() : 0,
       shouldAttemptRetry,
     }
+  }
+
+  /**
+   * Shared prefix of attempt-failure resolution: rethrows defects, passes control errors through,
+   * and turns retryable failures into a {@link RetryDirective}. Returns `undefined` when the failure
+   * should continue into catch mapping (or unmapped wrapping).
+   */
+  protected resolveControlOrRetry(error: unknown): RunnerError | RetryDirective | undefined {
+    if (error instanceof Panic) {
+      throw error
+    }
+
+    if (error instanceof ControlError) {
+      return error
+    }
+
+    const controlError = this.checkDidControlFail(error)
+
+    if (controlError) {
+      return controlError
+    }
+
+    const retryDecision = this.buildRetryDecision(error)
+
+    if (retryDecision.shouldAttemptRetry) {
+      return new RetryDirective(retryDecision)
+    }
+
+    return undefined
+  }
+
+  /**
+   * Shared tail of attempt-failure resolution when no catch handler exists. With retry configured,
+   * any give-up (limit exhausted or shouldRetry declining) is reported uniformly as
+   * {@link RetryExhaustedError} carrying the last attempt's error; otherwise the failure is wrapped
+   * in {@link UnhandledException}.
+   */
+  protected resolveUnmappedFailure(error: unknown): RunnerError {
+    // Even without a catch handler, cancellation/timeout may have won since
+    // the original failure was first observed.
+    const finalizeControlError = this.checkDidControlFail(error)
+
+    if (finalizeControlError) {
+      return finalizeControlError
+    }
+
+    if (this.config.retry) {
+      return new RetryExhaustedError(undefined, { cause: error })
+    }
+
+    return new UnhandledException(undefined, { cause: error })
   }
 
   get #wrapCtx(): WrapCtx {
