@@ -108,8 +108,8 @@ class FlowExecution<T extends TaskRecord> extends TaskGraphExecutionBase<T, Flow
     return super.mapStoredError(error)
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- polymorphic override
   protected override shouldAbortOnTaskError(): boolean {
-    void this.taskNames
     return true
   }
 

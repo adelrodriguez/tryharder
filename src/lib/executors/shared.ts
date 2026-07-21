@@ -257,32 +257,29 @@ export abstract class TaskGraphExecutionBase<
     }
   }
 
-  protected onTaskResult(_taskName: keyof T, _value: unknown): void {
-    void this.tasks
-    void _taskName
-    void _value
-  }
+  /**
+   * Optional observation hooks: subclasses implement these to record task outcomes. Left undefined
+   * in the base class.
+   */
+  protected onTaskResult?(taskName: keyof T, value: unknown): void
+  protected onTaskError?(taskName: keyof T, error: unknown): void
 
-  protected onTaskError(_taskName: keyof T, _error: unknown): void {
-    void this.tasks
-    void _taskName
-    void _error
-  }
+  // The three methods below are polymorphic defaults overridden by
+  // subclasses (template-method pattern); they must stay instance methods
+  // even though the base implementations do not touch `this`.
 
+  // oxlint-disable-next-line class-methods-use-this -- polymorphic default
   protected mapStoredError(error: unknown): Error {
-    void this.tasks
     return error instanceof Error ? error : new UnhandledException(undefined, { cause: error })
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- polymorphic default
   protected shouldAbortOnTaskError(_error: unknown): boolean {
-    void this.tasks
-    void _error
     return false
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- polymorphic default
   protected shouldRethrowTaskError(_error: unknown): boolean {
-    void this.tasks
-    void _error
     return true
   }
 
@@ -300,11 +297,11 @@ export abstract class TaskGraphExecutionBase<
       const result = await taskFn.call(context)
 
       this.storeResult(taskName, result)
-      this.onTaskResult(taskName, result)
+      this.onTaskResult?.(taskName, result)
     } catch (error) {
       this.setFirstRejection(error)
       this.storeError(taskName, error)
-      this.onTaskError(taskName, error)
+      this.onTaskError?.(taskName, error)
 
       if (this.shouldAbortOnTaskError(error)) {
         this.abortInternal(error)
