@@ -27,7 +27,7 @@ import { executeFlow, type FlowResult, type InferredFlowTaskContext } from "./ex
 import { executeRun, type AsyncRunInput, type RunTryFn } from "./executors/run"
 import { executeRunSync, type SyncRunInput, type SyncRunTryFn } from "./executors/run-sync"
 import { retryOptions } from "./modifiers/retry"
-import { invariant } from "./utils"
+import { assertValidTimeout } from "./modifiers/timeout"
 
 /**
  * Wraps are observational hooks: they can inspect execution context and surround execution, but
@@ -101,8 +101,7 @@ export class RunBuilder<
   }
 
   protected buildTimeoutConfig(ms: number): BuilderConfig {
-    invariant(Number.isFinite(ms), new Panic("TIMEOUT_INVALID_MS"))
-    invariant(ms >= 0, new Panic("TIMEOUT_INVALID_MS"))
+    assertValidTimeout(ms)
 
     return {
       ...this.config,
