@@ -1,6 +1,11 @@
 import { describe, expect, it } from "bun:test"
 import {
   CancellationError,
+  isCancellationError,
+  isPanic,
+  isRetryExhaustedError,
+  isTimeoutError,
+  isUnhandledException,
   Panic,
   RetryExhaustedError,
   TimeoutError,
@@ -9,6 +14,15 @@ import {
 import * as try$ from "../index"
 import { expectPanic } from "./test-utils"
 
+function createForeignError(name: string, extras: Record<string, unknown> = {}): Error {
+  // Simulates an error created by a duplicate copy of tryharder (or another
+  // realm): instanceof fails, but the name-based guards must still match.
+  const foreign = new Error("foreign")
+  foreign.name = name
+  Object.assign(foreign, extras)
+  return foreign
+}
+
 describe("entrypoints", () => {
   it("does not expose errors from the root entrypoint", () => {
     expect("CancellationError" in try$).toBe(false)
@@ -16,6 +30,8 @@ describe("entrypoints", () => {
     expect("RetryExhaustedError" in try$).toBe(false)
     expect("TimeoutError" in try$).toBe(false)
     expect("UnhandledException" in try$).toBe(false)
+    expect("isCancellationError" in try$).toBe(false)
+    expect("isPanic" in try$).toBe(false)
   })
 
   it("exposes errors from the dedicated errors entrypoint", () => {
@@ -112,5 +128,41 @@ describe("entrypoints", () => {
     } catch (error) {
       expectPanic(error, "RETRY_INVALID_LIMIT")
     }
+  })
+
+  describe("error type guards", () => {
+    it("matches genuine instances", () => {
+      expect(isCancellationError(new CancellationError())).toBe(true)
+      expect(isTimeoutError(new TimeoutError())).toBe(true)
+      expect(isRetryExhaustedError(new RetryExhaustedError())).toBe(true)
+      expect(isUnhandledException(new UnhandledException())).toBe(true)
+      expect(isPanic(new Panic("FLOW_NO_EXIT"))).toBe(true)
+    })
+
+    it("matches foreign errors by name when instanceof fails", () => {
+      const foreignCancellation = createForeignError("CancellationError")
+
+      expect(foreignCancellation).not.toBeInstanceOf(CancellationError)
+      expect(isCancellationError(foreignCancellation)).toBe(true)
+
+      expect(isTimeoutError(createForeignError("TimeoutError"))).toBe(true)
+      expect(isRetryExhaustedError(createForeignError("RetryExhaustedError"))).toBe(true)
+      expect(isUnhandledException(createForeignError("UnhandledException"))).toBe(true)
+      expect(isPanic(createForeignError("Panic", { code: "FLOW_NO_EXIT" }))).toBe(true)
+    })
+
+    it("requires a string code for foreign Panic errors", () => {
+      expect(isPanic(createForeignError("Panic"))).toBe(false)
+      expect(isPanic(createForeignError("Panic", { code: 42 }))).toBe(false)
+    })
+
+    it("rejects non-errors and unrelated names", () => {
+      expect(isCancellationError(null)).toBe(false)
+      expect(isTimeoutError(0)).toBe(false)
+      expect(isRetryExhaustedError("RetryExhaustedError")).toBe(false)
+      expect(isUnhandledException({ name: "UnhandledException" })).toBe(false)
+      expect(isPanic(new Error("Panic"))).toBe(false)
+      expect(isCancellationError(new TimeoutError())).toBe(false)
+    })
   })
 })

@@ -6,6 +6,7 @@ import type {
   UnhandledException,
 } from "../errors"
 import type { AsyncDisposer, FlowExit, SettledResult } from "../types"
+import { isPanic, isTimeoutError, Panic } from "../errors"
 import * as try$ from "../index"
 
 type Expect<T extends true> = T
@@ -269,6 +270,24 @@ describe("type inference", () => {
         void signalBuilder.runSync
         // @ts-expect-error -- gen() is unavailable after retry(), timeout(), or signal()
         void signalBuilder.gen
+      }
+    })
+  })
+
+  describe("error type guards", () => {
+    it("narrows unknown values through the guard predicates", () => {
+      const value: unknown = new Panic("FLOW_NO_EXIT")
+
+      if (isPanic(value)) {
+        type _assert = Expect<Equal<typeof value, Panic>>
+      }
+
+      const result = "ok" as string | TimeoutError
+
+      if (isTimeoutError(result)) {
+        type _assert = Expect<Equal<typeof result, TimeoutError>>
+      } else {
+        type _assert = Expect<Equal<typeof result, string>>
       }
     })
   })

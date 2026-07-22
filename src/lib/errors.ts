@@ -90,3 +90,46 @@ export class Panic extends Error {
     this.name = "Panic"
   }
 }
+
+// Type guards below match by `error.name` in addition to instanceof, so they
+// keep working when two copies of tryharder end up in one dependency graph
+// (or across realms), where instanceof silently fails. They are the
+// recommended way to identify tryharder errors.
+//
+// Caveat: name matching means a foreign error that happens to use the same
+// `name` (e.g. a DOMException named "TimeoutError") also passes. Within the
+// unions returned by tryharder APIs this cannot occur.
+
+export function isCancellationError(error: unknown): error is CancellationError {
+  return (
+    error instanceof CancellationError ||
+    (error instanceof Error && error.name === "CancellationError")
+  )
+}
+
+export function isTimeoutError(error: unknown): error is TimeoutError {
+  return error instanceof TimeoutError || (error instanceof Error && error.name === "TimeoutError")
+}
+
+export function isRetryExhaustedError(error: unknown): error is RetryExhaustedError {
+  return (
+    error instanceof RetryExhaustedError ||
+    (error instanceof Error && error.name === "RetryExhaustedError")
+  )
+}
+
+export function isUnhandledException(error: unknown): error is UnhandledException {
+  return (
+    error instanceof UnhandledException ||
+    (error instanceof Error && error.name === "UnhandledException")
+  )
+}
+
+export function isPanic(error: unknown): error is Panic {
+  return (
+    error instanceof Panic ||
+    (error instanceof Error &&
+      error.name === "Panic" &&
+      typeof (error as { code?: unknown }).code === "string")
+  )
+}
