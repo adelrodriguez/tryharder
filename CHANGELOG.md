@@ -1,5 +1,11 @@
 # tryharder
 
+## 0.2.1
+
+### Patch Changes
+
+- 4ae6425: Build the package and its declarations with TypeScript 7.
+
 ## 0.2.0
 
 ### Minor Changes
