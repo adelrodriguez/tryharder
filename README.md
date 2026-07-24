@@ -58,7 +58,7 @@ const result = await try$
   - [all and allSettled](#all-and-allsettled)
   - [flow and $exit](#flow-and-exit)
   - [gen](#gen)
-- [disposer](#disposer)
+  - [disposer](#disposer)
 - [API Reference](#api-reference)
 - [Common Recipes](#common-recipes)
 - [When not to use tryharder](#when-not-to-use-tryharder)
