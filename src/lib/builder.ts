@@ -53,7 +53,15 @@ export interface BuilderConfig {
   wraps?: WrapFn[]
 }
 
-type ConfigRunErrors = RetryExhaustedError | TimeoutError | CancellationError
+type ConfigRunErrors = TimeoutError | CancellationError
+/**
+ * The failure type for try functions without a catch handler. With retry configured, any give-up
+ * (limit exhausted or `shouldRetry` declining) is reported as {@link RetryExhaustedError} carrying
+ * the last attempt's error as `cause`; otherwise failures are wrapped in {@link UnhandledException}.
+ */
+type UnmappedError<HasRetry extends boolean> = HasRetry extends true
+  ? RetryExhaustedError
+  : UnhandledException
 type OrchestrationMethods = "all" | "allSettled" | "flow"
 type SignalBuilderHiddenMethods<SupportsOrchestration extends boolean> =
   | "runSync"
@@ -104,9 +112,9 @@ export class RunBuilder<
     }
   }
 
-  retry(policy: number): ExecutionBuilderSurface<E | RetryExhaustedError, true>
-  retry(policy: RetryOptions): AsyncExecutionBuilderSurface<E | RetryExhaustedError, true>
-  retry(policy: RetryOptions): ExecutionBuilderSurface<E | RetryExhaustedError, true> {
+  retry(policy: number): ExecutionBuilderSurface<E, true>
+  retry(policy: RetryOptions): AsyncExecutionBuilderSurface<E, true>
+  retry(policy: RetryOptions): ExecutionBuilderSurface<E, true> {
     return new ExecutionBuilder({
       ...this.config,
       retry: retryOptions(policy),
@@ -140,13 +148,30 @@ export class RunBuilder<
     })
   }
 
-  run<T>(tryFn: RunTryFn<T, TryCtxFor<HasRetry>>): Promise<T | UnhandledException | E>
+  /**
+   * Executes an async unit of work.
+   *
+   * `catch` maps errors that originated inside `try` — thrown directly, or carried out of the retry
+   * loop as the last attempt's error once the retry policy gives up. Policy outcomes ({@link
+   * TimeoutError}, {@link CancellationError}) and defects ({@link Panic}) never pass through
+   * `catch`; they surface typed in the return union (or are thrown, for `Panic`).
+   *
+   * Without `catch`, unmapped failures are wrapped: {@link RetryExhaustedError} when a retry policy
+   * gave up, {@link UnhandledException} otherwise. The original error is available as `cause`.
+   */
+  run<T>(tryFn: RunTryFn<T, TryCtxFor<HasRetry>>): Promise<T | UnmappedError<HasRetry> | E>
   run<T, C>(options: AsyncRunInput<T, C, TryCtxFor<HasRetry>>): Promise<T | C | E>
   run<T, C>(input: AsyncRunInput<T, C, TryCtxFor<HasRetry>>) {
     return executeRun(this.config, input)
   }
 
-  runSync<T>(tryFn: SyncRunTryFn<T, TryCtxFor<HasRetry>>): T | UnhandledException | E
+  /**
+   * Executes a sync unit of work.
+   *
+   * Follows the same `catch` contract as {@link RunBuilder.run}: `catch` maps try-originated errors
+   * (including retry give-up); policy outcomes and defects never pass through it.
+   */
+  runSync<T>(tryFn: SyncRunTryFn<T, TryCtxFor<HasRetry>>): T | UnmappedError<HasRetry> | E
   runSync<T, C>(input: SyncRunInput<T, C, TryCtxFor<HasRetry>>): T | C | E
   runSync<T, C>(input: SyncRunInput<T, C, TryCtxFor<HasRetry>>) {
     return executeRunSync(this.config, input)

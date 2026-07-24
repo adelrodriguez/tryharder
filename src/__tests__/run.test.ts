@@ -403,6 +403,147 @@ describe("retry behavior", () => {
   })
 })
 
+describe("retry give-up and catch contract", () => {
+  it("routes the last error through catch when retries exhaust", async () => {
+    const caught: unknown[] = []
+
+    const result = await try$.retry(3).run({
+      catch: (error) => {
+        caught.push(error)
+        return "mapped" as const
+      },
+      try: (ctx) => {
+        throw new Error(`boom ${ctx.retry.attempt}`)
+      },
+    })
+
+    expect(result).toBe("mapped")
+    expect(caught).toHaveLength(1)
+    expect((caught[0] as Error).message).toBe("boom 3")
+  })
+
+  it("routes the last error through catch when retries exhaust in runSync", () => {
+    const caught: unknown[] = []
+
+    const result = try$.retry(2).runSync({
+      catch: (error) => {
+        caught.push(error)
+        return "mapped" as const
+      },
+      try: (ctx) => {
+        throw new Error(`boom ${ctx.retry.attempt}`)
+      },
+    })
+
+    expect(result).toBe("mapped")
+    expect(caught).toHaveLength(1)
+    expect((caught[0] as Error).message).toBe("boom 2")
+  })
+
+  it("returns RetryExhaustedError with the last error as cause when no catch is provided", async () => {
+    const result = await try$.retry(2).run((ctx) => {
+      throw new Error(`boom ${ctx.retry.attempt}`)
+    })
+
+    expect(result).toBeInstanceOf(RetryExhaustedError)
+    expect((result.cause as Error).message).toBe("boom 2")
+  })
+
+  it("returns RetryExhaustedError with cause in runSync when no catch is provided", () => {
+    const result = try$.retry(2).runSync((ctx) => {
+      throw new Error(`boom ${ctx.retry.attempt}`)
+    })
+
+    expect(result).toBeInstanceOf(RetryExhaustedError)
+    expect((result.cause as Error).message).toBe("boom 2")
+  })
+
+  it("returns RetryExhaustedError when shouldRetry declines and no catch is provided", async () => {
+    let attempts = 0
+
+    const result = await try$
+      .retry({
+        backoff: "constant",
+        limit: 5,
+        shouldRetry: () => false,
+      })
+      .run(() => {
+        attempts += 1
+        throw new Error("not transient")
+      })
+
+    expect(result).toBeInstanceOf(RetryExhaustedError)
+    expect((result.cause as Error).message).toBe("not transient")
+    expect(attempts).toBe(1)
+  })
+
+  it("passes the original error to catch when shouldRetry declines", async () => {
+    const caught: unknown[] = []
+
+    const result = await try$
+      .retry({
+        backoff: "constant",
+        limit: 5,
+        shouldRetry: () => false,
+      })
+      .run({
+        catch: (error) => {
+          caught.push(error)
+          return "mapped" as const
+        },
+        try: () => {
+          throw new Error("not transient")
+        },
+      })
+
+    expect(result).toBe("mapped")
+    expect(caught).toHaveLength(1)
+    expect((caught[0] as Error).message).toBe("not transient")
+  })
+
+  it("does not invoke catch when timeout fires during retry backoff", async () => {
+    const caught: unknown[] = []
+
+    const result = await try$
+      .retry({ backoff: "constant", delayMs: 50, limit: 3 })
+      .timeout(5)
+      .run({
+        catch: (error) => {
+          caught.push(error)
+          return "mapped" as const
+        },
+        try: () => {
+          throw new Error("boom")
+        },
+      })
+
+    expect(result).toBeInstanceOf(TimeoutError)
+    expect(caught).toHaveLength(0)
+  })
+
+  it("rethrows Panic from try without invoking catch even with retry configured", async () => {
+    const panic = new Panic("FLOW_NO_EXIT")
+    const caught: unknown[] = []
+
+    try {
+      await try$.retry(3).run({
+        catch: (error) => {
+          caught.push(error)
+          return "mapped" as const
+        },
+        try: () => {
+          throw panic
+        },
+      })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect(error).toBe(panic)
+    }
+
+    expect(caught).toHaveLength(0)
+  })
+})
+
 describe("timeout and cancellation behavior", () => {
   it("returns TimeoutError when timeout expires during try execution", async () => {
     const result = await try$.timeout(5).run(async (ctx) => {
