@@ -91,6 +91,13 @@ export type TryCtx = TryCtxFor<true>
 
 export type NonPromise<T> = T extends PromiseLike<unknown> ? never : T
 
+interface TaskGraphRun extends AsyncDisposable {
+  execute(): Promise<unknown>
+  waitForTasksToSettle(): Promise<void>
+}
+
+export type TaskGraphFailureOutcome<R> = { mapped: R } | { thrown: unknown }
+
 export abstract class OrchestrationExecution<TResult> extends BaseExecution<Promise<TResult>> {
   protected constructor(config: BuilderConfig) {
     const unsupportedPolicies = [
@@ -121,6 +128,53 @@ export abstract class OrchestrationExecution<TResult> extends BaseExecution<Prom
     }
 
     return await this.executeTasks()
+  }
+
+  /**
+   * Shared task-graph lifecycle: race execution against cancellation, let `mapFailure` turn a
+   * failure into a mapped result or a value to rethrow, always wait for sibling tasks to settle
+   * before resolving, and give cancellation priority over whatever was thrown while it fired.
+   */
+  protected async executeTaskGraph<R>(
+    graph: TaskGraphRun,
+    mapFailure: (
+      error: unknown
+    ) => TaskGraphFailureOutcome<R> | Promise<TaskGraphFailureOutcome<R>> = (error) => ({
+      thrown: error,
+    })
+  ): Promise<R> {
+    await using execution = graph
+    let result!: R
+    let threw = false
+    let thrownError: unknown
+
+    try {
+      result = (await this.raceWithCancellation(execution.execute())) as R
+    } catch (error) {
+      const outcome = await mapFailure(error)
+
+      if ("mapped" in outcome) {
+        result = outcome.mapped
+      } else {
+        threw = true
+        thrownError = outcome.thrown
+      }
+    } finally {
+      await execution.waitForTasksToSettle()
+    }
+
+    const cancellation = this.checkDidCancel(thrownError)
+
+    if (cancellation) {
+      throw cancellation
+    }
+
+    if (threw) {
+      // oxlint-disable-next-line no-throw-literal, typescript/only-throw-error -- Preserve raw task failures for callers/tests.
+      throw thrownError
+    }
+
+    return result
   }
 
   protected abstract executeTasks(): Promise<TResult>

@@ -12,16 +12,10 @@ class AllSettledExecution<T extends TaskRecord> extends OrchestrationExecution<
     this.#tasks = tasks
   }
 
-  protected override async executeTasks(): Promise<AllSettledResult<T>> {
-    await using execution = new TaskExecution(this.executionSignal, this.#tasks, "settled")
-    const result = await this.raceWithCancellation(execution.execute())
-    const cancellation = this.checkDidCancel()
-
-    if (cancellation) {
-      throw cancellation
-    }
-
-    return result as AllSettledResult<T>
+  protected override executeTasks(): Promise<AllSettledResult<T>> {
+    return this.executeTaskGraph<AllSettledResult<T>>(
+      new TaskExecution(this.executionSignal, this.#tasks, "settled")
+    )
   }
 }
 
