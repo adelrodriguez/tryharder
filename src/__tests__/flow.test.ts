@@ -58,13 +58,16 @@ describe("flow", () => {
 
   it("resolves exactly one winner when two tasks exit near-simultaneously", async () => {
     const disposed: string[] = []
+    const exitAttempts: string[] = []
 
     const result = await try$.flow({
       async first() {
         this.$disposer.defer(() => {
           disposed.push("first")
         })
+
         await Promise.resolve()
+        exitAttempts.push("first")
         return this.$exit("first" as const)
       },
       async second() {
@@ -72,13 +75,15 @@ describe("flow", () => {
           disposed.push("second")
         })
         await Promise.resolve()
+        exitAttempts.push("second")
         return this.$exit("second" as const)
       },
     })
 
-    // First-writer-wins: exactly one exit value is returned, and teardown
-    // registered by both tasks still runs before the flow resolves.
-    expect(["first", "second"]).toContain(result)
+    // Both tasks yield once, queuing their exits and rejection handlers in
+    // task order before the flow reads the winner. The first value remains.
+    expect(exitAttempts).toEqual(["first", "second"])
+    expect(result).toBe("first")
     expect(disposed.toSorted()).toEqual(["first", "second"])
   })
 
