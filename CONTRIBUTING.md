@@ -6,7 +6,7 @@ Thank you for your interest in contributing to tryharder. This document provides
 
 ### Prerequisites
 
-- [Bun](https://bun.sh) 1.3.1 or higher
+- [Bun](https://bun.sh) 1.3.14 or higher
 - TypeScript knowledge
 
 ### Installation
@@ -62,14 +62,11 @@ bun run test:coverage
 # Format the codebase
 bun run format
 
-# Check linting and formatting
+# Check linting and types
 bun run check
 
 # Auto-fix linting and formatting issues
 bun run fix
-
-# Type checking
-bun run typecheck
 
 # Analyze dependency usage
 bun run analyze
@@ -79,7 +76,6 @@ Run `bun run format` after editing files. Before submitting a PR, run:
 
 ```bash
 bun run check
-bun run typecheck
 bun run test
 bun run build
 ```
@@ -181,7 +177,6 @@ Ensure your PR meets these requirements:
 - [ ] Code follows the project's style guidelines
 - [ ] Code is formatted (`bun run format`)
 - [ ] Linting and checks pass (`bun run check`)
-- [ ] Type checking passes (`bun run typecheck`)
 - [ ] Tests pass (`bun run test`)
 - [ ] Build succeeds (`bun run build`)
 - [ ] Changeset added, if applicable
