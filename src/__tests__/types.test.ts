@@ -6,7 +6,14 @@ import type {
   UnhandledException,
 } from "../errors"
 import type { AsyncDisposer, FlowExit, SettledResult } from "../types"
-import { isPanic, isTimeoutError, Panic } from "../errors"
+import {
+  isCancellationError,
+  isPanic,
+  isRetryExhaustedError,
+  isTimeoutError,
+  isUnhandledException,
+  Panic,
+} from "../errors"
 import * as try$ from "../index"
 
 type Expect<T extends true> = T
@@ -280,6 +287,18 @@ describe("type inference", () => {
 
       if (isPanic(value)) {
         type _assert = Expect<Equal<typeof value, Panic>>
+      }
+
+      if (isCancellationError(value)) {
+        type _assert = Expect<Equal<typeof value, CancellationError>>
+      }
+
+      if (isRetryExhaustedError(value)) {
+        type _assert = Expect<Equal<typeof value, RetryExhaustedError>>
+      }
+
+      if (isUnhandledException(value)) {
+        type _assert = Expect<Equal<typeof value, UnhandledException>>
       }
 
       const result = "ok" as string | TimeoutError

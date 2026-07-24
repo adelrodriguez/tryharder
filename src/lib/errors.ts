@@ -96,40 +96,33 @@ export class Panic extends Error {
 // (or across realms), where instanceof silently fails. They are the
 // recommended way to identify tryharder errors.
 //
-// Caveat: name matching means a foreign error that happens to use the same
-// `name` (e.g. a DOMException named "TimeoutError") also passes. Within the
-// unions returned by tryharder APIs this cannot occur.
+// Caveat: name matching means a foreign Error that happens to use the same
+// `name` also passes. Within the unions returned by tryharder APIs this cannot
+// occur.
+
+function hasErrorName(error: unknown, name: string): error is Error {
+  return Error.isError(error) && error.name === name
+}
 
 export function isCancellationError(error: unknown): error is CancellationError {
-  return (
-    error instanceof CancellationError ||
-    (error instanceof Error && error.name === "CancellationError")
-  )
+  return error instanceof CancellationError || hasErrorName(error, "CancellationError")
 }
 
 export function isTimeoutError(error: unknown): error is TimeoutError {
-  return error instanceof TimeoutError || (error instanceof Error && error.name === "TimeoutError")
+  return error instanceof TimeoutError || hasErrorName(error, "TimeoutError")
 }
 
 export function isRetryExhaustedError(error: unknown): error is RetryExhaustedError {
-  return (
-    error instanceof RetryExhaustedError ||
-    (error instanceof Error && error.name === "RetryExhaustedError")
-  )
+  return error instanceof RetryExhaustedError || hasErrorName(error, "RetryExhaustedError")
 }
 
 export function isUnhandledException(error: unknown): error is UnhandledException {
-  return (
-    error instanceof UnhandledException ||
-    (error instanceof Error && error.name === "UnhandledException")
-  )
+  return error instanceof UnhandledException || hasErrorName(error, "UnhandledException")
 }
 
 export function isPanic(error: unknown): error is Panic {
   return (
     error instanceof Panic ||
-    (error instanceof Error &&
-      error.name === "Panic" &&
-      typeof (error as { code?: unknown }).code === "string")
+    (hasErrorName(error, "Panic") && "code" in error && typeof error.code === "string")
   )
 }

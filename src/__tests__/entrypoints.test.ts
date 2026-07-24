@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test"
+import { runInNewContext } from "node:vm"
 import {
   CancellationError,
   isCancellationError,
@@ -15,9 +16,7 @@ import * as try$ from "../index"
 import { expectPanic } from "./test-utils"
 
 function createForeignError(name: string, extras: Record<string, unknown> = {}): Error {
-  // Simulates an error created by a duplicate copy of tryharder (or another
-  // realm): instanceof fails, but the name-based guards must still match.
-  const foreign = new Error("foreign")
+  const foreign = runInNewContext("new Error('foreign')") as Error
   foreign.name = name
   Object.assign(foreign, extras)
   return foreign
@@ -143,6 +142,7 @@ describe("entrypoints", () => {
       const foreignCancellation = createForeignError("CancellationError")
 
       expect(foreignCancellation).not.toBeInstanceOf(CancellationError)
+      expect(foreignCancellation).not.toBeInstanceOf(Error)
       expect(isCancellationError(foreignCancellation)).toBe(true)
 
       expect(isTimeoutError(createForeignError("TimeoutError"))).toBe(true)
@@ -157,6 +157,13 @@ describe("entrypoints", () => {
     })
 
     it("rejects non-errors and unrelated names", () => {
+      const spoofedError = { name: "TimeoutError", [Symbol.toStringTag]: "Error" }
+
+      expect(Object.prototype.toString.call(spoofedError)).toBe("[object Error]")
+      expect(isTimeoutError(spoofedError)).toBe(false)
+      expect(isPanic({ code: "FLOW_NO_EXIT", name: "Panic", [Symbol.toStringTag]: "Error" })).toBe(
+        false
+      )
       expect(isCancellationError(null)).toBe(false)
       expect(isTimeoutError(0)).toBe(false)
       expect(isRetryExhaustedError("RetryExhaustedError")).toBe(false)
