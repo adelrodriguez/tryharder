@@ -22,7 +22,7 @@ bun run bench:ci
 - Cases stay deterministic and timer-free. Do not use `sleep`, real timeout expiry, or cancellation races in this suite.
 - Reuse task graphs and builder fixtures where setup can stay outside the measured loop.
 - Route results through the shared sink in `bench/shared.ts` so the runtime cannot optimize work away.
-- Run on the same Bun version when comparing history. This repo pins benchmark runs to `bun@1.3.1`.
+- Run on the same Bun version when comparing history. This repo pins benchmark runs to `bun@1.3.14`.
 - Treat results as trend signals. Do not infer product-level latency from these microbenchmarks.
 
 ## How to read these benchmarks

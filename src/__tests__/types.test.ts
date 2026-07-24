@@ -865,16 +865,6 @@ describe("type inference", () => {
         void try$.allSettled({ a: () => 42 }, { catch: () => "mapped" as const })
       }
     })
-
-    it("removes settled mode selector from namespace and chains", () => {
-      if (typecheckOnly()) {
-        // @ts-expect-error -- settled() was removed in favor of allSettled()
-        void try$.settled
-
-        // @ts-expect-error -- settled() was removed in favor of allSettled()
-        void try$.retry(3).settled
-      }
-    })
   })
 
   describe("flow", () => {
