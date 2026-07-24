@@ -20,7 +20,6 @@ import type {
   ValidateRetryLimit,
   ValidateRetryOptions,
 } from "./modifiers/retry"
-import { Panic } from "./errors"
 import { executeAll } from "./executors/all"
 import { executeAllSettled } from "./executors/all-settled"
 import { executeFlow, type FlowResult, type InferredFlowTaskContext } from "./executors/flow"
@@ -163,8 +162,8 @@ export class RunBuilder<
    *
    * `catch` maps errors that originated inside `try` — thrown directly, or carried out of the retry
    * loop as the last attempt's error once the retry policy gives up. Policy outcomes ({@link
-   * TimeoutError}, {@link CancellationError}) and defects ({@link Panic}) never pass through
-   * `catch`; they surface typed in the return union (or are thrown, for `Panic`).
+   * TimeoutError}, {@link CancellationError}) and defects (`Panic`) never pass through `catch`; they
+   * surface typed in the return union (or are thrown, for `Panic`).
    *
    * Without `catch`, unmapped failures are wrapped: {@link RetryExhaustedError} when a retry policy
    * gave up, {@link UnhandledException} otherwise. The original error is available as `cause`.
