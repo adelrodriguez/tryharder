@@ -56,6 +56,37 @@ describe("flow", () => {
     expect(result).toBe("cached")
   })
 
+  it("resolves exactly one winner when two tasks exit near-simultaneously", async () => {
+    const disposed: string[] = []
+    const exitAttempts: string[] = []
+
+    const result = await try$.flow({
+      async first() {
+        this.$disposer.defer(() => {
+          disposed.push("first")
+        })
+
+        await Promise.resolve()
+        exitAttempts.push("first")
+        return this.$exit("first" as const)
+      },
+      async second() {
+        this.$disposer.defer(() => {
+          disposed.push("second")
+        })
+        await Promise.resolve()
+        exitAttempts.push("second")
+        return this.$exit("second" as const)
+      },
+    })
+
+    // Both tasks yield once, queuing their exits and rejection handlers in
+    // task order before the flow reads the winner. The first value remains.
+    expect(exitAttempts).toEqual(["first", "second"])
+    expect(result).toBe("first")
+    expect(disposed.toSorted()).toEqual(["first", "second"])
+  })
+
   it("treats $exit(new TimeoutError()) as a returned value", async () => {
     const timeout = new TimeoutError("returned value")
 

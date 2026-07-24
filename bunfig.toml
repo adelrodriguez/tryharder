@@ -1,0 +1,4 @@
+[test]
+# Benchmark scripts are loaded by tooling but are not part of the library
+# surface; keep them out of coverage reports.
+coveragePathIgnorePatterns = ["bench/**"]
