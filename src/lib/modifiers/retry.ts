@@ -92,6 +92,18 @@ export type ValidateRetryLimit<N extends number> = number extends N
       ? InvalidRetryLimit
       : number
 
+/**
+ * Compile-time validation for full {@link RetryOptions} values, including unions of number and
+ * policy forms. Distributes over union members so that mixed inputs like `flag ? 3 : { backoff:
+ * "constant", limit: 5 }` are accepted while any member carrying an invalid literal limit still
+ * fails to compile.
+ */
+export type ValidateRetryOptions<P extends RetryOptions> = P extends number
+  ? ValidateRetryLimit<P>
+  : P extends { limit: infer N extends number }
+    ? { limit: ValidateRetryLimit<N> }
+    : never
+
 export function retryOptions(policy: RetryOptions): RetryPolicy {
   const limit = typeof policy === "number" ? policy : policy.limit
 

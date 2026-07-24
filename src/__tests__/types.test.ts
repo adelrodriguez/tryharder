@@ -295,6 +295,23 @@ describe("type inference", () => {
         void try$.retry(1 as number)
       }
     })
+
+    it("accepts union-typed policies and keeps runSync hidden", () => {
+      if (typecheckOnly()) {
+        const unionBuilder = try$.retry(
+          typecheckOnly() ? 3 : { backoff: "constant" as const, limit: 5 }
+        )
+        const result = unionBuilder.run(() => 1)
+
+        type _assert = Expect<Equal<typeof result, Promise<number | RetryExhaustedError>>>
+
+        // @ts-expect-error -- runSync is unavailable when the policy may be async
+        void unionBuilder.runSync
+
+        // @ts-expect-error -- a union member with an invalid literal limit is rejected
+        void try$.retry(typecheckOnly() ? 0 : { backoff: "constant" as const, limit: 5 })
+      }
+    })
   })
 
   describe("with retry", () => {
