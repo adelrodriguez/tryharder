@@ -258,8 +258,9 @@ export abstract class TaskGraphExecutionBase<
   }
 
   /**
-   * Optional observation hooks: subclasses implement these to record task outcomes. Left undefined
-   * in the base class.
+   * Optional observation hooks: subclasses implement these to record task outcomes. These method
+   * signatures are erased at compile time, so the base class leaves them undefined without emitting
+   * fields that would shadow subclass prototype methods.
    */
   protected onTaskResult?(taskName: keyof T, value: unknown): void
   protected onTaskError?(taskName: keyof T, error: unknown): void
