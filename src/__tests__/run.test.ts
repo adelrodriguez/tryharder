@@ -25,6 +25,28 @@ class RemoteServiceError extends Error {
   override name = "RemoteServiceError"
 }
 
+/**
+ * Patches `setTimeout` to record every scheduled delay and fire callbacks immediately. Lets
+ * retry-delay tests assert the delay calculation deterministically instead of measuring wall-clock
+ * time, which is flaky on contended CI.
+ */
+function captureScheduledDelays() {
+  const values: number[] = []
+  const originalSetTimeout = globalThis.setTimeout
+
+  globalThis.setTimeout = ((callback: () => void, ms?: number) => {
+    values.push(ms ?? 0)
+    return originalSetTimeout(callback, 0)
+  }) as typeof globalThis.setTimeout
+
+  return {
+    restore() {
+      globalThis.setTimeout = originalSetTimeout
+    },
+    values,
+  }
+}
+
 describe("runSync", () => {
   describe("function form", () => {
     it("returns value when function succeeds", () => {
@@ -345,6 +367,116 @@ describe("retry behavior", () => {
 
     expect(result).toBe("mapped")
     expect(attempts).toBe(1)
+  })
+
+  it("runs exactly once with retry(1) and reports give-up on failure", async () => {
+    let attempts = 0
+
+    const result = await try$.retry(1).run(() => {
+      attempts += 1
+      throw new Error("boom")
+    })
+
+    expect(result).toBeInstanceOf(RetryExhaustedError)
+    expect(attempts).toBe(1)
+  })
+
+  it("caps exponential backoff delays at maxDelayMs through the public API", async () => {
+    const scheduledDelays = captureScheduledDelays()
+
+    try {
+      let attempts = 0
+
+      const result = await try$
+        .retry({ backoff: "exponential", delayMs: 25, limit: 4, maxDelayMs: 25 })
+        .run(() => {
+          attempts += 1
+          throw new Error("boom")
+        })
+
+      expect(result).toBeInstanceOf(RetryExhaustedError)
+      expect(attempts).toBe(4)
+      // Uncapped exponential delays would be [25, 50, 100]; the cap keeps
+      // every scheduled retry sleep at 25ms.
+      expect(scheduledDelays.values).toEqual([25, 25, 25])
+    } finally {
+      scheduledDelays.restore()
+    }
+  })
+
+  it("applies jitter to retry delays through the public API", async () => {
+    const originalRandom = Math.random
+    Math.random = () => 0.5
+    const scheduledDelays = captureScheduledDelays()
+
+    try {
+      let attempts = 0
+
+      const result = await try$
+        .retry({ backoff: "constant", delayMs: 50, jitter: true, limit: 3 })
+        .run(() => {
+          attempts += 1
+          throw new Error("boom")
+        })
+
+      expect(result).toBeInstanceOf(RetryExhaustedError)
+      expect(attempts).toBe(3)
+      // With Math.random() === 0.5, jitter floors each 50ms delay to 25ms;
+      // without jitter both scheduled sleeps would be 50ms.
+      expect(scheduledDelays.values).toEqual([25, 25])
+    } finally {
+      scheduledDelays.restore()
+      Math.random = originalRandom
+    }
+  })
+
+  it("panics when runSync receives a delayed retry policy via casts", () => {
+    const unsafeBuilder = try$.retry({
+      backoff: "constant",
+      delayMs: 10,
+      limit: 2,
+    }) as unknown as { runSync(tryFn: () => number): unknown }
+
+    try {
+      unsafeBuilder.runSync(() => 1)
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expectPanic(error, "RUN_SYNC_ASYNC_RETRY_POLICY")
+    }
+  })
+
+  it("panics when runSync receives a jittered retry policy via casts", () => {
+    const unsafeBuilder = try$.retry({
+      backoff: "constant",
+      jitter: true,
+      limit: 2,
+    }) as unknown as { runSync(tryFn: () => number): unknown }
+
+    try {
+      unsafeBuilder.runSync(() => 1)
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expectPanic(error, "RUN_SYNC_ASYNC_RETRY_POLICY")
+    }
+  })
+
+  it("runs retries synchronously with the numeric shorthand", () => {
+    const attempts: number[] = []
+
+    const result = try$.retry(3).runSync((ctx) => {
+      attempts.push(ctx.retry.attempt)
+
+      if (ctx.retry.attempt < 3) {
+        throw new Error("boom")
+      }
+
+      return "done" as const
+    })
+
+    // The whole retry loop completed synchronously: the result is available
+    // on the same tick, with no awaits in between.
+    expect(result).toBe("done")
+    expect(attempts).toEqual([1, 2, 3])
   })
 
   it("does not retry control errors", () => {
