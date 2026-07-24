@@ -74,11 +74,41 @@ export type RetryPolicy =
  */
 export type RetryOptions = number | RetryPolicy
 
+declare const INVALID_RETRY_LIMIT: unique symbol
+type InvalidRetryLimit = {
+  readonly [INVALID_RETRY_LIMIT]: "retry() requires a positive integer limit"
+}
+
+/**
+ * Compile-time validation for literal retry limits. Rejects `0`, negative, and fractional literals;
+ * non-literal `number` values pass and are validated at runtime by {@link retryOptions} instead.
+ * (`Infinity`/`NaN` have no literal types, so they are runtime-only.)
+ */
+export type ValidateRetryLimit<N extends number> = number extends N
+  ? number
+  : `${N}` extends `-${string}` | `${string}.${string}`
+    ? InvalidRetryLimit
+    : N extends 0
+      ? InvalidRetryLimit
+      : number
+
+/**
+ * Compile-time validation for full {@link RetryOptions} values, including unions of number and
+ * policy forms. Distributes over union members so that mixed inputs like `flag ? 3 : { backoff:
+ * "constant", limit: 5 }` are accepted while any member carrying an invalid literal limit still
+ * fails to compile.
+ */
+export type ValidateRetryOptions<P extends RetryOptions> = P extends number
+  ? ValidateRetryLimit<P>
+  : P extends { limit: infer N extends number }
+    ? { limit: ValidateRetryLimit<N> }
+    : never
+
 export function retryOptions(policy: RetryOptions): RetryPolicy {
   const limit = typeof policy === "number" ? policy : policy.limit
 
-  invariant(Number.isFinite(limit), new Panic("RETRY_INVALID_LIMIT"))
-  invariant(limit >= 0, new Panic("RETRY_INVALID_LIMIT"))
+  invariant(Number.isInteger(limit), new Panic("RETRY_INVALID_LIMIT"))
+  invariant(limit >= 1, new Panic("RETRY_INVALID_LIMIT"))
 
   if (typeof policy === "number") {
     return {

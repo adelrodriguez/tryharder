@@ -54,7 +54,7 @@ describe("disposer shim", () => {
     class AsyncAliasTarget {
       disposed = 0
 
-      async disposeAsync(): Promise<void> {
+      async dispose(): Promise<void> {
         await Promise.resolve()
         this.disposed += 1
       }
@@ -94,7 +94,7 @@ describe("disposer shim", () => {
     class AsyncDescriptorTarget {
       disposed = 0
 
-      async disposeAsync(): Promise<void> {
+      async dispose(): Promise<void> {
         await Promise.resolve()
         this.disposed += 1
         asyncDisposeCalls += 1
@@ -172,7 +172,7 @@ describe("disposer shim", () => {
     }
     const disposeAsyncAlias = disposer[ASYNC_DISPOSE]
 
-    disposer.add(() => {
+    disposer.defer(() => {
       calls.push("cleanup")
     })
 
@@ -187,30 +187,17 @@ describe("disposer shim", () => {
     expect(calls).toEqual(["cleanup"])
   })
 
-  it("exposes cleanup as an alias for async disposal", async () => {
+  it("runs deferred cleanup through dispose()", async () => {
     const calls: string[] = []
     const disposer = createAsyncDisposer()
 
-    disposer.add(() => {
+    disposer.defer(() => {
       calls.push("cleanup")
     })
 
-    await disposer.cleanup()
+    await disposer.dispose()
 
     expect(calls).toEqual(["cleanup"])
-  })
-
-  it("exposes add as an alias for defer", async () => {
-    const calls: string[] = []
-    const disposer = createAsyncDisposer()
-
-    disposer.add(() => {
-      calls.push("add")
-    })
-
-    await disposer.cleanup()
-
-    expect(calls).toEqual(["add"])
   })
 
   it("handles async shim-symbol resources and sync shim-symbol fallback in LIFO order", async () => {
@@ -233,7 +220,7 @@ describe("disposer shim", () => {
     disposer.use(syncResource as unknown as Disposable)
     disposer.use(asyncResource as unknown as AsyncDisposable)
 
-    await disposer.cleanup()
+    await disposer.dispose()
 
     expect(calls).toEqual(["async", "sync"])
   })
@@ -283,7 +270,7 @@ describe("disposer shim", () => {
       },
     })
 
-    await disposer.cleanup()
+    await disposer.dispose()
 
     expect(() => {
       disposer.use(resource as unknown as AsyncDisposable)

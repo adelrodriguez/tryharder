@@ -12,7 +12,7 @@ export const signal: RunBuilder["signal"] = root.signal.bind(root)
 export const timeout: RunBuilder["timeout"] = root.timeout.bind(root)
 export const wrap: RunBuilder["wrap"] = root.wrap.bind(root)
 
-export { dispose } from "./lib/dispose"
+export { disposer } from "./lib/dispose"
 export { driveGen as gen } from "./lib/gen"
 
 export { retryOptions } from "./lib/modifiers/retry"

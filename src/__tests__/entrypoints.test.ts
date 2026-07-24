@@ -80,7 +80,7 @@ describe("entrypoints", () => {
 
   it("throws Panic when retry() receives a negative number", () => {
     try {
-      try$.retry(-1)
+      try$.retry(-1 as number)
       expect.unreachable("should have thrown")
     } catch (error) {
       expectPanic(error, "RETRY_INVALID_LIMIT")
@@ -90,6 +90,24 @@ describe("entrypoints", () => {
   it("throws Panic when retry() receives NaN", () => {
     try {
       try$.retry(Number.NaN)
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expectPanic(error, "RETRY_INVALID_LIMIT")
+    }
+  })
+
+  it("throws Panic when retry() receives zero", () => {
+    try {
+      try$.retry(0 as number)
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expectPanic(error, "RETRY_INVALID_LIMIT")
+    }
+  })
+
+  it("throws Panic when retry() receives a fractional limit", () => {
+    try {
+      try$.retry(2.5 as number)
       expect.unreachable("should have thrown")
     } catch (error) {
       expectPanic(error, "RETRY_INVALID_LIMIT")
