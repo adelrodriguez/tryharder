@@ -100,29 +100,37 @@ export class Panic extends Error {
 // `name` also passes. Within the unions returned by tryharder APIs this cannot
 // occur.
 
-function hasErrorName(error: unknown, name: string): error is Error {
-  return Error.isError(error) && error.name === name
-}
-
 export function isCancellationError(error: unknown): error is CancellationError {
-  return error instanceof CancellationError || hasErrorName(error, "CancellationError")
+  return (
+    error instanceof CancellationError ||
+    (Error.isError(error) && error.name === "CancellationError")
+  )
 }
 
 export function isTimeoutError(error: unknown): error is TimeoutError {
-  return error instanceof TimeoutError || hasErrorName(error, "TimeoutError")
+  return error instanceof TimeoutError || (Error.isError(error) && error.name === "TimeoutError")
 }
 
 export function isRetryExhaustedError(error: unknown): error is RetryExhaustedError {
-  return error instanceof RetryExhaustedError || hasErrorName(error, "RetryExhaustedError")
+  return (
+    error instanceof RetryExhaustedError ||
+    (Error.isError(error) && error.name === "RetryExhaustedError")
+  )
 }
 
 export function isUnhandledException(error: unknown): error is UnhandledException {
-  return error instanceof UnhandledException || hasErrorName(error, "UnhandledException")
+  return (
+    error instanceof UnhandledException ||
+    (Error.isError(error) && error.name === "UnhandledException")
+  )
 }
 
 export function isPanic(error: unknown): error is Panic {
   return (
     error instanceof Panic ||
-    (hasErrorName(error, "Panic") && "code" in error && typeof error.code === "string")
+    (Error.isError(error) &&
+      error.name === "Panic" &&
+      "code" in error &&
+      typeof error.code === "string")
   )
 }
