@@ -132,33 +132,8 @@ class FlowRunnerExecution<T extends TaskRecord> extends OrchestrationExecution<F
     this.#tasks = tasks
   }
 
-  protected override async executeTasks(): Promise<FlowResult<T>> {
-    await using execution = new FlowExecution(this.executionSignal, this.#tasks)
-    let result!: FlowResult<T>
-    let threw = false
-    let thrownError: unknown
-
-    try {
-      result = (await this.raceWithCancellation(execution.execute())) as FlowResult<T>
-    } catch (error) {
-      threw = true
-      thrownError = error
-    } finally {
-      await execution.waitForTasksToSettle()
-    }
-
-    const cancellation = this.checkDidCancel(thrownError)
-
-    if (cancellation) {
-      throw cancellation
-    }
-
-    if (threw) {
-      // oxlint-disable-next-line no-throw-literal -- Preserve raw task failures for callers/tests.
-      throw thrownError
-    }
-
-    return result
+  protected override executeTasks(): Promise<FlowResult<T>> {
+    return this.executeTaskGraph(new FlowExecution(this.executionSignal, this.#tasks))
   }
 }
 
