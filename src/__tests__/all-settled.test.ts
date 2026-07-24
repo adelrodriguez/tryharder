@@ -299,6 +299,49 @@ describe("allSettled", () => {
     }
   })
 
+  it("surfaces cancellation without waiting for non-cooperative tasks", async () => {
+    const controller = new AbortController()
+    let markStarted!: () => void
+    let markFinished!: () => void
+    let releaseTask!: () => void
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve
+    })
+    const finished = new Promise<void>((resolve) => {
+      markFinished = resolve
+    })
+    const taskBlocker = new Promise<void>((resolve) => {
+      releaseTask = resolve
+    })
+
+    const pending = try$.signal(controller.signal).allSettled({
+      async blocked() {
+        markStarted()
+
+        try {
+          await taskBlocker
+          return 1
+        } finally {
+          markFinished()
+        }
+      },
+    })
+
+    await started
+    controller.abort(new Error("stop"))
+
+    const observed = pending.then(
+      () => "resolved" as const,
+      (error: unknown) => error
+    )
+    const outcome = await Promise.race([observed, sleep(0).then(() => "blocked" as const)])
+
+    releaseTask()
+    await finished
+
+    expect(outcome).toBeInstanceOf(CancellationError)
+  })
+
   it("runs disposer cleanup after all tasks settle", async () => {
     let cleaned = false
 

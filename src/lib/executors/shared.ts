@@ -9,6 +9,11 @@ type ResolverPair = [(value: unknown) => void, (reason?: unknown) => void]
 
 type TaskExecutionMode = "fail-fast" | "settled"
 
+type TaskExecutionResult<
+  T extends TaskRecord,
+  TMode extends TaskExecutionMode,
+> = TMode extends "settled" ? AllSettledResult<T> : AllValue<T>
+
 // oxlint-disable-next-line no-explicit-any -- Required for task-map inference
 export type TaskRecord = Record<string, any>
 
@@ -91,12 +96,17 @@ export type TryCtx = TryCtxFor<true>
 
 export type NonPromise<T> = T extends PromiseLike<unknown> ? never : T
 
-interface TaskGraphRun extends AsyncDisposable {
-  execute(): Promise<unknown>
+interface TaskGraphRun<R> extends AsyncDisposable {
+  execute(): Promise<R>
   waitForTasksToSettle(): Promise<void>
 }
 
 export type TaskGraphFailureOutcome<R> = { mapped: R } | { thrown: unknown }
+
+interface TaskGraphOptions<R> {
+  mapFailure?: (error: unknown) => TaskGraphFailureOutcome<R> | Promise<TaskGraphFailureOutcome<R>>
+  waitForTasksToSettle?: boolean
+}
 
 export abstract class OrchestrationExecution<TResult> extends BaseExecution<Promise<TResult>> {
   protected constructor(config: BuilderConfig) {
@@ -132,18 +142,18 @@ export abstract class OrchestrationExecution<TResult> extends BaseExecution<Prom
 
   /**
    * Shared task-graph lifecycle: race execution against cancellation, let `mapFailure` turn a
-   * failure into a mapped result or a value to rethrow, always wait for sibling tasks to settle
+   * failure into a mapped result or a value to rethrow, optionally wait for sibling tasks to settle
    * before resolving, and give cancellation priority over whatever was thrown while it fired.
    */
   protected async executeTaskGraph<R>(
-    graph: TaskGraphRun,
-    mapFailure: (
-      error: unknown
-    ) => TaskGraphFailureOutcome<R> | Promise<TaskGraphFailureOutcome<R>> = (error) => ({
-      thrown: error,
-    })
+    graph: TaskGraphRun<R>,
+    options: TaskGraphOptions<R> = {}
   ): Promise<R> {
     await using execution = graph
+    const {
+      mapFailure = (error): TaskGraphFailureOutcome<R> => ({ thrown: error }),
+      waitForTasksToSettle = true,
+    } = options
     let result!: R
     let threw = false
     let thrownError: unknown
@@ -160,7 +170,9 @@ export abstract class OrchestrationExecution<TResult> extends BaseExecution<Prom
         thrownError = outcome.thrown
       }
     } finally {
-      await execution.waitForTasksToSettle()
+      if (waitForTasksToSettle) {
+        await execution.waitForTasksToSettle()
+      }
     }
 
     const cancellation = this.checkDidCancel(thrownError)
@@ -370,13 +382,16 @@ export abstract class TaskGraphExecutionBase<
 }
 defineAsyncDisposeAlias(TaskGraphExecutionBase.prototype)
 
-export class TaskExecution<T extends TaskRecord> extends TaskGraphExecutionBase<T, TaskContext<T>> {
-  readonly #mode: TaskExecutionMode
+export class TaskExecution<
+  T extends TaskRecord,
+  TMode extends TaskExecutionMode = TaskExecutionMode,
+> extends TaskGraphExecutionBase<T, TaskContext<T>> {
+  readonly #mode: TMode
   readonly #returnValue: Record<string, unknown> = {}
   #failedTask: (keyof T & string) | undefined
   private settledPromise: Promise<Array<PromiseSettledResult<void>>> | undefined
 
-  constructor(signal: AbortSignal | undefined, tasks: T, mode: TaskExecutionMode) {
+  constructor(signal: AbortSignal | undefined, tasks: T, mode: TMode) {
     super(signal, tasks)
     this.#mode = mode
   }
@@ -393,13 +408,13 @@ export class TaskExecution<T extends TaskRecord> extends TaskGraphExecutionBase<
     return this.#returnValue
   }
 
-  async execute(): Promise<Record<string, unknown>> {
+  async execute(): Promise<TaskExecutionResult<T, TMode>> {
     const promises = this.taskNames.map(async (name) => this.runTask(name))
     this.settledPromise = Promise.allSettled(promises)
 
     if (this.#mode === "settled") {
       await this.settledPromise
-      return this.#returnValue
+      return this.#returnValue as TaskExecutionResult<T, TMode>
     }
 
     try {
@@ -408,7 +423,7 @@ export class TaskExecution<T extends TaskRecord> extends TaskGraphExecutionBase<
       throw this.mapStoredError(this.firstRejection)
     }
 
-    return this.#returnValue
+    return this.#returnValue as TaskExecutionResult<T, TMode>
   }
 
   async waitForTasksToSettle(): Promise<void> {

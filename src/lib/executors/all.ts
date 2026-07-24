@@ -26,13 +26,13 @@ class AllExecution<T extends TaskRecord, C> extends OrchestrationExecution<AllVa
   protected override executeTasks(): Promise<AllValue<T> | C> {
     const execution = new TaskExecution(this.executionSignal, this.#tasks, "fail-fast")
 
-    return this.executeTaskGraph<AllValue<T> | C>(execution, (error) =>
-      this.#mapFailure(execution, error)
-    )
+    return this.executeTaskGraph<AllValue<T> | C>(execution, {
+      mapFailure: (error) => this.#mapFailure(execution, error),
+    })
   }
 
   async #mapFailure(
-    execution: TaskExecution<T>,
+    execution: TaskExecution<T, "fail-fast">,
     error: unknown
   ): Promise<TaskGraphFailureOutcome<AllValue<T> | C>> {
     const controlAfterFailure = this.checkDidControlFail(error)

@@ -13,9 +13,9 @@ class AllSettledExecution<T extends TaskRecord> extends OrchestrationExecution<
   }
 
   protected override executeTasks(): Promise<AllSettledResult<T>> {
-    return this.executeTaskGraph<AllSettledResult<T>>(
-      new TaskExecution(this.executionSignal, this.#tasks, "settled")
-    )
+    return this.executeTaskGraph(new TaskExecution(this.executionSignal, this.#tasks, "settled"), {
+      waitForTasksToSettle: false,
+    })
   }
 }
 

@@ -133,9 +133,7 @@ class FlowRunnerExecution<T extends TaskRecord> extends OrchestrationExecution<F
   }
 
   protected override executeTasks(): Promise<FlowResult<T>> {
-    return this.executeTaskGraph<FlowResult<T>>(
-      new FlowExecution(this.executionSignal, this.#tasks)
-    )
+    return this.executeTaskGraph(new FlowExecution(this.executionSignal, this.#tasks))
   }
 }
 
