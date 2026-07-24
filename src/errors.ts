@@ -1,5 +1,10 @@
 export {
   CancellationError,
+  isCancellationError,
+  isPanic,
+  isRetryExhaustedError,
+  isTimeoutError,
+  isUnhandledException,
   Panic,
   RetryExhaustedError,
   TimeoutError,

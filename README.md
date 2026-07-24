@@ -544,6 +544,18 @@ Exports from `tryharder/errors`:
 | `UnhandledException`  | Returned when function-form execution throws                                                              |
 | `Panic`               | Thrown for programmer errors and invalid API usage                                                        |
 
+Each error class has a matching type guard: `isCancellationError`, `isTimeoutError`, `isRetryExhaustedError`, `isUnhandledException`, and `isPanic`. Prefer the guards over `instanceof` — they also match by `error.name`, so they keep working when two copies of `tryharder` end up in one dependency graph or when errors cross realm boundaries, where `instanceof` silently fails.
+
+```ts
+import { isTimeoutError } from "tryharder/errors"
+
+const result = await try$.timeout(1_000).run(fetchUser)
+
+if (isTimeoutError(result)) {
+  // handle the deadline here
+}
+```
+
 ### Types
 
 Exports from `tryharder/types`:
