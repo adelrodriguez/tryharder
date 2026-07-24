@@ -118,7 +118,7 @@ export class RunBuilder<
   }
 
   // Runtime note: there is a single builder class. Policy misuse that the
-  // narrowed type surfaces prevent (e.g. calling all() after retry() from
+  // narrowed type surface prevents (e.g. calling all() after retry() from
   // untyped code) is guarded at execution time by OrchestrationExecution's
   // ORCHESTRATION_UNSUPPORTED_POLICY panic, and wrap ordering is
   // behavior-invariant (wraps always cover the full retry scope), so no
