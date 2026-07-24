@@ -26,9 +26,9 @@ class RemoteServiceError extends Error {
 }
 
 /**
- * Patches `setTimeout` to record every scheduled delay and fire callbacks immediately. Lets
- * retry-delay tests assert the delay calculation deterministically instead of measuring wall-clock
- * time, which is flaky on contended CI.
+ * Patches `setTimeout` to record every scheduled delay and re-schedule callbacks with a 0ms delay.
+ * Lets retry-delay tests assert the delay calculation deterministically instead of measuring
+ * wall-clock time, which is flaky on contended CI.
  */
 function captureScheduledDelays() {
   const values: number[] = []
