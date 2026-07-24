@@ -2,6 +2,15 @@ import { defineDisposeAlias } from "../../shims/disposer"
 import { Panic, TimeoutError } from "../errors"
 import { invariant, resolveWithAbort } from "../utils"
 
+/**
+ * Single source of truth for timeout validation: used eagerly by the builder at `.timeout()` call
+ * time and defensively by {@link TimeoutController}.
+ */
+export function assertValidTimeout(ms: number): void {
+  invariant(Number.isFinite(ms), new Panic("TIMEOUT_INVALID_MS"))
+  invariant(ms >= 0, new Panic("TIMEOUT_INVALID_MS"))
+}
+
 export class TimeoutController {
   readonly signal?: AbortSignal
   readonly #controller?: AbortController
@@ -17,8 +26,7 @@ export class TimeoutController {
       return
     }
 
-    invariant(Number.isFinite(timeoutMs), new Panic("TIMEOUT_INVALID_MS"))
-    invariant(timeoutMs >= 0, new Panic("TIMEOUT_INVALID_MS"))
+    assertValidTimeout(timeoutMs)
 
     this.#controller = new AbortController()
     this.signal = this.#controller.signal
