@@ -401,6 +401,8 @@ const result = await try$
 
 `timeout(ms)` measures total execution time, not just a single attempt.
 
+`runSync(...)` stays available after the numeric retry shorthand (`retry(3)`), but not after the object form (`retry({ ... })`) or `timeout(...)` — those policies may need to wait or interrupt, which synchronous execution cannot do. This restriction is intentionally conservative: it is enforced at the type level even for object policies that would be sync-safe at runtime (constant backoff, no delay, no jitter). If you need retries with `runSync(...)`, use the numeric shorthand.
+
 Apply `signal(...)` on the root builder when you want cancellation to cover `all(...)`, `allSettled(...)`, or `flow(...)`.
 
 ### wrap
