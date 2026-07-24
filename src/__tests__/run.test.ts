@@ -34,9 +34,13 @@ function captureScheduledDelays() {
   const values: number[] = []
   const originalSetTimeout = globalThis.setTimeout
 
-  globalThis.setTimeout = ((callback: () => void, ms?: number) => {
+  globalThis.setTimeout = ((
+    callback: Parameters<typeof globalThis.setTimeout>[0],
+    ms?: number,
+    ...args: unknown[]
+  ) => {
     values.push(ms ?? 0)
-    return originalSetTimeout(callback, 0)
+    return originalSetTimeout(callback, 0, ...args)
   }) as typeof globalThis.setTimeout
 
   return {
@@ -46,6 +50,30 @@ function captureScheduledDelays() {
     values,
   }
 }
+
+describe("captureScheduledDelays", () => {
+  it("preserves setTimeout callback arguments", async () => {
+    const scheduledDelays = captureScheduledDelays()
+
+    try {
+      const result = await new Promise<string>((resolve) => {
+        setTimeout(
+          (prefix, value) => {
+            resolve(`${prefix}${value}`)
+          },
+          25,
+          "value-",
+          42
+        )
+      })
+
+      expect(result).toBe("value-42")
+      expect(scheduledDelays.values).toEqual([25])
+    } finally {
+      scheduledDelays.restore()
+    }
+  })
+})
 
 describe("runSync", () => {
   describe("function form", () => {
