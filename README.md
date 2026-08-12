@@ -303,7 +303,7 @@ Use `run(...)` and `runSync(...)` for a single unit of work. Use `all(...)` or `
 
 Orchestration supports `signal(...)` and `timeout(...)` policies. `timeout(ms)` is a whole-graph deadline: when it fires, every task's `$signal` aborts and the orchestration rejects with `TimeoutError` (cancellation wins if both fire). Policy failures are thrown, never mapped through an orchestration-level `catch`. `retry(...)` is not supported for orchestration — apply it to leaf `run(...)` calls inside tasks instead.
 
-The deadline is cooperative, like all cancellation in JavaScript: aborting `$signal` does not stop a task by itself. All three orchestration APIs wait for every in-flight task to settle before rejecting — the structured guarantee that no task code is still running once the orchestration returns, and that a caller may safely retry after a `TimeoutError` — so a task that ignores `$signal` extends the time until the `TimeoutError` surfaces. For the deadline to bound wall-clock time in practice, tasks must observe `$signal`: check it between steps, or pass it to signal-aware I/O such as `fetch`.
+The deadline is cooperative, like all cancellation in JavaScript: aborting `$signal` does not stop a task by itself. All three orchestration APIs wait for every in-flight task to settle before rejecting — the structured guarantee that no task code is still running once the orchestration returns, and that a caller may safely retry after a `TimeoutError` — so a task that ignores `$signal` extends the time until the `TimeoutError` surfaces. The same holds for `signal(...)` cancellation: the orchestration rejects with `CancellationError` only after every in-flight task has settled. For the deadline to bound wall-clock time in practice, tasks must observe `$signal`: check it between steps, or pass it to signal-aware I/O such as `fetch`.
 
 `all(...)` runs an object-shaped task graph and resolves to one object of successful results. Named tasks are easier to scan than positional arrays, and tasks can await earlier task results through `this.$result`. Execution is fail-fast: once one task fails, sibling task signals are aborted and the orchestration rejects unless you provide an orchestration-level `catch`.
 
@@ -411,7 +411,7 @@ const result = await try$
 
 `runSync(...)` stays available after the numeric retry shorthand (`retry(3)`), but not after the object form (`retry({ ... })`) or `timeout(...)` — those policies may need to wait or interrupt, which synchronous execution cannot do. This restriction is intentionally conservative: it is enforced at the type level even for object policies that would be sync-safe at runtime (constant backoff, no delay, no jitter). If you need retries with `runSync(...)`, use the numeric shorthand.
 
-Apply `signal(...)` on the root builder when you want cancellation to cover `all(...)`, `allSettled(...)`, or `flow(...)`.
+Apply `signal(...)` on the root builder when you want cancellation to cover `all(...)`, `allSettled(...)`, or `flow(...)`. Cancellation is cooperative there too: the orchestration rejects with `CancellationError` only once every in-flight task has settled, so tasks must observe `$signal` for the abort to take effect promptly.
 
 ### wrap
 
