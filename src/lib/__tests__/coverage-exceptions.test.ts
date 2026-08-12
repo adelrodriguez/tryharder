@@ -44,10 +44,10 @@ class SharedDefaultExecution extends TaskGraphExecutionBase<EmptyTasks, TaskCont
     super(undefined, {})
   }
 
-  // oxlint-disable-next-line class-methods-use-this -- polymorphic override
   protected override createTaskContext() {
     return {
       $disposer: createAsyncDisposer(),
+      $race: <V>(promise: PromiseLike<V>) => this.raceTaskSignal(promise),
       $result: {} as ResultProxy<EmptyTasks>,
       $signal: new AbortController().signal,
     }

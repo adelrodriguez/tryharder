@@ -613,6 +613,77 @@ describe("all", () => {
     }
   })
 
+  it("bounds the deadline with $race for signal-unaware work", async () => {
+    const startedAt = Date.now()
+
+    try {
+      await try$.timeout(10).all({
+        async a() {
+          await this.$race(sleep(200))
+          return "late" as const
+        },
+      })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect(error).toBeInstanceOf(TimeoutError)
+    }
+
+    expect(Date.now() - startedAt).toBeLessThan(150)
+  })
+
+  it("passes values and failures through $race when the signal stays quiet", async () => {
+    const boom = new Error("boom")
+
+    const result = await try$.all({
+      async a() {
+        return await this.$race(Promise.resolve(1))
+      },
+    })
+
+    expect(result.a).toBe(1)
+
+    try {
+      await try$.all({
+        async b() {
+          return await this.$race(Promise.reject(boom))
+        },
+      })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect(error).toBe(boom)
+    }
+  })
+
+  it("rejects $race with the sibling failure that aborted the task signal", async () => {
+    const boom = new Error("boom")
+    let racedRejection: unknown
+
+    try {
+      await try$.all({
+        a() {
+          throw boom
+        },
+        async b() {
+          try {
+            await this.$race(
+              new Promise(() => {
+                // Never settles: $race must reject via the aborted task signal.
+              })
+            )
+          } catch (error) {
+            racedRejection = error
+            throw error
+          }
+        },
+      })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect(error).toBe(boom)
+    }
+
+    expect(racedRejection).toBe(boom)
+  })
+
   it("does not pass the graph deadline through the catch option", async () => {
     let catchCalls = 0
 
