@@ -145,7 +145,7 @@ export class RunBuilder<
    * delays, and catch handling, and surfaces typed as {@link TimeoutError}. For orchestration
    * (`all`/`allSettled`/`flow`), it is a whole-graph deadline: the task signal aborts when it fires
    * and the orchestration rejects with {@link TimeoutError} (cancellation still wins when both
-   * fire). The deadline is cooperative — `all`/`flow` wait for in-flight tasks to settle before
+   * fire). The deadline is cooperative — orchestration waits for in-flight tasks to settle before
    * rejecting, so tasks must observe `$signal` for it to bound wall-clock time.
    */
   timeout(
