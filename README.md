@@ -176,7 +176,7 @@ pnpm add tryharder
 
 Terminal execution APIs are `run(...)` and `runSync(...)`. They are the points where work is actually executed and a result union is produced. Function form is the minimal shape and returns `T | UnhandledException` by default, or `T | RetryExhaustedError` when retry is configured. Object form adds a `catch` mapper and returns `T | C`.
 
-Policy builders decorate terminal execution. `retry(...)`, `timeout(...)`, and `signal(...)` do not run work by themselves; they configure the next terminal call and widen the resulting union with the policy-level failures they can introduce. `retry(limit)` counts the first attempt. `timeout(ms)` applies one total deadline across attempts, delays, and catch handling. `signal(abortSignal)` forwards external cancellation into execution.
+Policy builders decorate terminal execution. `retry(...)`, `timeout(...)`, and `signal(...)` do not run work by themselves; they configure the next terminal call and widen the resulting union with the policy-level failures they can introduce. `retry(limit)` counts the first attempt. `timeout(ms)` applies one total deadline across attempts, delays, and catch handling — or across a whole task graph when used with orchestration. `signal(abortSignal)` forwards external cancellation into execution.
 
 Orchestration APIs scale the same model from one operation to a task graph. `all(...)` runs a fail-fast named task map. `allSettled(...)` preserves every settled task outcome. `flow(...)` runs an ordered workflow that must explicitly terminate through `this.$exit(...)`.
 
@@ -187,7 +187,7 @@ Orchestration APIs scale the same model from one operation to a task graph. `all
 | `run`                 | Async terminal execution that returns a value, mapped failure, or policy error |
 | `runSync`             | Sync terminal execution for synchronous work only                              |
 | `retry(limit)`        | Retry policy; `limit` is a positive integer counting the first attempt         |
-| `timeout(ms)`         | Total execution timeout across attempts, delays, and catch handling            |
+| `timeout(ms)`         | Total deadline: across attempts for `run(...)`, whole-graph for orchestration  |
 | `signal(abortSignal)` | External cancellation for `run(...)` and root-level orchestration              |
 | `wrap(fn)`            | Top-level observational middleware around terminal APIs                        |
 | `all(tasks)`          | Fail-fast parallel named task graph                                            |
@@ -238,7 +238,7 @@ Without `catch`, unmapped failures are wrapped: `RetryExhaustedError` when a ret
 
 `Panic` is intentionally separate from that model. It signals programmer errors such as invalid builder usage or invalid task graphs, not expected business-domain failures.
 
-One implementation detail worth knowing: `retry(...)` and `timeout(...)` switch the builder onto an execution-only surface. At both the type level and runtime, orchestration methods such as `all(...)`, `allSettled(...)`, `flow(...)`, and `wrap(...)` are not available from those execution-scoped builders. Root-level `signal(...)` still supports orchestration.
+One implementation detail worth knowing: `retry(...)` switches the builder onto an execution-only surface. At both the type level and runtime, orchestration methods such as `all(...)`, `allSettled(...)`, and `flow(...)` are not available after `retry(...)` — retrying a whole task graph is not meaningful. `timeout(...)` and root-level `signal(...)` keep orchestration available; `wrap(...)` must come before any policy.
 
 ## Quick Start
 
@@ -296,6 +296,8 @@ const result = await try$
 ## Orchestration Semantics
 
 Use `run(...)` and `runSync(...)` for a single unit of work. Use `all(...)` or `allSettled(...)` when you want a concurrent task map with named dependencies. Use `flow(...)` when you need a stepwise workflow with explicit early return.
+
+Orchestration supports `signal(...)` and `timeout(...)` policies. `timeout(ms)` is a whole-graph deadline: when it fires, every task's `$signal` aborts and the orchestration rejects with `TimeoutError` (cancellation wins if both fire). Policy failures are thrown, never mapped through an orchestration-level `catch`. `retry(...)` is not supported for orchestration — apply it to leaf `run(...)` calls inside tasks instead.
 
 `all(...)` runs an object-shaped task graph and resolves to one object of successful results. Named tasks are easier to scan than positional arrays, and tasks can await earlier task results through `this.$result`. Execution is fail-fast: once one task fails, sibling task signals are aborted and the orchestration rejects unless you provide an orchestration-level `catch`.
 
@@ -602,7 +604,7 @@ const result = await try$.run({
 
 ### Retry only the leaf request inside a flow
 
-`retry(...)` and `timeout(...)` do not apply directly to `flow(...)`. Wrap the leaf work in nested `run(...)` calls when a single step needs its own execution policy.
+`retry(...)` does not apply directly to `flow(...)`, and `timeout(...)` applies to the whole graph rather than a single step. Wrap the leaf work in nested `run(...)` calls when a single step needs its own execution policy.
 
 ```ts
 const result = await try$.flow({

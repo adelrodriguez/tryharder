@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { CancellationError, Panic, UnhandledException } from "../errors"
+import { CancellationError, Panic, TimeoutError, UnhandledException } from "../errors"
 import * as try$ from "../index"
 import { expectPanic, sleep } from "./test-utils"
 
@@ -501,5 +501,93 @@ describe("all", () => {
       .catch(() => null)
 
     expect(cleaned).toBe(true)
+  })
+
+  it("rejects with TimeoutError when the graph deadline fires", async () => {
+    try {
+      await try$.timeout(10).all({
+        async a() {
+          await sleep(40)
+          return "late" as const
+        },
+      })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect(error).toBeInstanceOf(TimeoutError)
+    }
+  })
+
+  it("aborts the task signal when the graph deadline fires", async () => {
+    let abortReason: unknown
+
+    try {
+      await try$.timeout(10).all({
+        async a() {
+          await new Promise<void>((resolve) => {
+            this.$signal.addEventListener(
+              "abort",
+              () => {
+                abortReason = this.$signal.reason
+                resolve()
+              },
+              { once: true }
+            )
+          })
+
+          throw this.$signal.reason
+        },
+      })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect(error).toBeInstanceOf(TimeoutError)
+    }
+
+    expect(abortReason).toBeInstanceOf(TimeoutError)
+  })
+
+  it("prefers cancellation over the graph deadline when both fire", async () => {
+    const controller = new AbortController()
+
+    controller.abort(new Error("stop"))
+
+    try {
+      await try$
+        .signal(controller.signal)
+        .timeout(0)
+        .all({
+          a() {
+            return 1
+          },
+        })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect(error).toBeInstanceOf(CancellationError)
+    }
+  })
+
+  it("does not pass the graph deadline through the catch option", async () => {
+    let catchCalls = 0
+
+    try {
+      await try$.timeout(10).all(
+        {
+          async a() {
+            await sleep(40)
+            throw new Error("boom")
+          },
+        },
+        {
+          catch: () => {
+            catchCalls += 1
+            return "mapped" as const
+          },
+        }
+      )
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect(error).toBeInstanceOf(TimeoutError)
+    }
+
+    expect(catchCalls).toBe(0)
   })
 })

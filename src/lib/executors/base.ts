@@ -1,6 +1,6 @@
 import type { BuilderConfig, WrapCtx } from "../builder"
 import type { TryCtx } from "./shared"
-import { defineDisposeAlias, InternalDisposableStack } from "../../shims/disposer"
+import { defineDisposeAlias } from "../../shims/disposer"
 import {
   CancellationError,
   ControlError,
@@ -79,22 +79,12 @@ export abstract class BaseExecution<TResult = unknown> implements Disposable {
   protected abstract executeCore(): TResult
 
   dispose(): void {
-    if (!this.#timeoutController && !this.#signalController) {
-      return
-    }
-
-    const disposer = new InternalDisposableStack()
-
+    // Tear down in LIFO order (the signal controller is created after the timeout
+    // controller); the try/finally guarantees a throw from one cannot skip the other.
     try {
-      if (this.#timeoutController) {
-        disposer.use(this.#timeoutController)
-      }
-
-      if (this.#signalController) {
-        disposer.use(this.#signalController)
-      }
+      this.#signalController?.dispose()
     } finally {
-      disposer.dispose()
+      this.#timeoutController?.dispose()
     }
   }
 
@@ -130,6 +120,10 @@ export abstract class BaseExecution<TResult = unknown> implements Disposable {
   }
 
   protected static createWrapContext(ctx: TryCtx): WrapCtx {
+    // `ctx.retry.attempt` advances across retries, so the retry view must stay live
+    // while still reporting read-only data descriptors; a Proxy is the only way to
+    // do both. `ctx.signal` is set once at construction, so a frozen plain object
+    // suffices for the rest.
     const retry = new Proxy(ctx.retry, {
       defineProperty: () => false,
       deleteProperty: () => false,
@@ -148,41 +142,7 @@ export abstract class BaseExecution<TResult = unknown> implements Disposable {
       set: () => false,
     })
 
-    const handler: ProxyHandler<TryCtx> = {
-      defineProperty: () => false,
-      deleteProperty: () => false,
-      get(target, property, receiver) {
-        if (property === "retry") {
-          return retry
-        }
-
-        const value: unknown = Reflect.get(target, property, receiver)
-        return value
-      },
-      getOwnPropertyDescriptor(target, property) {
-        const descriptor = Reflect.getOwnPropertyDescriptor(target, property)
-
-        if (!descriptor) {
-          return descriptor
-        }
-
-        if (property === "retry") {
-          return {
-            ...descriptor,
-            value: retry,
-            writable: false,
-          }
-        }
-
-        return {
-          ...descriptor,
-          writable: false,
-        }
-      },
-      set: () => false,
-    }
-
-    return new Proxy(ctx, handler)
+    return Object.freeze({ retry, signal: ctx.signal })
   }
 
   protected checkDidCancel(cause?: unknown): CancellationError | undefined {
@@ -196,12 +156,28 @@ export abstract class BaseExecution<TResult = unknown> implements Disposable {
     return this.#signalController ? this.#signalController.race(promise, cause) : promise
   }
 
+  /**
+   * Observes current control state: cancellation is consulted before timeout, making this the
+   * single statement of the cancellation-beats-timeout ordering. `cause` threads the underlying
+   * error into whichever control error is created.
+   */
   protected checkDidControlFail(cause?: unknown): CancellationError | TimeoutError | undefined {
     return this.checkDidCancel(cause) ?? this.#timeoutController?.checkDidTimeout(cause)
   }
 
-  protected resolveSyncSuccess<T>(value: T): T | CancellationError | TimeoutError {
-    return this.checkDidControlFail() ?? value
+  /**
+   * Single owner of the outcome-priority rule: cancellation beats timeout beats the candidate
+   * outcome. Callers invoke this at every boundary where control state may have changed since the
+   * candidate was produced; `cause` threads the underlying error into whichever control error is
+   * reported. A `TimeoutError` candidate already won its race, so it is preserved as-is unless a
+   * near-simultaneous cancellation displaces it.
+   */
+  protected resolveOutcome<V>(candidate: V, cause?: unknown): V | CancellationError | TimeoutError {
+    if (candidate instanceof TimeoutError) {
+      return this.checkDidCancel(cause) ?? candidate
+    }
+
+    return this.checkDidControlFail(cause) ?? candidate
   }
 
   protected race<V>(
@@ -216,17 +192,12 @@ export abstract class BaseExecution<TResult = unknown> implements Disposable {
 
     // Nest cancellation inside the timeout race so cancellation takes priority
     // when both fire: if cancellation wins, the inner promise already resolves
-    // with a CancellationError; if timeout wins, re-check cancellation here so a
-    // near-simultaneous cancel is still reported over the timeout.
+    // with a CancellationError; if timeout wins, the outcome is still provisional,
+    // so route it through resolveOutcome for a near-simultaneous cancel to displace
+    // it. A settled value is final: the race already arbitrated it.
     return Promise.resolve(
       timeoutController.race(this.raceWithCancellation(promise, cause), cause)
-    ).then((raced) => {
-      if (raced instanceof TimeoutError) {
-        return this.checkDidCancel(cause) ?? raced
-      }
-
-      return raced
-    })
+    ).then((raced) => (raced instanceof TimeoutError ? this.resolveOutcome(raced, cause) : raced))
   }
 
   protected async waitForRetryDelay(
@@ -299,18 +270,13 @@ export abstract class BaseExecution<TResult = unknown> implements Disposable {
    */
   protected resolveUnmappedFailure(error: unknown): RunnerError {
     // Even without a catch handler, cancellation/timeout may have won since
-    // the original failure was first observed.
-    const finalizeControlError = this.checkDidControlFail(error)
+    // the original failure was first observed, so the wrapped error is only a
+    // candidate outcome.
+    const wrapped = this.config.retry
+      ? new RetryExhaustedError(undefined, { cause: error })
+      : new UnhandledException(undefined, { cause: error })
 
-    if (finalizeControlError) {
-      return finalizeControlError
-    }
-
-    if (this.config.retry) {
-      return new RetryExhaustedError(undefined, { cause: error })
-    }
-
-    return new UnhandledException(undefined, { cause: error })
+    return this.resolveOutcome(wrapped, error)
   }
 
   get #wrapCtx(): WrapCtx {

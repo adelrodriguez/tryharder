@@ -534,4 +534,18 @@ describe("flow", () => {
     expect(result).toBe("done")
     expect(signalAbortedInB).toBe(true)
   })
+
+  it("rejects with TimeoutError when the graph deadline fires before $exit", async () => {
+    try {
+      await try$.timeout(10).flow({
+        async a() {
+          await sleep(40)
+          return this.$exit("late" as const)
+        },
+      })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect(error).toBeInstanceOf(TimeoutError)
+    }
+  })
 })
