@@ -773,6 +773,27 @@ describe("timeout and cancellation behavior", () => {
     expect(result).toBeInstanceOf(CancellationError)
   })
 
+  it("reports the configured deadline over a TimeoutError returned as a value", async () => {
+    const userTimeout = new TimeoutError("returned as a value")
+
+    const result = await try$.timeout(5).run(() => {
+      const startedAt = Date.now()
+      let spins = 0
+
+      // Busy-wait past the deadline: sync work cannot observe the timer, so the
+      // wall-clock check at the result boundary must report the policy timeout.
+      while (Date.now() - startedAt < 10) {
+        spins += 1
+      }
+
+      void spins
+      return userTimeout
+    })
+
+    expect(result).toBeInstanceOf(TimeoutError)
+    expect(result).not.toBe(userTimeout)
+  })
+
   it("returns CancellationError when aborted during retry backoff", async () => {
     const controller = new AbortController()
     let attempts = 0

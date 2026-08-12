@@ -112,11 +112,11 @@ export abstract class BaseExecution<TResult = unknown> implements Disposable {
     signals: readonly AbortSignal[] | undefined,
     timeoutSignal: AbortSignal | undefined
   ): SignalController | undefined {
-    const composedSignals = [...(signals ?? []), timeoutSignal].filter(
-      (value): value is AbortSignal => value !== undefined
-    )
+    const userSignals = signals ?? []
 
-    return composedSignals.length > 0 ? new SignalController(composedSignals) : undefined
+    return userSignals.length > 0 || timeoutSignal !== undefined
+      ? new SignalController(userSignals, timeoutSignal)
+      : undefined
   }
 
   protected static createWrapContext(ctx: TryCtx): WrapCtx {
@@ -169,14 +169,10 @@ export abstract class BaseExecution<TResult = unknown> implements Disposable {
    * Single owner of the outcome-priority rule: cancellation beats timeout beats the candidate
    * outcome. Callers invoke this at every boundary where control state may have changed since the
    * candidate was produced; `cause` threads the underlying error into whichever control error is
-   * reported. A `TimeoutError` candidate already won its race, so it is preserved as-is unless a
-   * near-simultaneous cancellation displaces it.
+   * reported. A race-produced `TimeoutError` candidate survives the timeout check unchanged — the
+   * chain returns the controller's stored reason, which is that same instance.
    */
   protected resolveOutcome<V>(candidate: V, cause?: unknown): V | CancellationError | TimeoutError {
-    if (candidate instanceof TimeoutError) {
-      return this.checkDidCancel(cause) ?? candidate
-    }
-
     return this.checkDidControlFail(cause) ?? candidate
   }
 
