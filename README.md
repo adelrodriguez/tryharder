@@ -170,6 +170,10 @@ yarn add tryharder
 pnpm add tryharder
 ```
 
+### Requirements
+
+Node.js 22 or later (declared via `engines`), or any runtime with `AbortSignal.any` and `Promise.withResolvers` — recent Bun, Deno, and evergreen browsers qualify.
+
 ## Execution Model
 
 `tryharder` has three layers: terminal execution APIs, policy builders, and orchestration APIs.
@@ -298,6 +302,8 @@ const result = await try$
 Use `run(...)` and `runSync(...)` for a single unit of work. Use `all(...)` or `allSettled(...)` when you want a concurrent task map with named dependencies. Use `flow(...)` when you need a stepwise workflow with explicit early return.
 
 Orchestration supports `signal(...)` and `timeout(...)` policies. `timeout(ms)` is a whole-graph deadline: when it fires, every task's `$signal` aborts and the orchestration rejects with `TimeoutError` (cancellation wins if both fire). Policy failures are thrown, never mapped through an orchestration-level `catch`. `retry(...)` is not supported for orchestration — apply it to leaf `run(...)` calls inside tasks instead.
+
+The deadline is cooperative, like all cancellation in JavaScript: aborting `$signal` does not stop a task by itself. `all(...)` and `flow(...)` wait for every in-flight task to settle before rejecting — the structured guarantee that no task code is still running once the orchestration returns, and that a caller may safely retry after a `TimeoutError` — so a task that ignores `$signal` extends the time until the `TimeoutError` surfaces. For the deadline to bound wall-clock time in practice, tasks must observe `$signal`: check it between steps, or pass it to signal-aware I/O such as `fetch`.
 
 `all(...)` runs an object-shaped task graph and resolves to one object of successful results. Named tasks are easier to scan than positional arrays, and tasks can await earlier task results through `this.$result`. Execution is fail-fast: once one task fails, sibling task signals are aborted and the orchestration rejects unless you provide an orchestration-level `catch`.
 

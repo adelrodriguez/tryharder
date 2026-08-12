@@ -545,7 +545,30 @@ describe("all", () => {
     expect(abortReason).toBeInstanceOf(TimeoutError)
   })
 
-  it("prefers cancellation over the graph deadline when both fire", async () => {
+  it("prefers cancellation over the graph deadline when both fire in flight", async () => {
+    const controller = new AbortController()
+
+    setTimeout(() => {
+      controller.abort(new Error("stop"))
+    }, 10)
+
+    try {
+      await try$
+        .signal(controller.signal)
+        .timeout(30)
+        .all({
+          async a() {
+            await sleep(60)
+            return 1
+          },
+        })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect(error).toBeInstanceOf(CancellationError)
+    }
+  })
+
+  it("prefers cancellation over the graph deadline when both are tripped before execution", async () => {
     const controller = new AbortController()
 
     controller.abort(new Error("stop"))
