@@ -17,8 +17,8 @@ If any of these files don't exist, **proceed silently**. Don't flag their absenc
 /
 ├── CONTEXT.md
 ├── docs/adr/
-│   ├── 0001-example-decision.md
-│   └── 0002-another-decision.md
+│   ├── 0001-wet-first-implementation.md
+│   └── 0002-settle-before-reject-orchestration.md
 └── src/
 ```
 
@@ -32,4 +32,4 @@ If the concept you need isn't in the glossary yet, that's a signal — either yo
 
 If your output contradicts an existing ADR, surface it explicitly rather than silently overriding:
 
-> _Contradicts ADR-0007 (event-sourced orders) — but worth reopening because…_
+> _Contradicts ADR-0002 (settle-before-reject orchestration) — but worth reopening because…_

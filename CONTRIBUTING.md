@@ -115,6 +115,7 @@ Allows flow tasks to observe external cancellation consistently.
 
 ### Code Style
 
+- Use the vocabulary defined in [CONTEXT.md](CONTEXT.md) when naming things in code, tests, issues, and docs; design decisions are recorded in [docs/adr/](docs/adr/) — read the ones touching the area you're changing
 - Follow the existing TypeScript style in the repository
 - Prefer type inference when it already produces the correct type
 - Avoid explicit return types unless required for tooling or public API contracts
