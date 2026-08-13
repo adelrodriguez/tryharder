@@ -131,8 +131,8 @@ export function executeRunSync<T, E, Ctx extends BaseTryCtx>(
   config: BuilderConfig,
   input: SyncRunInput<T, E, Ctx>
 ): T | E | RunnerError {
-  // Builder typing blocks async-only retry policies, but direct executor usage and
-  // unsafe casts still need a runtime guard here.
+  // Builder typing blocks async-only retry policies, but calling executeRunSync
+  // directly and unsafe casts still need a runtime guard here.
   const isSyncSafeRetryPolicy =
     config.retry === undefined ||
     (config.retry.backoff === "constant" &&

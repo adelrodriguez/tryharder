@@ -103,7 +103,7 @@ export abstract class OrchestrationExecution<TResult> extends BaseExecution<Prom
   }
 
   protected override async executeCore(): Promise<TResult> {
-    // Orchestration executors still share outer wraps/cancellation checks even
+    // Orchestration executions still share outer wraps/cancellation checks even
     // though their task execution strategies differ.
     const controlBeforeExecution = this.checkDidControlFail()
 

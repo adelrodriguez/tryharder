@@ -4,5 +4,5 @@ The library is pre-v1 and its execution semantics are still being reshaped, so w
 
 ## Consequences
 
-- Simple duplication across executors or modifiers is not a defect; do not "fix" it while the duplicated behavior is still evolving.
+- Simple duplication across the execution, orchestration, and policy modules is not a defect; do not "fix" it while the duplicated behavior is still evolving.
 - When behavior has stabilized across a few releases, deduplication PRs are welcome.
