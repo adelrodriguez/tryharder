@@ -421,6 +421,24 @@ describe("allSettled", () => {
     expect(taskSettled).toBe(true)
   })
 
+  it("bounds the deadline with $race for signal-unaware work", async () => {
+    const startedAt = Date.now()
+
+    try {
+      await try$.timeout(10).allSettled({
+        async a() {
+          await this.$race(sleep(200))
+          return "late" as const
+        },
+      })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect(error).toBeInstanceOf(TimeoutError)
+    }
+
+    expect(Date.now() - startedAt).toBeLessThan(150)
+  })
+
   it("waits for in-flight tasks to settle before rejecting on cancellation", async () => {
     const controller = new AbortController()
     let taskSettled = false
