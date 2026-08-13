@@ -530,6 +530,8 @@ if (checks.api.status === "rejected") {
 
 Use `flow(...)` for stepwise, business-process workflows. Tasks still read earlier results through `this.$result`, but completion is explicit: at least one path must call `this.$exit(...)`. The exit is a visible part of the workflow contract, not an implicit convention.
 
+Tasks start together, like in `all(...)`. `$exit` does not stop tasks that already started: the first exit becomes the flow result and aborts sibling `$signal`s. Observe `this.$signal` in later tasks, or make them await an earlier task through `this.$result` before they start side effects.
+
 ```ts
 const cache = new Map<string, string>()
 
@@ -538,14 +540,14 @@ const avatar = await try$.flow({
     const hit = cache.get("user_42")
 
     if (hit !== undefined) {
-      return this.$exit(hit) // Cache hit: skip the remaining steps
+      return this.$exit(hit) // Cache hit: this value becomes the flow result
     }
 
     return null
   },
   async fetched() {
     const response = await fetch("https://api.example.com/users/42", {
-      signal: this.$signal,
+      signal: this.$signal, // Aborted when another task exits first
     })
 
     const user = (await response.json()) as { avatarUrl: string }
