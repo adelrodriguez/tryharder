@@ -684,6 +684,37 @@ describe("all", () => {
     expect(racedRejection).toBe(boom)
   })
 
+  it("normalizes an undefined sibling failure observed through $race", async () => {
+    let racedRejection: unknown
+
+    try {
+      await try$.all({
+        a() {
+          // oxlint-disable-next-line no-throw-literal, typescript/only-throw-error -- Intentional coverage for undefined task failures.
+          throw undefined
+        },
+        async b() {
+          try {
+            await this.$race(
+              new Promise(() => {
+                // Never settles: $race must reject via the aborted task signal.
+              })
+            )
+          } catch (error) {
+            racedRejection = error
+            throw error
+          }
+        },
+      })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect(error).toBeInstanceOf(UnhandledException)
+      expect((error as UnhandledException).cause).toBeUndefined()
+    }
+
+    expect(racedRejection).toBeInstanceOf(UnhandledException)
+  })
+
   it("does not pass the graph deadline through the catch option", async () => {
     let catchCalls = 0
 

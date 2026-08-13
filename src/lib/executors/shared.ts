@@ -331,12 +331,18 @@ export abstract class TaskGraphExecutionBase<
       this.taskSettlement(taskName).resolve(result)
       this.onTaskResult?.(taskName, result)
     } catch (error) {
+      const mappedError = this.mapStoredError(error)
+
       this.setFirstRejection(error)
-      this.taskSettlement(taskName).reject(this.mapStoredError(error))
+      this.taskSettlement(taskName).reject(mappedError)
       this.onTaskError?.(taskName, error)
 
       if (this.shouldAbortOnTaskError(error)) {
-        this.abortInternal(error)
+        // Abort with the mapped error so the signal reason siblings observe
+        // (directly or via $race) is never undefined — abort(undefined) would
+        // make the platform substitute a default AbortError that could then
+        // replace an unrecordable undefined firstRejection.
+        this.abortInternal(mappedError)
       }
 
       if (this.shouldRethrowTaskError(error)) {
