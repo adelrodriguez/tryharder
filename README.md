@@ -11,56 +11,59 @@
   </p>
 </div>
 
-`tryharder` is a small execution layer for TypeScript. It keeps plain functions, object-shaped task definitions, and familiar control flow, but makes failure and execution policy explicit in the API surface.
+`tryharder` is a small execution layer for TypeScript. You write normal functions. `tryharder` runs them, applies your retry, timeout, and cancellation policy, and returns errors as typed values instead of thrown exceptions.
 
-Use it when `try/catch` starts absorbing too many concerns at once: retries, deadlines, cancellation, failure mapping, and orchestration. Instead of letting those concerns stay hidden in ambient `throw` paths, `tryharder` returns them as typed values and composes them around a single operation or a task graph.
-
-It is deliberately narrower than a full effect runtime. You keep writing normal functions, but the return type tells you which values, mapped failures, and policy-level failures can come back from execution.
+The return type tells you everything that can come back: your value, the failures you map, and the policy failures that your chain can introduce.
 
 ```ts
 import * as try$ from "tryharder"
 
-class RequestFailedError extends Error {}
+class OrderLookupError extends Error {}
 
 const result = await try$
-  .retry(3) // Retry up to 3 times total, including the first attempt
-  .timeout(5_000) // Enforce one total deadline across attempts
+  .retry(3) // Up to 3 attempts total, including the first
+  .timeout(5_000) // One total deadline across all attempts
   .run({
-    try: async () => {
-      const order = await db.orders.findById("ord_123")
+    try: async ({ signal }) => {
+      const response = await fetch("https://api.example.com/orders/ord_123", {
+        signal, // Aborts when the deadline expires
+      })
 
-      if (order === null) {
-        throw new Error("order not found")
+      if (!response.ok) {
+        throw new Error(`unexpected status ${response.status}`)
       }
 
+      const order = (await response.json()) as { status: "pending" | "shipped" }
       return order.status
     },
-    catch: () => new RequestFailedError("request failed"),
+    catch: () => new OrderLookupError("could not load the order"),
   })
 
-// result is OrderStatus | RequestFailedError | TimeoutError
+// result is "pending" | "shipped" | OrderLookupError | TimeoutError
 ```
 
 <details>
-<summary>Table of Contents</summary>
+<summary>Table of contents</summary>
 
 - [Why not plain try/catch?](#why-not-plain-trycatch)
 - [Features](#features)
 - [Installation](#installation)
-- [Execution Model](#execution-model)
-- [Type Semantics](#type-semantics)
-- [Quick Start](#quick-start)
-- [Orchestration Semantics](#orchestration-semantics)
-- [Usage](#usage)
+- [Quick start](#quick-start)
+- [How tryharder works](#how-tryharder-works)
+- [Errors as values](#errors-as-values)
+- [Run one operation](#run-one-operation)
   - [run and runSync](#run-and-runsync)
-  - [retry, timeout, signal](#retry-timeout-signal)
+  - [retry, timeout, and signal](#retry-timeout-and-signal)
   - [wrap](#wrap)
-  - [all and allSettled](#all-and-allsettled)
+- [Run many tasks](#run-many-tasks)
+  - [all](#all)
+  - [allSettled](#allsettled)
   - [flow and $exit](#flow-and-exit)
+- [More tools](#more-tools)
   - [gen](#gen)
   - [disposer](#disposer)
-- [API Reference](#api-reference)
-- [Common Recipes](#common-recipes)
+- [API reference](#api-reference)
+- [Recipes](#recipes)
 - [When not to use tryharder](#when-not-to-use-tryharder)
 - [Contributing](#contributing)
 - [Acknowledgments](#acknowledgments)
@@ -70,7 +73,9 @@ const result = await try$
 
 ## Why not plain try/catch?
 
-Plain `try/catch` works well for isolated code, but it scales poorly when one block starts carrying retry loops, cancellation wiring, timeout tracking, and domain error mapping at the same time.
+Plain `try/catch` works well for small, isolated code. It scales poorly when one block must retry, track a deadline, handle cancellation, and map errors at the same time.
+
+Here is one operation with all of that policy written by hand:
 
 ```ts
 class UserUnavailableError extends Error {}
@@ -83,15 +88,15 @@ async function loadUser(signal: AbortSignal) {
     const combined = AbortSignal.any([signal, timeout])
 
     try {
-      const user = await db.users.findById("user_123", {
+      const response = await fetch("https://api.example.com/users/42", {
         signal: combined,
       })
 
-      if (user === null) {
-        throw new Error("user not found")
+      if (!response.ok) {
+        throw new Error(`unexpected status ${response.status}`)
       }
 
-      return user
+      return (await response.json()) as { id: number; name: string }
     } catch (error) {
       lastError = error
 
@@ -107,7 +112,7 @@ async function loadUser(signal: AbortSignal) {
 }
 ```
 
-With `tryharder`, the execution policy is declared outside the work and the failure shape becomes part of the returned type:
+With `tryharder`, you declare the policy outside the work. The failure shape becomes part of the return type:
 
 ```ts
 class UserUnavailableError extends Error {}
@@ -120,39 +125,44 @@ const result = await try$
   .signal(controller.signal)
   .run({
     try: async ({ signal }) => {
-      const user = await db.users.findById("user_123", { signal })
+      const response = await fetch("https://api.example.com/users/42", {
+        signal,
+      })
 
-      if (user === null) {
-        throw new Error("user not found")
+      if (!response.ok) {
+        throw new Error(`unexpected status ${response.status}`)
       }
 
-      return user
+      return (await response.json()) as { id: number; name: string }
     },
     catch: () => new UserUnavailableError("user service unavailable"),
   })
 
 // result is
-// User | UserUnavailableError | TimeoutError | CancellationError
+// { id: number; name: string }
+//   | UserUnavailableError
+//   | TimeoutError
+//   | CancellationError
 ```
 
-That is the core shift:
+The rules are simple:
 
-- Plain `try/catch` hides control flow and failure policy inside implementation details.
-- `tryharder` exposes execution policy in the builder chain and failure shape in the return type.
 - `run(fn)` returns `T | UnhandledException`.
-- `run({ try, catch })` returns `T | C`.
-- Adding `timeout(...)` and `signal(...)` widens the union with `TimeoutError` and `CancellationError`.
-- Adding `retry(...)` changes how persistent failure is reported: with `catch`, the last attempt's error is mapped by `catch`; without `catch`, it surfaces as `RetryExhaustedError` (last error as `cause`) instead of `UnhandledException`.
+- `run({ try, catch })` returns `T | C`, where `C` is what your `catch` returns.
+- `timeout(...)` adds `TimeoutError` to the result type. `signal(...)` adds `CancellationError`.
+- `retry(...)` changes how persistent failure is reported. With `catch`, the last attempt's error goes through `catch`. Without `catch`, you get `RetryExhaustedError` with the last error as `cause`.
+
+You can read the failure behavior of a function from its return type. You do not have to read its body.
 
 ## Features
 
-- **Explicit failure unions** - Model thrown failures as values in the returned type instead of an invisible side channel.
-- **Execution policies** - Add retries, total deadlines, and cancellation around a unit of work without rewriting the work itself.
-- **Sync and async parity** - Use the same mental model for `runSync(...)` and `run(...)`.
-- **Named task orchestration** - Express concurrent and ordered workflows with object-shaped task graphs instead of positional arrays.
-- **Observable execution hooks** - Add top-level instrumentation with `wrap(...)` without changing task behavior.
-- **Resource cleanup** - Register teardown that survives async boundaries with `disposer()` and task disposers.
-- **No runtime dependencies** - The published package ships without runtime dependencies.
+- **Errors as values** — Thrown errors come back as part of the return type, not through a hidden side channel.
+- **Execution policies** — Add retries, one total deadline, and cancellation without changing the work itself.
+- **Sync and async parity** — `runSync(...)` uses the same mental model as `run(...)`.
+- **Named task orchestration** — Run concurrent and ordered workflows as named task objects, not positional arrays.
+- **Instrumentation hooks** — Observe execution with `wrap(...)` for logs, traces, and metrics.
+- **Resource cleanup** — Register teardown that survives async boundaries with `disposer()` and task disposers.
+- **No runtime dependencies** — The published package ships without runtime dependencies.
 
 ## Installation
 
@@ -172,358 +182,437 @@ pnpm add tryharder
 
 ### Requirements
 
-Node.js 22 or later (declared via `engines`), or any runtime with `AbortSignal.any` and `Promise.withResolvers` — recent Bun, Deno, and evergreen browsers qualify.
+`tryharder` needs Node.js 22 or later (declared via `engines`), or any runtime with `AbortSignal.any` and `Promise.withResolvers`. Recent Bun, Deno, and evergreen browsers qualify.
 
-## Execution Model
+## Quick start
 
-`tryharder` has three layers: terminal execution APIs, policy builders, and orchestration APIs.
-
-Terminal execution APIs are `run(...)` and `runSync(...)`. They are the points where work is actually executed and a result union is produced. Function form is the minimal shape and returns `T | UnhandledException` by default, or `T | RetryExhaustedError` when retry is configured. Object form adds a `catch` mapper and returns `T | C`.
-
-Policy builders decorate terminal execution. `retry(...)`, `timeout(...)`, and `signal(...)` do not run work by themselves; they configure the next terminal call and widen the resulting union with the policy-level failures they can introduce. `retry(limit)` counts the first attempt. `timeout(ms)` applies one total deadline across attempts, delays, and catch handling — or across a whole task graph when used with orchestration. `signal(abortSignal)` forwards external cancellation into execution.
-
-Orchestration APIs scale the same model from one operation to a task graph. `all(...)` runs a fail-fast named task map. `allSettled(...)` preserves every settled task outcome. `flow(...)` runs an ordered workflow that must explicitly terminate through `this.$exit(...)`.
-
-`wrap(...)` sits above those execution APIs as observational middleware. It can inspect readonly execution context and surround terminal calls, but it is not available after `retry(...)`, `timeout(...)`, or execution-scoped `signal(...)` chains. `gen(...)` offers a more linear way to compose returned unions. `disposer()` provides cleanup registration for work that spans async boundaries.
-
-| Term                  | Meaning                                                                        |
-| --------------------- | ------------------------------------------------------------------------------ |
-| `run`                 | Async terminal execution that returns a value, mapped failure, or policy error |
-| `runSync`             | Sync terminal execution for synchronous work only                              |
-| `retry(limit)`        | Retry policy; `limit` is a positive integer counting the first attempt         |
-| `timeout(ms)`         | Total deadline: across attempts for `run(...)`, whole-graph for orchestration  |
-| `signal(abortSignal)` | External cancellation for `run(...)` and root-level orchestration              |
-| `wrap(fn)`            | Top-level observational middleware around terminal APIs                        |
-| `all(tasks)`          | Fail-fast parallel named task graph                                            |
-| `allSettled(tasks)`   | Settled parallel named task graph                                              |
-| `flow(tasks)`         | Ordered task workflow with explicit early exit                                 |
-| `$exit(value)`        | Stop a `flow(...)` early and return `value`                                    |
-
-Not sure if `tryharder` is a good fit for your project? See [When not to use tryharder](#when-not-to-use-tryharder).
-
-## Type Semantics
-
-`tryharder` treats failure as part of the return type. The important distinction is not just that failures are represented as values, but that builder chains preserve which layer introduced them.
-
-- Domain failures are the values you map yourself with object-form `run({ try, catch })`.
-- Runtime policy failures are introduced by `retry(...)`, `timeout(...)`, and `signal(...)`.
-- Programmer misuse is represented by `Panic`, which is thrown for invalid API usage and invariant violations rather than returned as a domain result.
-
-```ts
-import * as try$ from "tryharder"
-
-class ValidationError extends Error {}
-
-const result = await try$
-  .retry(2)
-  .timeout(250)
-  .run({
-    try: async () => {
-      throw new Error("boom")
-    },
-    catch: () => new ValidationError("invalid input"),
-  })
-
-// result is
-// ValidationError | TimeoutError
-```
-
-That inferred union is the contract. A caller can see whether a function returns a domain error and whether a deadline may fire, without reading the implementation body.
-
-The `catch` contract is strict: `catch` maps errors that originated inside `try` — thrown directly, or carried out of the retry loop as the last attempt's error once the retry policy gives up. Policy outcomes (`TimeoutError`, `CancellationError`) never pass through `catch`; they surface typed in the union so you can handle them at the call site:
-
-```ts
-if (result instanceof TimeoutError) {
-  // deadline expired; map or handle it here
-}
-```
-
-Without `catch`, unmapped failures are wrapped: `RetryExhaustedError` when a retry policy gave up (for any reason — limit exhausted or `shouldRetry` declining), `UnhandledException` otherwise. The original error is always available as `cause`.
-
-`Panic` is intentionally separate from that model. It signals programmer errors such as invalid builder usage or invalid task graphs, not expected business-domain failures.
-
-One implementation detail worth knowing: `retry(...)` switches the builder onto an execution-only surface. At both the type level and runtime, orchestration methods such as `all(...)`, `allSettled(...)`, and `flow(...)` are not available after `retry(...)` — retrying a whole task graph is not meaningful. `timeout(...)` and root-level `signal(...)` keep orchestration available; `wrap(...)` must come before any policy.
-
-## Quick Start
-
-Use function form when thrown failures should be preserved as `UnhandledException` values:
+Run a function. Thrown errors come back as `UnhandledException` values:
 
 ```ts
 import * as try$ from "tryharder"
 
 const result = await try$.run(async () => {
-  return "ok" as const
+  const response = await fetch("https://api.example.com/health")
+  return response.status
 })
 
-// "ok" | UnhandledException
+// result is number | UnhandledException
 ```
 
-Use object form when you want to map failures into domain results:
+Use the object form to map thrown errors to your own error types:
 
 ```ts
 import * as try$ from "tryharder"
 
-class ValidationError extends Error {}
+class InvalidConfigError extends Error {}
 
-const result = await try$.run({
-  try: async () => {
-    throw new Error("boom")
-  },
-  catch: () => new ValidationError("invalid input"),
+const config = try$.runSync({
+  try: () => JSON.parse(process.env.APP_CONFIG ?? "") as { port: number },
+  catch: () => new InvalidConfigError("APP_CONFIG is not valid JSON"),
 })
 
-// ValidationError
+// config is { port: number } | InvalidConfigError
 ```
 
-In practice, you usually declare policy first and execute last:
+In real code, you usually declare the policy first, run last, and handle the union where you receive it:
 
 ```ts
-class UpstreamUnavailableError extends Error {}
+import * as try$ from "tryharder"
+import { isTimeoutError } from "tryharder/errors"
 
-const result = await try$
-  .retry({ backoff: "constant", delayMs: 100, limit: 3 })
-  .timeout(1_500)
+class RateUnavailableError extends Error {}
+
+const rate = await try$
+  .retry({ backoff: "exponential", delayMs: 200, maxDelayMs: 2_000, limit: 4 })
+  .timeout(10_000)
   .run({
-    try: async () => {
-      const account = await db.accounts.findById("acct_123")
+    try: async ({ signal }) => {
+      const response = await fetch("https://api.example.com/rates/EUR", {
+        signal,
+      })
 
-      if (account === null) {
-        throw new Error("account missing")
+      if (!response.ok) {
+        throw new Error(`unexpected status ${response.status}`)
       }
 
-      return account
+      const data = (await response.json()) as { usd: number }
+      return data.usd
     },
-    catch: () => new UpstreamUnavailableError("account store unavailable"),
+    catch: () => new RateUnavailableError("exchange rate service unavailable"),
   })
+
+if (isTimeoutError(rate)) {
+  // The 10 second deadline expired across all attempts.
+}
+
+if (rate instanceof RateUnavailableError) {
+  // Every attempt failed. Fall back to the cached rate.
+}
 ```
 
-## Orchestration Semantics
+## How tryharder works
 
-Use `run(...)` and `runSync(...)` for a single unit of work. Use `all(...)` or `allSettled(...)` when you want a concurrent task map with named dependencies. Use `flow(...)` when you need a stepwise workflow with explicit early return.
+`tryharder` has three layers:
 
-Orchestration supports `signal(...)` and `timeout(...)` policies. `timeout(ms)` is a whole-graph deadline: when it fires, every task's `$signal` aborts and the orchestration rejects with `TimeoutError` (cancellation wins if both fire). Policy failures are thrown, never mapped through an orchestration-level `catch`. `retry(...)` is not supported for orchestration — apply it to leaf `run(...)` calls inside tasks instead.
+1. **Terminal APIs** run the work. `run(...)` and `runSync(...)` execute a function and produce the result union.
+2. **Policy builders** configure the next terminal call. `retry(...)`, `timeout(...)`, and `signal(...)` do not run work by themselves. `timeout(...)` and `signal(...)` widen the result union with their policy failures. `retry(...)` changes the unmapped failure type only when you do not supply `catch`: persistent failure surfaces as `RetryExhaustedError` instead of `UnhandledException`.
+3. **Orchestration APIs** scale the same model to a group of tasks. `all(...)` runs a fail-fast task map. `allSettled(...)` keeps every task outcome. `flow(...)` runs an ordered workflow that ends through an explicit `this.$exit(...)`.
 
-The deadline is cooperative, like all cancellation in JavaScript: aborting `$signal` does not stop a task by itself. All three orchestration APIs wait for every in-flight task to settle before rejecting — the structured guarantee that no task code is still running once the orchestration returns, and that a caller may safely retry after a `TimeoutError` — so a task that ignores `$signal` extends the time until the `TimeoutError` surfaces. The same holds for `signal(...)` cancellation: the orchestration rejects with `CancellationError` only after every in-flight task has settled. For the deadline to bound wall-clock time in practice, tasks must observe `$signal`: check it between steps, pass it to signal-aware I/O such as `fetch`, or wrap any await in `this.$race(...)`, which races a promise against `$signal` and rejects with the abort reason when the signal fires first.
+Three more tools sit around these layers. `wrap(...)` observes execution without changing it. `gen(...)` composes result unions in a linear style. `disposer()` registers cleanup that runs when the work is done.
 
-`all(...)` runs an object-shaped task graph and resolves to one object of successful results. Named tasks are easier to scan than positional arrays, and tasks can await earlier task results through `this.$result`. Execution is fail-fast: once one task fails, sibling task signals are aborted and the orchestration rejects unless you provide an orchestration-level `catch`.
+| Term                  | Meaning                                                                          |
+| --------------------- | -------------------------------------------------------------------------------- |
+| `run`                 | Async terminal execution that returns a value, mapped failure, or policy failure |
+| `runSync`             | Sync terminal execution for synchronous work only                                |
+| `retry(limit)`        | Retry policy; `limit` is a positive integer counting the first attempt           |
+| `timeout(ms)`         | Total deadline: across attempts for `run(...)`, whole-graph for orchestration    |
+| `signal(abortSignal)` | External cancellation for `run(...)` and root-level orchestration                |
+| `wrap(fn)`            | Top-level observational middleware around terminal APIs                          |
+| `all(tasks)`          | Fail-fast parallel named task graph                                              |
+| `allSettled(tasks)`   | Settled parallel named task graph                                                |
+| `flow(tasks)`         | Ordered task workflow with explicit early exit                                   |
+| `$exit(value)`        | Stop a `flow(...)` early and return `value`                                      |
+| `$race(promise)`      | Race a promise against the task's `$signal` inside orchestration                 |
+| `$disposer`           | Register task cleanup that runs when the orchestration settles                   |
+
+The chain has a fixed order. Keep these rules in mind:
+
+- Put `wrap(...)` first. It is not available after `retry(...)`, `timeout(...)`, or an execution-scoped `signal(...)`.
+- `retry(...)` removes the orchestration methods, at the type level and at runtime. A retry of a whole task graph is not meaningful. Apply `retry(...)` to `run(...)` calls inside tasks instead.
+- `timeout(...)` and a root-level `signal(...)` keep orchestration available.
+
+Not sure if `tryharder` is a good fit for your project? See [When not to use tryharder](#when-not-to-use-tryharder).
+
+## Errors as values
+
+`tryharder` divides failure into three kinds, and treats each one differently:
+
+- **Domain failures** are the values you map into your own types with `catch`. They are expected outcomes of your problem domain, such as `ValidationError`.
+- **Policy failures** come from the chain: `TimeoutError`, `CancellationError`, and `RetryExhaustedError`. They appear in the result union when you add the matching policy.
+- **Panics** signal programmer misuse, such as an invalid builder chain or an invalid task graph. `tryharder` throws `Panic`; a panic is never part of a result union.
 
 ```ts
-const result = await try$.all({
-  user() {
-    return { id: "1", name: "Ada" }
-  },
-  async profile() {
-    const user = await this.$result.user
-    return { userId: user.id, plan: "pro" as const }
-  },
-})
+import * as try$ from "tryharder"
+
+class MetricsRejectedError extends Error {}
+
+const outcome = await try$
+  .retry(2)
+  .timeout(250)
+  .run({
+    try: async ({ signal }) => {
+      const response = await fetch("https://metrics.example.com/events", {
+        method: "POST",
+        body: JSON.stringify({ name: "checkout_completed" }),
+        signal,
+      })
+
+      if (!response.ok) {
+        throw new Error(`unexpected status ${response.status}`)
+      }
+
+      return "delivered" as const
+    },
+    catch: () => new MetricsRejectedError("metrics endpoint rejected the event"),
+  })
+
+// outcome is
+// "delivered" | MetricsRejectedError | TimeoutError
 ```
 
-`allSettled(...)` uses the same task-graph shape, but preserves every task outcome as settled data. Use it when failure is expected input to the next decision rather than something that should short-circuit the whole graph.
+That inferred union is the contract. A caller can see whether a function returns a domain failure and whether a deadline can fire, without reading the implementation.
+
+The `catch` contract is strict. `catch` maps only errors that started inside `try`: errors thrown directly, or the last attempt's error after the retry policy gives up. Policy failures never pass through `catch`. They surface typed in the union, so you handle them at the call site with the exported type guards:
 
 ```ts
-const settled = await try$.allSettled({
-  fail() {
-    throw new Error("boom")
-  },
-  ok() {
-    return 1
-  },
-})
+import { isTimeoutError } from "tryharder/errors"
+
+if (isTimeoutError(outcome)) {
+  // The deadline expired. Map or handle it here.
+}
 ```
 
-`flow(...)` is for dependent business-process style workflows. Tasks still read through `this.$result`, but completion is explicit: at least one path must call `this.$exit(...)`. That makes early return a visible part of the workflow contract instead of an implicit convention.
+Without `catch`, unmapped failures are wrapped. You get `RetryExhaustedError` when a retry policy gave up for any reason — the limit ran out or `shouldRetry` declined — and `UnhandledException` otherwise. The original error is always available as `cause`.
 
-```ts
-const result = await try$.flow({
-  cache() {
-    const cached: string | null = "cached-value"
-
-    if (cached !== null) {
-      return this.$exit(cached)
-    }
-
-    return null
-  },
-  async api() {
-    return "api-value"
-  },
-  async transform() {
-    const value = await this.$result.api
-    return this.$exit(`${value}-transformed`)
-  },
-})
-```
-
-## Usage
+## Run one operation
 
 ### run and runSync
 
-Use `run(...)` and `runSync(...)` for leaf operations where you want execution and failure semantics attached directly to one function call.
+Use `run(...)` and `runSync(...)` for one operation, when you want the failure semantics attached directly to one function call.
 
-Use function form when `UnhandledException` is an acceptable failure value:
+Use the function form when `UnhandledException` is an acceptable failure value:
 
 ```ts
-const syncValue = try$.runSync(() => 42)
+const link = "https://example.com/docs"
 
-const asyncValue = await try$.run(async () => {
-  return 42
+const url = try$.runSync(() => new URL(link))
+// url is URL | UnhandledException
+
+const response = await try$.run(async () => {
+  return fetch("https://api.example.com/session", { method: "DELETE" })
 })
+// response is Response | UnhandledException
 ```
 
-Use object form when you want to map failures into domain results yourself:
+Use the object form to map failures into domain results yourself. The `catch` callback receives the original error, so you can map different failures to different domain types:
 
 ```ts
-class InvalidInputError extends Error {}
-class PermissionDeniedError extends Error {}
+class MalformedRequestError extends Error {}
+class UnsupportedVersionError extends Error {}
 
-const result = try$.runSync({
+const rawBody = '{"version": 1, "items": ["sku_1", "sku_2"]}'
+
+const body = try$.runSync({
   try: () => {
-    throw new SyntaxError("bad input")
+    const parsed = JSON.parse(rawBody) as { version: number; items: string[] }
+
+    if (parsed.version !== 2) {
+      throw new RangeError(`unsupported version ${parsed.version}`)
+    }
+
+    return parsed
   },
   catch: (error) => {
     if (error instanceof SyntaxError) {
-      return new InvalidInputError("invalid")
+      return new MalformedRequestError("body is not valid JSON")
     }
 
-    return new PermissionDeniedError("denied")
+    return new UnsupportedVersionError("only version 2 is supported")
   },
 })
+
+// body is
+// { version: number; items: string[] }
+//   | MalformedRequestError
+//   | UnsupportedVersionError
 ```
 
-### retry, timeout, signal
+### retry, timeout, and signal
 
-Use these when execution policy belongs around a single unit of work. They decorate `run(...)` or `runSync(...)`, widen the returned union, and keep policy separate from business logic.
+Use these builders to put execution policy around one unit of work. They decorate `run(...)` or `runSync(...)` and keep policy separate from business logic. `timeout(...)` and `signal(...)` widen the result union; `retry(...)` changes how persistent failure is reported.
+
+The full retry policy controls backoff, jitter, and which errors are worth another attempt. `shouldRetry` lets the policy give up early on errors that a retry cannot fix:
 
 ```ts
-const controller = new AbortController()
+class RejectedUploadError extends Error {}
 
-const result = await try$
-  .retry({ backoff: "constant", delayMs: 50, limit: 3 })
-  .timeout(1_000)
+const controller = new AbortController()
+const backupData = JSON.stringify({ createdAt: "2026-08-12" })
+
+const etag = await try$
+  .retry({
+    backoff: "exponential",
+    delayMs: 100,
+    maxDelayMs: 5_000,
+    jitter: true,
+    limit: 5,
+    // Retry server errors; give up immediately when the request is rejected
+    shouldRetry: (error) => !(error instanceof RejectedUploadError),
+  })
+  .timeout(30_000)
   .signal(controller.signal)
-  .run(async (ctx) => {
-    return `attempt-${ctx.retry.attempt}`
+  .run(async ({ signal, retry }) => {
+    console.log(`upload attempt ${retry.attempt} of ${retry.limit}`)
+
+    const response = await fetch("https://api.example.com/backups", {
+      method: "PUT",
+      body: backupData,
+      signal,
+    })
+
+    if (response.status >= 500) {
+      throw new Error(`server error ${response.status}`)
+    }
+
+    if (!response.ok) {
+      throw new RejectedUploadError(`rejected with status ${response.status}`)
+    }
+
+    return response.headers.get("etag")
   })
 ```
 
-`timeout(ms)` measures total execution time, not just a single attempt.
+The function receives a context object. `signal` combines your external signal with the deadline, so one `fetch` option covers both. `retry.attempt` and `retry.limit` describe the current attempt.
 
-`runSync(...)` stays available after the numeric retry shorthand (`retry(3)`), but not after the object form (`retry({ ... })`) or `timeout(...)` — those policies may need to wait or interrupt, which synchronous execution cannot do. This restriction is intentionally conservative: it is enforced at the type level even for object policies that would be sync-safe at runtime (constant backoff, no delay, no jitter). If you need retries with `runSync(...)`, use the numeric shorthand.
+`timeout(ms)` measures total execution time — attempts, delays, and `catch` handling together — not one attempt.
 
-Apply `signal(...)` on the root builder when you want cancellation to cover `all(...)`, `allSettled(...)`, or `flow(...)`. Cancellation is cooperative there too: the orchestration rejects with `CancellationError` only once every in-flight task has settled, so tasks must observe `$signal` for the abort to take effect promptly.
+`runSync(...)` stays available after the numeric retry shorthand (`retry(3)`). It is not available after the object form (`retry({ ... })`) or after `timeout(...)`, because those policies can wait or interrupt, and synchronous execution cannot. This restriction is intentionally conservative: the types also block object policies that would be sync-safe at runtime. If you need retries with `runSync(...)`, use the numeric shorthand.
 
 ### wrap
 
-Use `wrap(...)` for logging, tracing, metrics, or other instrumentation that should observe execution without mutating it.
+Use `wrap(...)` for logging, tracing, metrics, or other instrumentation that observes execution without changing it. A wrap surrounds the whole terminal call, retries included. The context is a readonly view, and `ctx.retry.attempt` is live: after `next()` settles, it shows the final attempt count.
 
 ```ts
-const result = await try$
-  .wrap((ctx, next) => {
-    console.log("starting attempt", ctx.retry.attempt)
-    return next()
+const results = await try$
+  .wrap(async (ctx, next) => {
+    const start = performance.now()
+
+    try {
+      return await next()
+    } finally {
+      const elapsed = Math.round(performance.now() - start)
+      console.log(`settled after ${ctx.retry.attempt} attempt(s) in ${elapsed}ms`)
+    }
   })
-  .wrap((_ctx, next) => next())
-  .run(async () => "ok")
+  .retry(3)
+  .run(async () => {
+    const response = await fetch("https://api.example.com/search?q=shoes")
+    return (await response.json()) as Array<{ id: string }>
+  })
 ```
 
-`wrap(...)` is top-level only and can be chained as `.wrap().wrap()`. It is not available after `retry(...)`, `timeout(...)`, or execution-scoped `signal(...)`.
+`wrap(...)` is top-level only. You can chain it as `.wrap().wrap()`, but it is not available after `retry(...)`, `timeout(...)`, or an execution-scoped `signal(...)`.
 
-### all and allSettled
+## Run many tasks
 
-Use `all(...)` and `allSettled(...)` for concurrent work where named tasks and dependency reads are clearer than positional concurrency helpers.
+The orchestration APIs run a group of named tasks with one policy:
+
+- Use `all(...)` when the group should stop at the first failure.
+- Use `allSettled(...)` when you want every task outcome, including failures.
+- Use `flow(...)` when steps depend on earlier steps and one of them must end the workflow with `this.$exit(...)`.
+
+Tasks are object properties, so each task has a name. A task can await an earlier task's result through `this.$result`. Each task also receives `this.$signal` for cooperative cancellation and `this.$disposer` to register cleanup that runs when the orchestration settles. Named tasks are easier to scan than positional arrays.
+
+Orchestration supports `timeout(...)` and root-level `signal(...)`. `timeout(ms)` sets one deadline for the whole graph. When it fires, each task's `this.$signal` aborts, and the call rejects with `TimeoutError` (cancellation wins if both fire). Policy failures are thrown; an orchestration-level `catch` never maps them. `retry(...)` is not available for orchestration — apply it to `run(...)` calls inside tasks.
+
+Cancellation is cooperative, like all cancellation in JavaScript. An aborted signal does not stop a task by itself. All three orchestration APIs wait for every in-flight task to settle before they reject. This is a structural guarantee: no task code still runs after the call returns, so a caller can safely retry after a `TimeoutError`. The same holds for `signal(...)`: the call rejects with `CancellationError` only after every in-flight task has settled. For a deadline to bound wall-clock time in practice, your tasks must observe `this.$signal` — check it between steps, pass it to signal-aware I/O such as `fetch`, or wrap an await in `this.$race(...)`. `$race` races a promise against `$signal` and rejects with the abort reason when the signal fires first.
+
+### all
+
+`all(...)` runs the tasks concurrently and resolves to one object of successful results. Execution is fail-fast: when one task fails, the sibling task signals abort, and the call rejects unless you provide an orchestration-level `catch`.
 
 ```ts
-const values = await try$.all({
-  a() {
-    return 1
+const page = await try$.all({
+  async user() {
+    const response = await fetch("https://api.example.com/me", {
+      signal: this.$signal,
+    })
+    return (await response.json()) as { id: string; name: string }
   },
-  async b() {
-    const a = await this.$result.a
-    return a + 1
+  async invoices() {
+    const user = await this.$result.user
+
+    const response = await fetch(`https://api.example.com/users/${user.id}/invoices`, {
+      signal: this.$signal,
+    })
+    return (await response.json()) as Array<{ total: number }>
   },
 })
 
-// { a: 1, b: 2 }
+// page is { user: { id: string; name: string }; invoices: Array<{ total: number }> }
 ```
+
+### allSettled
+
+`allSettled(...)` uses the same task-graph shape, but keeps every task outcome as settled data, in the same shape as `Promise.allSettled`. Use it when a failure is input to the next decision, not a reason to stop the whole graph.
 
 ```ts
-const settled = await try$.allSettled({
-  fail() {
-    throw new Error("boom")
+const checks = await try$.allSettled({
+  async api() {
+    const response = await fetch("https://api.example.com/health")
+    return response.status
   },
-  ok() {
-    return 1
+  async cdn() {
+    const response = await fetch("https://cdn.example.com/health")
+    return response.status
   },
 })
-```
 
-Use `all(...)` when you want one successful combined value or one failure path. Use `allSettled(...)` when every outcome should be preserved for inspection.
+if (checks.api.status === "rejected") {
+  console.error("api is down:", checks.api.reason)
+}
+
+// checks.api is
+// { status: "fulfilled"; value: number } | { status: "rejected"; reason: unknown }
+```
 
 ### flow and $exit
 
-Use `flow(...)` for procedural workflows where steps depend on prior results and an explicit early return is part of the design.
+Use `flow(...)` for stepwise, business-process workflows. Tasks still read earlier results through `this.$result`, but completion is explicit: at least one path must call `this.$exit(...)`. The exit is a visible part of the workflow contract, not an implicit convention.
+
+Tasks start together, like in `all(...)`. `$exit` does not stop tasks that already started: the first exit becomes the flow result and aborts sibling `$signal`s. Observe `this.$signal` in later tasks, or make them await an earlier task through `this.$result` before they start side effects.
 
 ```ts
-const result = await try$.flow({
-  cache() {
-    const cached: string | null = "cached-value"
+const cache = new Map<string, string>()
 
-    if (cached !== null) {
-      return this.$exit(cached)
+const avatar = await try$.flow({
+  cached() {
+    const hit = cache.get("user_42")
+
+    if (hit !== undefined) {
+      return this.$exit(hit) // Cache hit: this value becomes the flow result
     }
 
     return null
   },
-  async api() {
-    return "api-value"
+  async fetched() {
+    await this.$result.cached // On a cache hit, the exit stops this task here
+
+    const response = await fetch("https://api.example.com/users/42", {
+      signal: this.$signal,
+    })
+
+    const user = (await response.json()) as { avatarUrl: string }
+    return user.avatarUrl
   },
-  async transform() {
-    const value = await this.$result.api
-    return this.$exit(`${value}-transformed`)
+  async stored() {
+    const avatarUrl = await this.$result.fetched
+    cache.set("user_42", avatarUrl)
+    return this.$exit(avatarUrl)
   },
 })
+
+// avatar is string
 ```
 
-At least one path must call `this.$exit(...)`. If no task exits, `flow(...)` throws `Panic`.
+If no task exits, `flow(...)` throws `Panic`.
+
+## More tools
 
 ### gen
 
-Use `gen(...)` when the returned unions are correct but nested handling becomes visually noisy and you want a more linear composition style.
+Use `gen(...)` when the returned unions are correct, but nested handling becomes noisy and you want a more linear composition style. `yield* use(...)` unwraps a success value and short-circuits when a step returns an `Error` instance:
 
 ```ts
-const value = await try$.gen(function* (use) {
-  const a = yield* use(try$.run(() => 1))
-  const b = yield* use(try$.run(() => a + 1))
-  return b
+const summary = await try$.gen(function* (use) {
+  const response = yield* use(try$.run(() => fetch("https://api.example.com/orders")))
+  const orders = yield* use(try$.run(() => response.json() as Promise<Array<{ total: number }>>))
+
+  const revenue = orders.reduce((sum, order) => sum + order.total, 0)
+  return `${orders.length} orders, ${revenue} total`
 })
+
+// summary is string | UnhandledException
 ```
+
+`gen(...)` detects failures with `instanceof Error`. A failure value that is not an `Error` instance — for example, a `catch` that maps to a plain object, or an error that crossed a realm boundary — resumes into the generator as a success value. Map failures to `Error` subclasses when you compose with `gen(...)`.
 
 ### disposer
 
-Use `disposer()` when cleanup should stay colocated with the workflow that allocates the resource, even across async boundaries. The returned `AsyncDisposer` gives you three operations:
+Use `disposer()` when cleanup should stay next to the workflow that allocates the resource, even across async boundaries. The returned `AsyncDisposer` gives you three operations:
 
 - `defer(fn)` registers a cleanup callback.
 - `use(resource)` tracks a disposable resource.
-- `dispose()` runs the registered teardown in reverse order (also triggered by leaving an `await using` scope).
+- `dispose()` runs the registered teardown in reverse order. Leaving an `await using` scope also triggers it.
 
 ```ts
 await using disposer = try$.disposer()
 
-{
-  const connection = await db.connect()
+const worker = new Worker("./video-encoder.js")
+disposer.defer(() => worker.terminate())
 
-  disposer.defer(async () => {
-    await connection.close()
-  })
+const heartbeat = setInterval(() => worker.postMessage("ping"), 1_000)
+disposer.defer(() => clearInterval(heartbeat))
 
-  const user = await connection.users.findById("user_123")
-}
+// ... send encoding work to the worker ...
+
+// When this scope ends — normally or through an error — the heartbeat
+// stops first, then the worker terminates (reverse order).
 ```
 
-`tryharder` handles the cleanup bookkeeping internally, so native `DisposableStack` or `AsyncDisposableStack` globals are not required.
+`tryharder` handles the cleanup bookkeeping internally, so the native `DisposableStack` and `AsyncDisposableStack` globals are not required.
 
-## API Reference
+## API reference
 
 ### Runtime
 
@@ -552,14 +641,17 @@ Exports from `tryharder/errors`:
 | `TimeoutError`        | Returned when timed execution expires                                                                     |
 | `RetryExhaustedError` | Returned when a retry policy gives up and no `catch` is provided; the last attempt's error is the `cause` |
 | `UnhandledException`  | Returned when function-form execution throws                                                              |
-| `Panic`               | Thrown for programmer errors and invalid API usage                                                        |
+| `Panic`               | Thrown for programmer misuse and invalid API usage                                                        |
 
-Each error class has a matching type guard: `isCancellationError`, `isTimeoutError`, `isRetryExhaustedError`, `isUnhandledException`, and `isPanic`. Prefer the guards over `instanceof` — they also match by `error.name`, so they keep working when two copies of `tryharder` end up in one dependency graph or when errors cross realm boundaries, where `instanceof` silently fails.
+Each error class has a matching type guard: `isCancellationError`, `isTimeoutError`, `isRetryExhaustedError`, `isUnhandledException`, and `isPanic`. Prefer the guards over `instanceof` — they also match by `error.name`, so they keep working when two copies of `tryharder` end up in one dependency graph, or when errors cross realm boundaries, where `instanceof` silently fails.
 
 ```ts
 import { isTimeoutError } from "tryharder/errors"
 
-const result = await try$.timeout(1_000).run(fetchUser)
+const result = await try$.timeout(1_000).run(async () => {
+  const response = await fetch("https://api.example.com/me")
+  return (await response.json()) as { name: string }
+})
 
 if (isTimeoutError(result)) {
   // handle the deadline here
@@ -585,63 +677,69 @@ import { Panic, TimeoutError, UnhandledException } from "tryharder/errors"
 import type { AsyncDisposer, FlowExit, SettledResult } from "tryharder/types"
 ```
 
-## Common Recipes
+## Recipes
 
-### Map infrastructure failure into domain error
+### Map infrastructure failure into a domain failure
 
-Use object-form `run(...)` when transport or infrastructure failures should be normalized into a domain-level result.
+Use the object form of `run(...)` when transport or infrastructure failures should reach callers as one domain-level result:
 
 ```ts
 class PaymentUnavailableError extends Error {}
 
-const result = await try$.run({
+const payment = await try$.run({
   try: async () => {
-    const payment = await db.payments.findById("pay_123")
+    const response = await fetch("https://payments.example.com/charges/ch_123")
 
-    if (payment === null) {
-      throw new Error("payment missing")
+    if (!response.ok) {
+      throw new Error(`unexpected status ${response.status}`)
     }
 
-    return payment
+    return (await response.json()) as { amount: number; captured: boolean }
   },
-  catch: () => new PaymentUnavailableError("payments unavailable"),
+  catch: () => new PaymentUnavailableError("payment provider unavailable"),
 })
+
+// Callers see one domain failure, not fetch internals:
+// { amount: number; captured: boolean } | PaymentUnavailableError
 ```
 
 ### Retry only the leaf request inside a flow
 
-`retry(...)` does not apply directly to `flow(...)`, and `timeout(...)` applies to the whole graph rather than a single step. Wrap the leaf work in nested `run(...)` calls when a single step needs its own execution policy.
+`retry(...)` does not apply to `flow(...)`, and `timeout(...)` applies to the whole graph, not one step. When one step needs its own policy, wrap the leaf work in a nested `run(...)`:
 
 ```ts
 const result = await try$.flow({
-  async fetchUser() {
-    const user = await try$.retry(2).run(async () => {
-      const row = await db.users.findById("user_123")
+  async shipment() {
+    const label = await try$.retry(2).run(async () => {
+      const response = await fetch("https://api.example.com/labels", {
+        method: "POST",
+      })
 
-      if (row === null) {
-        throw new Error("user missing")
+      if (!response.ok) {
+        throw new Error(`unexpected status ${response.status}`)
       }
 
-      return row
+      return (await response.json()) as { trackingNumber: string }
     })
 
-    return this.$exit(user)
+    return this.$exit(label)
   },
 })
 ```
 
 ### Choose all vs allSettled
 
-Use `all(...)` when the workflow should stop on the first failure:
+Use `all(...)` when the result is useless unless every task succeeds:
 
 ```ts
-const strict = await try$.all({
-  config() {
-    return { region: "us-east-1" as const }
+const checkout = await try$.all({
+  async cart() {
+    const response = await fetch("https://api.example.com/cart")
+    return (await response.json()) as { items: string[] }
   },
-  async client() {
-    const config = await this.$result.config
-    return connect(config)
+  async shipping() {
+    const response = await fetch("https://api.example.com/shipping-options")
+    return (await response.json()) as Array<{ carrier: string }>
   },
 })
 ```
@@ -649,48 +747,64 @@ const strict = await try$.all({
 Use `allSettled(...)` when failure is data you want to inspect:
 
 ```ts
-const observed = await try$.allSettled({
-  primary() {
-    return db.reports.readFromPrimary("daily-active-users")
+const report = await try$.allSettled({
+  async primary() {
+    const response = await fetch("https://db-1.example.com/reports/daily")
+    return response.json()
   },
-  replica() {
-    return db.reports.readFromReplica("daily-active-users")
+  async replica() {
+    const response = await fetch("https://db-2.example.com/reports/daily")
+    return response.json()
   },
 })
+
+// Serve from whichever source responded.
 ```
 
-### Use signal at the root for orchestration cancellation
+### Cancel a whole orchestration from the root
 
-Root-level `signal(...)` propagates cancellation through orchestration APIs.
+A root-level `signal(...)` propagates cancellation through the orchestration APIs. Abort one controller to stop every task:
 
 ```ts
 const controller = new AbortController()
 
-const result = await try$.signal(controller.signal).all({
-  async a() {
-    return db.users.findById("user_123", { signal: this.$signal })
+// Cancel the whole page load when the user navigates away
+window.addEventListener("popstate", () => controller.abort())
+
+const data = await try$.signal(controller.signal).all({
+  async posts() {
+    const response = await fetch("https://api.example.com/posts", {
+      signal: this.$signal,
+    })
+    return response.json()
   },
-  async b() {
-    return db.accounts.findById("acct_123", { signal: this.$signal })
+  async comments() {
+    const response = await fetch("https://api.example.com/comments", {
+      signal: this.$signal,
+    })
+    return response.json()
   },
 })
 ```
 
 ### Wrap signal-unaware work in $race
 
-When a task awaits work that cannot take an `AbortSignal`, wrap the await in `this.$race(...)` so graph deadlines and cancellation still bound how long the task runs. The abandoned promise keeps running in the background — `$race` hands control back to the orchestration; it cannot stop the underlying work.
+Some work cannot take an `AbortSignal`, such as a legacy client or driver. Wrap the await in `this.$race(...)` so graph deadlines and cancellation still bound how long the task runs. Note that `$race` hands control back to the orchestration; it cannot stop the underlying work, so the abandoned promise keeps running in the background.
 
 ```ts
-const result = await try$.timeout(5_000).all({
-  async report() {
-    return await this.$race(legacyClient.generateReport())
-  },
-})
+async function buildReport(legacy: { generateReport(): Promise<{ rows: number }> }) {
+  return try$.timeout(5_000).all({
+    async report() {
+      // generateReport() cannot take a signal, so race it against the deadline
+      return await this.$race(legacy.generateReport())
+    },
+  })
+}
 ```
 
 ### Choose object-form run vs function-form run
 
-Use function-form `run(...)` when `UnhandledException` is an acceptable boundary type:
+Use the function form when `UnhandledException` is an acceptable boundary type:
 
 ```ts
 const value = await try$.run(async () => {
@@ -698,7 +812,7 @@ const value = await try$.run(async () => {
 })
 ```
 
-Use object-form `run(...)` when callers should receive domain-specific failures instead:
+Use the object form when callers should receive domain-specific failures instead:
 
 ```ts
 class InvalidPayloadError extends Error {}
@@ -709,7 +823,7 @@ const value = await try$.run({
 })
 ```
 
-## When not to use
+## When not to use tryharder
 
 When you can use [`Effect`](https://github.com/Effect-TS/effect) in your codebase.
 
@@ -717,7 +831,7 @@ Seriously, Effect is a much more powerful and complete solution.
 
 ## Contributing
 
-Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for development workflow, code quality requirements, testing expectations, and changeset guidance.
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow, code quality requirements, testing expectations, and changeset guidance.
 
 ## Acknowledgments
 
