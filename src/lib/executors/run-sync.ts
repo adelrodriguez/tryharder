@@ -74,15 +74,9 @@ class RunSyncExecution<T, E, Ctx extends BaseTryCtx> extends BaseExecution<T | E
 
     assertNotPromiseLike(mapped, "RUN_SYNC_CATCH_PROMISE")
 
-    // Control state can change while the catch handler runs, so check again
+    // Control state can change while the catch handler runs, so arbitrate again
     // before returning a mapped sync value.
-    const catchControlError = this.checkDidControlFail(error)
-
-    if (catchControlError) {
-      return catchControlError
-    }
-
-    return mapped
+    return this.resolveOutcome(mapped, error)
   }
 
   #runAttemptLoop(attempt: number): T | E | RunnerError {
@@ -119,7 +113,7 @@ class RunSyncExecution<T, E, Ctx extends BaseTryCtx> extends BaseExecution<T | E
 
       assertNotPromiseLike(result, "RUN_SYNC_TRY_PROMISE")
 
-      return this.resolveSyncSuccess(result)
+      return this.resolveOutcome(result)
     }
   }
 }

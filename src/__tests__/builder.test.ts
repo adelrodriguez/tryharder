@@ -53,23 +53,6 @@ describe("builder chaining", () => {
     }
   })
 
-  it("panics at execution when orchestration is invoked after timeout() via casts", async () => {
-    const unsafeTimeoutBuilder = try$.timeout(100) as unknown as {
-      allSettled: typeof try$.allSettled
-    }
-
-    try {
-      await unsafeTimeoutBuilder.allSettled({
-        a() {
-          return 1
-        },
-      })
-      expect.unreachable("should have thrown")
-    } catch (error) {
-      expectPanic(error, "ORCHESTRATION_UNSUPPORTED_POLICY")
-    }
-  })
-
   it("treats wrap after retry as behavior-identical to wrap before retry", async () => {
     let wrapBeforeCalls = 0
     const wrapBeforeResult = await try$

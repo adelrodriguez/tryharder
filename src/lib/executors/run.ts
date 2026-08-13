@@ -77,15 +77,9 @@ class RunExecution<T, E, Ctx extends BaseTryCtx> extends BaseExecution<
       }
     }
 
-    // Control state can change while the catch handler runs, so check again
+    // Control state can change while the catch handler runs, so arbitrate again
     // before returning a mapped sync value.
-    const catchControlError = this.checkDidControlFail(error)
-
-    if (catchControlError) {
-      return catchControlError
-    }
-
-    return mapped
+    return this.resolveOutcome(mapped, error)
   }
 
   async #runAttemptLoop(attempt: number): Promise<T | E | RunnerError> {
@@ -120,7 +114,7 @@ class RunExecution<T, E, Ctx extends BaseTryCtx> extends BaseExecution<
           return raced
         }
 
-        return this.resolveSyncSuccess(result)
+        return this.resolveOutcome(result)
       } catch (attemptError) {
         // oxlint-disable-next-line no-await-in-loop
         const resolved = await this.#resolveFailure(attemptError)

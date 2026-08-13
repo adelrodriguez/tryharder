@@ -2,8 +2,8 @@ import type { BuilderConfig } from "../builder"
 import { CancellationError, Panic } from "../errors"
 import { checkIsPromiseLike } from "../utils"
 import {
+  FailFastTaskExecution,
   OrchestrationExecution,
-  TaskExecution,
   type AllOptions,
   type AllValue,
   type InferredTaskContext,
@@ -24,7 +24,7 @@ class AllExecution<T extends TaskRecord, C> extends OrchestrationExecution<AllVa
   }
 
   protected override executeTasks(): Promise<AllValue<T> | C> {
-    const execution = new TaskExecution(this.executionSignal, this.#tasks, "fail-fast")
+    const execution = new FailFastTaskExecution(this.executionSignal, this.#tasks)
 
     return this.executeTaskGraph<AllValue<T> | C>(execution, {
       mapFailure: (error) => this.#mapFailure(execution, error),
@@ -32,7 +32,7 @@ class AllExecution<T extends TaskRecord, C> extends OrchestrationExecution<AllVa
   }
 
   async #mapFailure(
-    execution: TaskExecution<T, "fail-fast">,
+    execution: FailFastTaskExecution<T>,
     error: unknown
   ): Promise<TaskGraphFailureOutcome<AllValue<T> | C>> {
     const controlAfterFailure = this.checkDidControlFail(error)

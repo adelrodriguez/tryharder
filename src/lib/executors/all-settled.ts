@@ -1,6 +1,6 @@
 import type { BuilderConfig } from "../builder"
 import type { AllSettledResult, InferredTaskContext, TaskRecord, TaskValidation } from "./shared"
-import { OrchestrationExecution, TaskExecution } from "./shared"
+import { OrchestrationExecution, SettledTaskExecution } from "./shared"
 
 class AllSettledExecution<T extends TaskRecord> extends OrchestrationExecution<
   AllSettledResult<T>
@@ -13,7 +13,7 @@ class AllSettledExecution<T extends TaskRecord> extends OrchestrationExecution<
   }
 
   protected override executeTasks(): Promise<AllSettledResult<T>> {
-    return this.executeTaskGraph(new TaskExecution(this.executionSignal, this.#tasks, "settled"), {
+    return this.executeTaskGraph(new SettledTaskExecution(this.executionSignal, this.#tasks), {
       waitForTasksToSettle: false,
     })
   }

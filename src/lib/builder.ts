@@ -67,7 +67,7 @@ type UnmappedError<HasRetry extends boolean> = HasRetry extends true
   ? RetryExhaustedError
   : UnhandledException
 type OrchestrationMethods = "all" | "allSettled" | "flow"
-type SignalBuilderHiddenMethods<SupportsOrchestration extends boolean> =
+type AsyncPolicyHiddenMethods<SupportsOrchestration extends boolean> =
   | "runSync"
   | "wrap"
   | (SupportsOrchestration extends true ? never : OrchestrationMethods)
@@ -75,18 +75,22 @@ type ExecutionBuilderSurface<E extends ConfigRunErrors, HasRetry extends boolean
   RunBuilder<E, HasRetry, false>,
   OrchestrationMethods | "wrap"
 >
-type AsyncExecutionBuilderSurface<E extends ConfigRunErrors, HasRetry extends boolean> = Omit<
-  RunBuilder<E, HasRetry, false>,
-  OrchestrationMethods | "runSync" | "wrap"
->
-type SignalBuilderSurface<
+/**
+ * Surface after an async policy (`timeout`/`signal`): sync execution and further wraps are gone,
+ * orchestration stays available unless retry already removed it.
+ */
+type AsyncPolicyBuilderSurface<
   E extends ConfigRunErrors,
   HasRetry extends boolean,
   SupportsOrchestration extends boolean,
 > = Omit<
   RunBuilder<E, HasRetry, SupportsOrchestration>,
-  SignalBuilderHiddenMethods<SupportsOrchestration>
+  AsyncPolicyHiddenMethods<SupportsOrchestration>
 >
+type AsyncExecutionBuilderSurface<
+  E extends ConfigRunErrors,
+  HasRetry extends boolean,
+> = AsyncPolicyBuilderSurface<E, HasRetry, false>
 
 export class RunBuilder<
   E extends ConfigRunErrors = never,
@@ -115,12 +119,12 @@ export class RunBuilder<
     }
   }
 
-  // Runtime note: there is a single builder class. Policy misuse that the
-  // narrowed type surface prevents (e.g. calling all() after retry() from
-  // untyped code) is guarded at execution time by OrchestrationExecution's
-  // ORCHESTRATION_UNSUPPORTED_POLICY panic, and wrap ordering is
-  // behavior-invariant (wraps always cover the full retry scope), so no
-  // runtime method-hiding is needed.
+  // Runtime note: there is a single builder class. The one policy the type
+  // surface forbids that would also be wrong at runtime — orchestration after
+  // retry() from untyped code — is guarded at execution time by
+  // OrchestrationExecution's ORCHESTRATION_UNSUPPORTED_POLICY panic. Wrap
+  // ordering is behavior-invariant (wraps always cover the full retry scope),
+  // so no runtime method-hiding is needed.
 
   retry<N extends number>(policy: N & ValidateRetryLimit<N>): ExecutionBuilderSurface<E, true>
   retry<N extends number>(
@@ -136,14 +140,28 @@ export class RunBuilder<
     })
   }
 
-  timeout(ms: number): AsyncExecutionBuilderSurface<E | TimeoutError, HasRetry> {
-    return new RunBuilder(this.buildTimeoutConfig(ms))
+  /**
+   * Applies one total deadline to the next terminal call. For `run`, the deadline spans attempts,
+   * delays, and catch handling, and surfaces typed as {@link TimeoutError}. For orchestration
+   * (`all`/`allSettled`/`flow`), it is a whole-graph deadline: the task signal aborts when it fires
+   * and the orchestration rejects with {@link TimeoutError} (cancellation still wins when both
+   * fire). The deadline is cooperative — `all`/`flow` wait for in-flight tasks to settle before
+   * rejecting, so tasks must observe `$signal` for it to bound wall-clock time.
+   */
+  timeout(
+    ms: number
+  ): AsyncPolicyBuilderSurface<E | TimeoutError, HasRetry, SupportsOrchestration> {
+    return new RunBuilder(this.buildTimeoutConfig(ms)) as unknown as AsyncPolicyBuilderSurface<
+      E | TimeoutError,
+      HasRetry,
+      SupportsOrchestration
+    >
   }
 
   signal(
     signal: AbortSignal
-  ): SignalBuilderSurface<E | CancellationError, HasRetry, SupportsOrchestration> {
-    return new RunBuilder(this.buildSignalConfig(signal)) as unknown as SignalBuilderSurface<
+  ): AsyncPolicyBuilderSurface<E | CancellationError, HasRetry, SupportsOrchestration> {
+    return new RunBuilder(this.buildSignalConfig(signal)) as unknown as AsyncPolicyBuilderSurface<
       E | CancellationError,
       HasRetry,
       SupportsOrchestration

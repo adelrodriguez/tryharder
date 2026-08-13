@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { CancellationError, Panic } from "../errors"
+import { CancellationError, Panic, TimeoutError } from "../errors"
 import * as try$ from "../index"
 import { expectPanic, sleep } from "./test-utils"
 
@@ -383,5 +383,19 @@ describe("allSettled", () => {
     expect(result.b.status).toBe("rejected")
     expect(cleanedA).toBe(true)
     expect(cleanedB).toBe(true)
+  })
+
+  it("rejects with TimeoutError when the graph deadline fires", async () => {
+    try {
+      await try$.timeout(10).allSettled({
+        async a() {
+          await sleep(40)
+          return "late" as const
+        },
+      })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect(error).toBeInstanceOf(TimeoutError)
+    }
   })
 })
