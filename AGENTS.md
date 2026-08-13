@@ -1,3 +1,5 @@
+Use ASD-STE100 / Simplified Technical English and Google developer documentation style guide as references for all communication.
+
 # AGENTS.md
 
 `tryharder` is a small execution layer for TypeScript that makes failure and execution policy explicit in the returned type. `README.md` documents the public API.
