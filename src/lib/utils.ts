@@ -61,3 +61,5 @@ export async function resolveWithAbort<V, E>(
 
   return await Promise.race([Promise.resolve(promise), abortPromise])
 }
+
+export type NonPromise<T> = T extends PromiseLike<unknown> ? never : T

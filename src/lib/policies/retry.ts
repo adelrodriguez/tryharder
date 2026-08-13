@@ -1,5 +1,5 @@
 import type { BuilderConfig } from "../builder"
-import type { TryCtx } from "../executors/shared"
+import type { TryCtx } from "../execution/context"
 import { Panic } from "../errors"
 import { assertUnreachable, invariant } from "../utils"
 

@@ -1,5 +1,6 @@
 import type { BuilderConfig } from "../builder"
-import type { BaseTryCtx, NonPromise } from "./shared"
+import type { NonPromise } from "../utils"
+import type { BaseTryCtx } from "./context"
 import { Panic, type UnhandledException } from "../errors"
 import { checkIsPromiseLike } from "../utils"
 import { BaseExecution, RetryDirective, type RetryDecision, type RunnerError } from "./base"

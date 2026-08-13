@@ -1,6 +1,7 @@
 import type { BuilderConfig } from "../builder"
+import type { NonPromise } from "../utils"
 import type { RunnerError } from "./base"
-import type { BaseTryCtx, NonPromise } from "./shared"
+import type { BaseTryCtx } from "./context"
 import { Panic, type PanicCode, type UnhandledException } from "../errors"
 import { checkIsPromiseLike, invariant } from "../utils"
 import { BaseExecution, RetryDirective } from "./base"
@@ -130,8 +131,8 @@ export function executeRunSync<T, E, Ctx extends BaseTryCtx>(
   config: BuilderConfig,
   input: SyncRunInput<T, E, Ctx>
 ): T | E | RunnerError {
-  // Builder typing blocks async-only retry policies, but direct executor usage and
-  // unsafe casts still need a runtime guard here.
+  // Builder typing blocks async-only retry policies, but calling executeRunSync
+  // directly and unsafe casts still need a runtime guard here.
   const isSyncSafeRetryPolicy =
     config.retry === undefined ||
     (config.retry.backoff === "constant" &&
