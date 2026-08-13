@@ -1,33 +1,31 @@
 # AGENTS.md
 
-This project was built with [`pastry`](https://github.com/adelrodriguez/pastry) template.
+`tryharder` is a small execution layer for TypeScript that makes failure and execution policy explicit in the returned type. `README.md` documents the public API.
 
-## Changesets
+## Documentation map
 
-- We use `changesets` for versioning and changelog management.
-- Never make a major version bump unless the user requests it.
-- If a breaking change is being made, and we are on v1.0.0 or higher, alert the user.
+- `CONTEXT.md` — the domain glossary. Use its vocabulary in code, tests, issues, and docs.
+- `docs/adr/` — recorded design decisions. Read the ones touching the area you're changing; record a new one when a decision is hard to reverse, surprising without context, and the result of a real trade-off.
+- `CONTRIBUTING.md` — development workflow, code style, testing expectations, and the changesets workflow. Follow it for all changes.
 
-## Version Policy
+## Rules for agents
 
-- We are currently in v0.
-- Backwards compatibility is not required right now.
-- Breaking changes are acceptable when they simplify or improve the API.
-
-## TypeScript Style
-
-- Prefer type inference whenever possible.
-- Do not add explicit return types unless required by tooling, declaration emit, or a public API contract.
-- Do not use explicit return types when inference already produces the correct result.
-
-## Public API Types
-
+- Never make a major version bump unless the user requests it. We are in v0, so breaking changes are acceptable when they simplify or improve the API — but if we are on v1.0.0 or higher, alert the user before making one.
 - Public API type changes must be covered in `src/__tests__/types.test.ts`.
 
-## Implementation Approach
+## Agent skills
 
-- Prefer a WET-first approach while behavior is still evolving: duplicate simple logic when it keeps intent obvious and local.
-- Move to DRY only after patterns stabilize and the abstraction clearly improves readability, maintenance, or correctness.
+### Issue tracker
+
+Issues are tracked in this repo's GitHub Issues (`adelrodriguez/tryharder`), via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five default triage labels are used as-is: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
 
 <!-- ADAMANTITE:START -->
 

@@ -30,6 +30,7 @@ src/
 ├── errors.ts             # Public error exports
 ├── types.ts              # Public types
 ├── __tests__/            # Public API and integration-style tests
+├── shims/                # Runtime shims (e.g. disposer support)
 └── lib/
     ├── builder.ts        # Fluent builder implementation
     ├── dispose.ts        # Resource cleanup helpers
