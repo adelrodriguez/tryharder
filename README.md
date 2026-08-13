@@ -272,7 +272,7 @@ Three more tools sit around these layers. `wrap(...)` observes execution without
 | `allSettled(tasks)`   | Settled parallel named task graph                                              |
 | `flow(tasks)`         | Ordered task workflow with explicit early exit                                 |
 | `$exit(value)`        | Stop a `flow(...)` early and return `value`                                    |
-| `$race(promise)`      | Race a promise against the task's `$signal` inside orchestration              |
+| `$race(promise)`      | Race a promise against the task's `$signal` inside orchestration               |
 
 The chain has a fixed order. Keep these rules in mind:
 
@@ -491,10 +491,9 @@ const page = await try$.all({
   async invoices() {
     const user = await this.$result.user
 
-    const response = await fetch(
-      `https://api.example.com/users/${user.id}/invoices`,
-      { signal: this.$signal }
-    )
+    const response = await fetch(`https://api.example.com/users/${user.id}/invoices`, {
+      signal: this.$signal,
+    })
     return (await response.json()) as Array<{ total: number }>
   },
 })
@@ -571,12 +570,8 @@ Use `gen(...)` when the returned unions are correct, but nested handling becomes
 
 ```ts
 const summary = await try$.gen(function* (use) {
-  const response = yield* use(
-    try$.run(() => fetch("https://api.example.com/orders"))
-  )
-  const orders = yield* use(
-    try$.run(() => response.json() as Promise<Array<{ total: number }>>)
-  )
+  const response = yield* use(try$.run(() => fetch("https://api.example.com/orders")))
+  const orders = yield* use(try$.run(() => response.json() as Promise<Array<{ total: number }>>))
 
   const revenue = orders.reduce((sum, order) => sum + order.total, 0)
   return `${orders.length} orders, ${revenue} total`
@@ -790,9 +785,7 @@ const data = await try$.signal(controller.signal).all({
 Some work cannot take an `AbortSignal`, such as a legacy client or driver. Wrap the await in `this.$race(...)` so graph deadlines and cancellation still bound how long the task runs. Note that `$race` hands control back to the orchestration; it cannot stop the underlying work, so the abandoned promise keeps running in the background.
 
 ```ts
-async function buildReport(legacy: {
-  generateReport(): Promise<{ rows: number }>
-}) {
+async function buildReport(legacy: { generateReport(): Promise<{ rows: number }> }) {
   return try$.timeout(5_000).all({
     async report() {
       // generateReport() cannot take a signal, so race it against the deadline

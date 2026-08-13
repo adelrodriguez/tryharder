@@ -66,4 +66,5 @@ Packref provides local copies of dependency source code so you can inspect the e
   - `packref clean --global` — wipe all global store entries
 - Use Packref when you need to understand how a dependency works internally — read the source in `.packref/` instead of guessing or searching the web
 - Multiple versions of the same package can coexist; check `.packref/packref-lock.json` for the full list
+
 <!-- PACKREF:END -->
