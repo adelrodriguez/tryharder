@@ -5,9 +5,9 @@ import type {
   TaskContext,
   TaskRecord,
   TaskResult,
-} from "./shared"
+} from "./task-graph"
 import { Panic } from "../errors"
-import { OrchestrationExecution, TaskGraphExecutionBase } from "./shared"
+import { OrchestrationExecution, TaskGraphExecutionBase } from "./task-graph"
 
 declare const FLOW_EXIT_BRAND: unique symbol
 

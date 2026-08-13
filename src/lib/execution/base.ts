@@ -1,5 +1,5 @@
 import type { BuilderConfig, WrapCtx } from "../builder"
-import type { TryCtx } from "./shared"
+import type { TryCtx } from "./context"
 import { defineDisposeAlias } from "../../shims/disposer"
 import {
   CancellationError,
@@ -9,9 +9,9 @@ import {
   TimeoutError,
   UnhandledException,
 } from "../errors"
-import { calculateRetryDelay, checkShouldAttemptRetry } from "../modifiers/retry"
-import { SignalController } from "../modifiers/signal"
-import { TimeoutController } from "../modifiers/timeout"
+import { calculateRetryDelay, checkShouldAttemptRetry } from "../policies/retry"
+import { SignalController } from "../policies/signal"
+import { TimeoutController } from "../policies/timeout"
 import { sleep } from "../utils"
 
 interface BaseExecutionOptions {

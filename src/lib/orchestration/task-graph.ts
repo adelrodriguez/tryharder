@@ -2,8 +2,8 @@ import type { AsyncDisposer } from "../../shims/disposer"
 import type { BuilderConfig } from "../builder"
 import { createAsyncDisposer, defineAsyncDisposeAlias } from "../../shims/disposer"
 import { Panic, UnhandledException } from "../errors"
+import { BaseExecution } from "../execution/base"
 import { invariant, resolveWithAbort } from "../utils"
-import { BaseExecution } from "./base"
 
 const TASK_RACE_ABORTED = Symbol("tryharder.taskRaceAborted")
 
@@ -78,22 +78,6 @@ export type SettledResult<T> = SettledFulfilled<T> | SettledRejected
 export type AllSettledResult<T extends TaskRecord> = {
   [K in keyof T]: SettledResult<TaskResult<T[K]>>
 }
-
-interface RetryInfo {
-  attempt: number
-  limit: number
-}
-
-export interface BaseTryCtx {
-  signal?: AbortSignal
-}
-
-export type TryCtxFor<HasRetry extends boolean> = BaseTryCtx &
-  (HasRetry extends true ? { retry: RetryInfo } : Record<never, never>)
-
-export type TryCtx = TryCtxFor<true>
-
-export type NonPromise<T> = T extends PromiseLike<unknown> ? never : T
 
 interface TaskGraphRun<R> extends AsyncDisposable {
   execute(): Promise<R>

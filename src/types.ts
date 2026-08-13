@@ -3,6 +3,6 @@ export type {
   SettledFulfilled,
   SettledRejected,
   SettledResult,
-} from "./lib/executors/shared"
+} from "./lib/orchestration/task-graph"
 export type { AsyncDisposer } from "./shims/disposer"
-export type { FlowExit } from "./lib/executors/flow"
+export type { FlowExit } from "./lib/orchestration/flow"

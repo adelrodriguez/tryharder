@@ -37,8 +37,9 @@ src/
     ├── errors.ts         # Internal error helpers
     ├── gen.ts            # Generator composition utilities
     ├── utils.ts          # Internal utilities
-    ├── executors/        # run, runSync, all, allSettled, flow
-    ├── modifiers/        # retry, timeout, signal
+    ├── execution/        # Terminal execution: run, runSync, and the shared engine
+    ├── orchestration/    # Task graphs: all, allSettled, flow
+    ├── policies/         # retry, timeout, signal
     └── __tests__/        # Internal-focused tests
 ```
 

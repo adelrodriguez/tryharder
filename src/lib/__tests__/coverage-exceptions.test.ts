@@ -2,9 +2,13 @@ import { describe, expect, it } from "bun:test"
 import type { BuilderConfig } from "../builder"
 import { Panic } from "../../errors"
 import { createAsyncDisposer } from "../../shims/disposer"
-import { BaseExecution } from "../executors/base"
-import { TaskGraphExecutionBase, type ResultProxy, type TaskContext } from "../executors/shared"
-import { calculateRetryDelay, retryOptions } from "../modifiers/retry"
+import { BaseExecution } from "../execution/base"
+import {
+  TaskGraphExecutionBase,
+  type ResultProxy,
+  type TaskContext,
+} from "../orchestration/task-graph"
+import { calculateRetryDelay, retryOptions } from "../policies/retry"
 import { assertUnreachable, resolveWithAbort, sleep } from "../utils"
 
 // Coverage-only tests for internal helper and guard branches that are not

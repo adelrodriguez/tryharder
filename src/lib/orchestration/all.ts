@@ -11,7 +11,7 @@ import {
   type TaskRecord,
   type TaskResult,
   type TaskValidation,
-} from "./shared"
+} from "./task-graph"
 
 class AllExecution<T extends TaskRecord, C> extends OrchestrationExecution<AllValue<T> | C> {
   readonly #tasks: T

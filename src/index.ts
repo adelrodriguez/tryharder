@@ -15,4 +15,4 @@ export const wrap: RunBuilder["wrap"] = root.wrap.bind(root)
 export { disposer } from "./lib/dispose"
 export { driveGen as gen } from "./lib/gen"
 
-export { retryOptions } from "./lib/modifiers/retry"
+export { retryOptions } from "./lib/policies/retry"

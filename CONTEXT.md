@@ -6,11 +6,11 @@ A small execution layer for TypeScript: callers keep writing plain functions, wh
 
 **Terminal execution API**:
 The point where work actually runs and a result union is produced (`run`, `runSync`).
-_Avoid_: executor (internal directory name), runner
+_Avoid_: executor, runner
 
 **Policy builder**:
 A chainable step (`retry`, `timeout`, `signal`) that runs no work itself; it configures the next terminal call and widens its result union.
-_Avoid_: modifier (internal directory name), middleware, decorator
+_Avoid_: modifier, middleware, decorator
 
 **Result union**:
 The return type of a terminal execution: the success value together with every failure that execution can produce.

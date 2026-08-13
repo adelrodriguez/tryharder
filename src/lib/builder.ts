@@ -4,6 +4,7 @@ import type {
   TimeoutError,
   UnhandledException,
 } from "./errors"
+import type { TryCtx, TryCtxFor } from "./execution/context"
 import type {
   InferredTaskContext,
   TaskRecord,
@@ -11,22 +12,20 @@ import type {
   TaskValidation,
   AllOptions,
   AllSettledResult,
-  TryCtx,
-  TryCtxFor,
-} from "./executors/shared"
+} from "./orchestration/task-graph"
 import type {
   RetryOptions,
   RetryPolicy,
   ValidateRetryLimit,
   ValidateRetryOptions,
-} from "./modifiers/retry"
-import { executeAll } from "./executors/all"
-import { executeAllSettled } from "./executors/all-settled"
-import { executeFlow, type FlowResult, type InferredFlowTaskContext } from "./executors/flow"
-import { executeRun, type AsyncRunInput, type RunTryFn } from "./executors/run"
-import { executeRunSync, type SyncRunInput, type SyncRunTryFn } from "./executors/run-sync"
-import { retryOptions } from "./modifiers/retry"
-import { assertValidTimeout } from "./modifiers/timeout"
+} from "./policies/retry"
+import { executeRun, type AsyncRunInput, type RunTryFn } from "./execution/run"
+import { executeRunSync, type SyncRunInput, type SyncRunTryFn } from "./execution/run-sync"
+import { executeAll } from "./orchestration/all"
+import { executeAllSettled } from "./orchestration/all-settled"
+import { executeFlow, type FlowResult, type InferredFlowTaskContext } from "./orchestration/flow"
+import { retryOptions } from "./policies/retry"
+import { assertValidTimeout } from "./policies/timeout"
 
 /**
  * Wraps are observational hooks: they can inspect execution context and surround execution, but
