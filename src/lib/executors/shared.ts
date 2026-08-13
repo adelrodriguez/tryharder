@@ -96,7 +96,6 @@ export type TaskGraphFailureOutcome<R> = { mapped: R } | { thrown: unknown }
 
 interface TaskGraphOptions<R> {
   mapFailure?: (error: unknown) => TaskGraphFailureOutcome<R> | Promise<TaskGraphFailureOutcome<R>>
-  waitForTasksToSettle?: boolean
 }
 
 export abstract class OrchestrationExecution<TResult> extends BaseExecution<Promise<TResult>> {
@@ -125,19 +124,17 @@ export abstract class OrchestrationExecution<TResult> extends BaseExecution<Prom
 
   /**
    * Shared task-graph lifecycle: race execution against cancellation and the graph deadline, let
-   * `mapFailure` turn a failure into a mapped result or a value to rethrow, optionally wait for
-   * sibling tasks to settle before resolving, and give control failures (cancellation first, then
-   * timeout) priority over whatever was thrown while they fired.
+   * `mapFailure` turn a failure into a mapped result or a value to rethrow, wait for in-flight
+   * tasks to settle before resolving (so no task code is still running once the orchestration
+   * returns), and give control failures (cancellation first, then timeout) priority over whatever
+   * was thrown while they fired.
    */
   protected async executeTaskGraph<R>(
     graph: TaskGraphRun<R>,
     options: TaskGraphOptions<R> = {}
   ): Promise<R> {
     await using execution = graph
-    const {
-      mapFailure = (error): TaskGraphFailureOutcome<R> => ({ thrown: error }),
-      waitForTasksToSettle = true,
-    } = options
+    const { mapFailure = (error): TaskGraphFailureOutcome<R> => ({ thrown: error }) } = options
     let result!: R
     let threw = false
     let thrownError: unknown
@@ -154,9 +151,7 @@ export abstract class OrchestrationExecution<TResult> extends BaseExecution<Prom
         thrownError = outcome.thrown
       }
     } finally {
-      if (waitForTasksToSettle) {
-        await execution.waitForTasksToSettle()
-      }
+      await execution.waitForTasksToSettle()
     }
 
     // Control state may have changed while tasks ran or settled, and it takes

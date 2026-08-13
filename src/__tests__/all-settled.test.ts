@@ -299,7 +299,7 @@ describe("allSettled", () => {
     }
   })
 
-  it("surfaces cancellation without waiting for non-cooperative tasks", async () => {
+  it("holds cancellation until non-cooperative tasks settle", async () => {
     const controller = new AbortController()
     let markStarted!: () => void
     let markFinished!: () => void
@@ -336,10 +336,13 @@ describe("allSettled", () => {
     )
     const outcome = await Promise.race([observed, sleep(0).then(() => "blocked" as const)])
 
+    // The orchestration must stay pending while the task is still running.
+    expect(outcome).toBe("blocked")
+
     releaseTask()
     await finished
 
-    expect(outcome).toBeInstanceOf(CancellationError)
+    expect(await observed).toBeInstanceOf(CancellationError)
   })
 
   it("runs disposer cleanup after all tasks settle", async () => {
@@ -397,5 +400,48 @@ describe("allSettled", () => {
     } catch (error) {
       expect(error).toBeInstanceOf(TimeoutError)
     }
+  })
+
+  it("waits for in-flight tasks to settle before rejecting on the graph deadline", async () => {
+    let taskSettled = false
+
+    try {
+      await try$.timeout(10).allSettled({
+        async a() {
+          await sleep(40)
+          taskSettled = true
+          return "late" as const
+        },
+      })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect(error).toBeInstanceOf(TimeoutError)
+    }
+
+    expect(taskSettled).toBe(true)
+  })
+
+  it("waits for in-flight tasks to settle before rejecting on cancellation", async () => {
+    const controller = new AbortController()
+    let taskSettled = false
+
+    setTimeout(() => {
+      controller.abort(new Error("stop"))
+    }, 5)
+
+    try {
+      await try$.signal(controller.signal).allSettled({
+        async a() {
+          await sleep(30)
+          taskSettled = true
+          return 1
+        },
+      })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect(error).toBeInstanceOf(CancellationError)
+    }
+
+    expect(taskSettled).toBe(true)
   })
 })
