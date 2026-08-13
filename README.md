@@ -546,8 +546,10 @@ const avatar = await try$.flow({
     return null
   },
   async fetched() {
+    await this.$result.cached // On a cache hit, the exit stops this task here
+
     const response = await fetch("https://api.example.com/users/42", {
-      signal: this.$signal, // Aborted when another task exits first
+      signal: this.$signal,
     })
 
     const user = (await response.json()) as { avatarUrl: string }
@@ -569,7 +571,7 @@ If no task exits, `flow(...)` throws `Panic`.
 
 ### gen
 
-Use `gen(...)` when the returned unions are correct, but nested handling becomes noisy and you want a more linear composition style. `yield* use(...)` unwraps a success value and short-circuits on any error in the union:
+Use `gen(...)` when the returned unions are correct, but nested handling becomes noisy and you want a more linear composition style. `yield* use(...)` unwraps a success value and short-circuits when a step returns an `Error` instance:
 
 ```ts
 const summary = await try$.gen(function* (use) {
@@ -582,6 +584,8 @@ const summary = await try$.gen(function* (use) {
 
 // summary is string | UnhandledException
 ```
+
+`gen(...)` detects failures with `instanceof Error`. A failure value that is not an `Error` instance — for example, a `catch` that maps to a plain object, or an error that crossed a realm boundary — resumes into the generator as a success value. Map failures to `Error` subclasses when you compose with `gen(...)`.
 
 ### disposer
 
