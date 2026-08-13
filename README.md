@@ -13,7 +13,7 @@
 
 `tryharder` is a small execution layer for TypeScript. You write normal functions. `tryharder` runs them, applies your retry, timeout, and cancellation policy, and returns errors as typed values instead of thrown exceptions.
 
-The return type tells you everything that can come back: your value, the errors you map, and the policy errors that your chain can introduce.
+The return type tells you everything that can come back: your value, the failures you map, and the policy failures that your chain can introduce.
 
 ```ts
 import * as try$ from "tryharder"
@@ -161,7 +161,7 @@ You can read the failure behavior of a function from its return type. You do not
 - **Sync and async parity** — `runSync(...)` uses the same mental model as `run(...)`.
 - **Named task orchestration** — Run concurrent and ordered workflows as named task objects, not positional arrays.
 - **Instrumentation hooks** — Observe execution with `wrap(...)` for logs, traces, and metrics.
-- **Resource cleanup** — Register teardown that survives async boundaries with `disposer()`.
+- **Resource cleanup** — Register teardown that survives async boundaries with `disposer()` and task disposers.
 - **No runtime dependencies** — The published package ships without runtime dependencies.
 
 ## Installation
@@ -255,24 +255,25 @@ if (rate instanceof RateUnavailableError) {
 `tryharder` has three layers:
 
 1. **Terminal APIs** run the work. `run(...)` and `runSync(...)` execute a function and produce the result union.
-2. **Policy builders** configure the next terminal call. `retry(...)`, `timeout(...)`, and `signal(...)` do not run work by themselves. Each one adds its own failure type to the result union.
+2. **Policy builders** configure the next terminal call. `retry(...)`, `timeout(...)`, and `signal(...)` do not run work by themselves. `timeout(...)` and `signal(...)` widen the result union with their policy failures. `retry(...)` changes the unmapped failure type only when you do not supply `catch`: persistent failure surfaces as `RetryExhaustedError` instead of `UnhandledException`.
 3. **Orchestration APIs** scale the same model to a group of tasks. `all(...)` runs a fail-fast task map. `allSettled(...)` keeps every task outcome. `flow(...)` runs an ordered workflow that ends through an explicit `this.$exit(...)`.
 
 Three more tools sit around these layers. `wrap(...)` observes execution without changing it. `gen(...)` composes result unions in a linear style. `disposer()` registers cleanup that runs when the work is done.
 
-| Term                  | Meaning                                                                        |
-| --------------------- | ------------------------------------------------------------------------------ |
-| `run`                 | Async terminal execution that returns a value, mapped failure, or policy error |
-| `runSync`             | Sync terminal execution for synchronous work only                              |
-| `retry(limit)`        | Retry policy; `limit` is a positive integer counting the first attempt         |
-| `timeout(ms)`         | Total deadline: across attempts for `run(...)`, whole-graph for orchestration  |
-| `signal(abortSignal)` | External cancellation for `run(...)` and root-level orchestration              |
-| `wrap(fn)`            | Top-level observational middleware around terminal APIs                        |
-| `all(tasks)`          | Fail-fast parallel named task graph                                            |
-| `allSettled(tasks)`   | Settled parallel named task graph                                              |
-| `flow(tasks)`         | Ordered task workflow with explicit early exit                                 |
-| `$exit(value)`        | Stop a `flow(...)` early and return `value`                                    |
-| `$race(promise)`      | Race a promise against the task's `$signal` inside orchestration               |
+| Term                  | Meaning                                                                          |
+| --------------------- | -------------------------------------------------------------------------------- |
+| `run`                 | Async terminal execution that returns a value, mapped failure, or policy failure |
+| `runSync`             | Sync terminal execution for synchronous work only                                |
+| `retry(limit)`        | Retry policy; `limit` is a positive integer counting the first attempt           |
+| `timeout(ms)`         | Total deadline: across attempts for `run(...)`, whole-graph for orchestration    |
+| `signal(abortSignal)` | External cancellation for `run(...)` and root-level orchestration                |
+| `wrap(fn)`            | Top-level observational middleware around terminal APIs                          |
+| `all(tasks)`          | Fail-fast parallel named task graph                                              |
+| `allSettled(tasks)`   | Settled parallel named task graph                                                |
+| `flow(tasks)`         | Ordered task workflow with explicit early exit                                   |
+| `$exit(value)`        | Stop a `flow(...)` early and return `value`                                      |
+| `$race(promise)`      | Race a promise against the task's `$signal` inside orchestration                 |
+| `$disposer`           | Register task cleanup that runs when the orchestration settles                   |
 
 The chain has a fixed order. Keep these rules in mind:
 
@@ -286,9 +287,9 @@ Not sure if `tryharder` is a good fit for your project? See [When not to use try
 
 `tryharder` divides failure into three kinds, and treats each one differently:
 
-- **Domain errors** are the values you create in `catch`. They describe expected failures in your problem domain, such as `ValidationError`.
-- **Policy errors** come from the chain: `TimeoutError`, `CancellationError`, and `RetryExhaustedError`. They appear in the result union when you add the matching policy.
-- **Programmer errors** are `Panic`. `tryharder` throws `Panic` for invalid API usage and invariant violations. It never returns `Panic` as a result.
+- **Domain failures** are the values you map into your own types with `catch`. They are expected outcomes of your problem domain, such as `ValidationError`.
+- **Policy failures** come from the chain: `TimeoutError`, `CancellationError`, and `RetryExhaustedError`. They appear in the result union when you add the matching policy.
+- **Panics** signal programmer misuse, such as an invalid builder chain or an invalid task graph. `tryharder` throws `Panic`; a panic is never part of a result union.
 
 ```ts
 import * as try$ from "tryharder"
@@ -319,9 +320,9 @@ const outcome = await try$
 // "delivered" | MetricsRejectedError | TimeoutError
 ```
 
-That inferred union is the contract. A caller can see whether a function returns a domain error and whether a deadline can fire, without reading the implementation.
+That inferred union is the contract. A caller can see whether a function returns a domain failure and whether a deadline can fire, without reading the implementation.
 
-The `catch` contract is strict. `catch` maps only errors that started inside `try`: errors thrown directly, or the last attempt's error after the retry policy gives up. Policy errors never pass through `catch`. They surface typed in the union, so you handle them at the call site with the exported type guards:
+The `catch` contract is strict. `catch` maps only errors that started inside `try`: errors thrown directly, or the last attempt's error after the retry policy gives up. Policy failures never pass through `catch`. They surface typed in the union, so you handle them at the call site with the exported type guards:
 
 ```ts
 import { isTimeoutError } from "tryharder/errors"
@@ -388,7 +389,7 @@ const body = try$.runSync({
 
 ### retry, timeout, and signal
 
-Use these builders to put execution policy around one unit of work. They decorate `run(...)` or `runSync(...)`, add their failure types to the result union, and keep policy separate from business logic.
+Use these builders to put execution policy around one unit of work. They decorate `run(...)` or `runSync(...)` and keep policy separate from business logic. `timeout(...)` and `signal(...)` widen the result union; `retry(...)` changes how persistent failure is reported.
 
 The full retry policy controls backoff, jitter, and which errors are worth another attempt. `shouldRetry` lets the policy give up early on errors that a retry cannot fix:
 
@@ -470,7 +471,7 @@ The orchestration APIs run a group of named tasks with one policy:
 - Use `allSettled(...)` when you want every task outcome, including failures.
 - Use `flow(...)` when steps depend on earlier steps and one of them must end the workflow with `this.$exit(...)`.
 
-Tasks are object properties, so each task has a name. A task can await an earlier task's result through `this.$result`. Named tasks are easier to scan than positional arrays.
+Tasks are object properties, so each task has a name. A task can await an earlier task's result through `this.$result`. Each task also receives `this.$signal` for cooperative cancellation and `this.$disposer` to register cleanup that runs when the orchestration settles. Named tasks are easier to scan than positional arrays.
 
 Orchestration supports `timeout(...)` and root-level `signal(...)`. `timeout(ms)` sets one deadline for the whole graph. When it fires, each task's `this.$signal` aborts, and the call rejects with `TimeoutError` (cancellation wins if both fire). Policy failures are thrown; an orchestration-level `catch` never maps them. `retry(...)` is not available for orchestration — apply it to `run(...)` calls inside tasks.
 
@@ -527,7 +528,7 @@ if (checks.api.status === "rejected") {
 
 ### flow and $exit
 
-Use `flow(...)` for stepwise, business-process workflows. Tasks still read earlier results through `this.$result`, but completion is explicit: at least one path must call `this.$exit(...)`. Early return is a visible part of the workflow contract, not an implicit convention.
+Use `flow(...)` for stepwise, business-process workflows. Tasks still read earlier results through `this.$result`, but completion is explicit: at least one path must call `this.$exit(...)`. The exit is a visible part of the workflow contract, not an implicit convention.
 
 ```ts
 const cache = new Map<string, string>()
@@ -634,7 +635,7 @@ Exports from `tryharder/errors`:
 | `TimeoutError`        | Returned when timed execution expires                                                                     |
 | `RetryExhaustedError` | Returned when a retry policy gives up and no `catch` is provided; the last attempt's error is the `cause` |
 | `UnhandledException`  | Returned when function-form execution throws                                                              |
-| `Panic`               | Thrown for programmer errors and invalid API usage                                                        |
+| `Panic`               | Thrown for programmer misuse and invalid API usage                                                        |
 
 Each error class has a matching type guard: `isCancellationError`, `isTimeoutError`, `isRetryExhaustedError`, `isUnhandledException`, and `isPanic`. Prefer the guards over `instanceof` — they also match by `error.name`, so they keep working when two copies of `tryharder` end up in one dependency graph, or when errors cross realm boundaries, where `instanceof` silently fails.
 
@@ -672,7 +673,7 @@ import type { AsyncDisposer, FlowExit, SettledResult } from "tryharder/types"
 
 ## Recipes
 
-### Map infrastructure failure into a domain error
+### Map infrastructure failure into a domain failure
 
 Use the object form of `run(...)` when transport or infrastructure failures should reach callers as one domain-level result:
 
@@ -692,7 +693,7 @@ const payment = await try$.run({
   catch: () => new PaymentUnavailableError("payment provider unavailable"),
 })
 
-// Callers see one domain error, not fetch internals:
+// Callers see one domain failure, not fetch internals:
 // { amount: number; captured: boolean } | PaymentUnavailableError
 ```
 
