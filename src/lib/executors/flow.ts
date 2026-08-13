@@ -95,6 +95,7 @@ class FlowExecution<T extends TaskRecord> extends TaskGraphExecutionBase<T, Flow
       $exit: (value) => {
         throw new FlowExitSignalError(value)
       },
+      $race: (promise) => this.raceTaskSignal(promise),
       $result: resultProxy,
       $signal: this.taskSignal,
     }

@@ -670,6 +670,40 @@ describe("type inference", () => {
       })
     })
 
+    it("exposes $race on all orchestration task contexts, mapping PromiseLike to Promise", () => {
+      if (typecheckOnly()) return
+
+      void try$.all({
+        async a() {
+          const like: PromiseLike<number> = Promise.resolve(1)
+          const raced = this.$race(like)
+          const resolved = await raced
+
+          type _assertRaced = Expect<Equal<typeof raced, Promise<number>>>
+          type _assertResolved = Expect<Equal<typeof resolved, number>>
+          return resolved
+        },
+      })
+
+      void try$.allSettled({
+        async a() {
+          const raced = this.$race(Promise.resolve("ok" as const))
+
+          type _assert = Expect<Equal<typeof raced, Promise<"ok">>>
+          return await raced
+        },
+      })
+
+      void try$.flow({
+        async a() {
+          const raced = this.$race(Promise.resolve(42))
+
+          type _assert = Expect<Equal<typeof raced, Promise<number>>>
+          return this.$exit(await raced)
+        },
+      })
+    })
+
     it("rejects unknown $result keys", () => {
       if (typecheckOnly()) {
         void try$.all({

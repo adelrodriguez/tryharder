@@ -535,6 +535,24 @@ describe("flow", () => {
     expect(signalAbortedInB).toBe(true)
   })
 
+  it("bounds the deadline with $race for signal-unaware work", async () => {
+    const startedAt = Date.now()
+
+    try {
+      await try$.timeout(10).flow({
+        async a() {
+          await this.$race(sleep(200))
+          return this.$exit("late" as const)
+        },
+      })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expect(error).toBeInstanceOf(TimeoutError)
+    }
+
+    expect(Date.now() - startedAt).toBeLessThan(150)
+  })
+
   it("rejects with TimeoutError when the graph deadline fires before $exit", async () => {
     try {
       await try$.timeout(10).flow({

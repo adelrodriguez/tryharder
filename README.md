@@ -303,7 +303,7 @@ Use `run(...)` and `runSync(...)` for a single unit of work. Use `all(...)` or `
 
 Orchestration supports `signal(...)` and `timeout(...)` policies. `timeout(ms)` is a whole-graph deadline: when it fires, every task's `$signal` aborts and the orchestration rejects with `TimeoutError` (cancellation wins if both fire). Policy failures are thrown, never mapped through an orchestration-level `catch`. `retry(...)` is not supported for orchestration — apply it to leaf `run(...)` calls inside tasks instead.
 
-The deadline is cooperative, like all cancellation in JavaScript: aborting `$signal` does not stop a task by itself. All three orchestration APIs wait for every in-flight task to settle before rejecting — the structured guarantee that no task code is still running once the orchestration returns, and that a caller may safely retry after a `TimeoutError` — so a task that ignores `$signal` extends the time until the `TimeoutError` surfaces. The same holds for `signal(...)` cancellation: the orchestration rejects with `CancellationError` only after every in-flight task has settled. For the deadline to bound wall-clock time in practice, tasks must observe `$signal`: check it between steps, or pass it to signal-aware I/O such as `fetch`.
+The deadline is cooperative, like all cancellation in JavaScript: aborting `$signal` does not stop a task by itself. All three orchestration APIs wait for every in-flight task to settle before rejecting — the structured guarantee that no task code is still running once the orchestration returns, and that a caller may safely retry after a `TimeoutError` — so a task that ignores `$signal` extends the time until the `TimeoutError` surfaces. The same holds for `signal(...)` cancellation: the orchestration rejects with `CancellationError` only after every in-flight task has settled. For the deadline to bound wall-clock time in practice, tasks must observe `$signal`: check it between steps, pass it to signal-aware I/O such as `fetch`, or wrap any await in `this.$race(...)`, which races a promise against `$signal` and rejects with the abort reason when the signal fires first.
 
 `all(...)` runs an object-shaped task graph and resolves to one object of successful results. Named tasks are easier to scan than positional arrays, and tasks can await earlier task results through `this.$result`. Execution is fail-fast: once one task fails, sibling task signals are aborted and the orchestration rejects unless you provide an orchestration-level `catch`.
 
@@ -672,6 +672,18 @@ const result = await try$.signal(controller.signal).all({
   },
   async b() {
     return db.accounts.findById("acct_123", { signal: this.$signal })
+  },
+})
+```
+
+### Wrap signal-unaware work in $race
+
+When a task awaits work that cannot take an `AbortSignal`, wrap the await in `this.$race(...)` so graph deadlines and cancellation still bound how long the task runs. The abandoned promise keeps running in the background — `$race` hands control back to the orchestration; it cannot stop the underlying work.
+
+```ts
+const result = await try$.timeout(5_000).all({
+  async report() {
+    return await this.$race(legacyClient.generateReport())
   },
 })
 ```

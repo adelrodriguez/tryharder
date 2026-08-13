@@ -2,8 +2,10 @@ import type { AsyncDisposer } from "../../shims/disposer"
 import type { BuilderConfig } from "../builder"
 import { createAsyncDisposer, defineAsyncDisposeAlias } from "../../shims/disposer"
 import { Panic, UnhandledException } from "../errors"
-import { invariant } from "../utils"
+import { invariant, resolveWithAbort } from "../utils"
 import { BaseExecution } from "./base"
+
+const TASK_RACE_ABORTED = Symbol("tryharder.taskRaceAborted")
 
 // oxlint-disable-next-line no-explicit-any -- Required for task-map inference
 export type TaskRecord = Record<string, any>
@@ -24,6 +26,11 @@ export interface TaskContext<T extends TaskRecord> {
   $result: ResultProxy<T>
   $signal: AbortSignal
   $disposer: AsyncDisposer
+  /**
+   * Races a promise against `$signal`, rejecting with the abort reason if the signal fires first.
+   * Wrap awaits on signal-unaware work so graph deadlines and cancellation bound wall-clock time.
+   */
+  $race<V>(promise: PromiseLike<V>): Promise<V>
 }
 
 export type InferredTaskContext<T extends TaskRecord> = {
@@ -34,6 +41,7 @@ export type InferredTaskContext<T extends TaskRecord> = {
   }
   $signal: AbortSignal
   $disposer: AsyncDisposer
+  $race<V>(promise: PromiseLike<V>): Promise<V>
 }
 
 export type AllValue<T extends TaskRecord> = {
@@ -266,6 +274,21 @@ export abstract class TaskGraphExecutionBase<
   }
 
   /**
+   * Backs the task context's `$race`: races a promise against the task signal and rejects with the
+   * abort reason if the signal fires first. The abandoned promise stays observed inside
+   * `resolveWithAbort`, so a late rejection cannot become an unhandled rejection.
+   */
+  protected async raceTaskSignal<V>(promise: PromiseLike<V>): Promise<V> {
+    const raced = await resolveWithAbort(this.taskSignal, promise, () => TASK_RACE_ABORTED)
+
+    if (raced === TASK_RACE_ABORTED) {
+      throw this.taskSignal.reason
+    }
+
+    return raced as V
+  }
+
+  /**
    * Optional observation hooks: subclasses implement these to record task outcomes. These method
    * signatures are erased at compile time, so the base class leaves them undefined without emitting
    * fields that would shadow subclass prototype methods.
@@ -308,12 +331,18 @@ export abstract class TaskGraphExecutionBase<
       this.taskSettlement(taskName).resolve(result)
       this.onTaskResult?.(taskName, result)
     } catch (error) {
+      const mappedError = this.mapStoredError(error)
+
       this.setFirstRejection(error)
-      this.taskSettlement(taskName).reject(this.mapStoredError(error))
+      this.taskSettlement(taskName).reject(mappedError)
       this.onTaskError?.(taskName, error)
 
       if (this.shouldAbortOnTaskError(error)) {
-        this.abortInternal(error)
+        // Abort with the mapped error so the signal reason siblings observe
+        // (directly or via $race) is never undefined — abort(undefined) would
+        // make the platform substitute a default AbortError that could then
+        // replace an unrecordable undefined firstRejection.
+        this.abortInternal(mappedError)
       }
 
       if (this.shouldRethrowTaskError(error)) {
@@ -347,6 +376,7 @@ abstract class TaskExecution<T extends TaskRecord> extends TaskGraphExecutionBas
   protected override createTaskContext(resultProxy: ResultProxy<T>): TaskContext<T> {
     return {
       $disposer: this.disposer,
+      $race: (promise) => this.raceTaskSignal(promise),
       $result: resultProxy,
       $signal: this.taskSignal,
     }
