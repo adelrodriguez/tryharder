@@ -22,10 +22,10 @@ describe("gen", () => {
             observed.push(yield* use(value))
           }
 
-          return observed.length
+          return observed.reduce((sum, value) => sum + value, 0)
         })
 
-        expect(result).toBe(values.length)
+        expect(result).toBe(values.reduce((sum, value) => sum + value, 0))
         expect(observed).toEqual(values)
       })
     )

@@ -345,7 +345,7 @@ describe("retry behavior", () => {
     expect(result).toBe(limit)
   })
 
-  it("supports runSync after numeric retry shorthand", () => {
+  it("runs no more than the numeric retry limit", () => {
     fc.assert(
       fc.property(
         fc.integer({ max: 100, min: 1 }),
