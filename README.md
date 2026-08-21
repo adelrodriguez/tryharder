@@ -145,7 +145,7 @@ const result = await try$
 //   | CancellationError
 ```
 
-The rules are simple:
+Four rules determine the result type:
 
 - `run(fn)` returns `T | UnhandledException`.
 - `run({ try, catch })` returns `T | C`, where `C` is what your `catch` returns.
@@ -156,13 +156,13 @@ You can read the failure behavior of a function from its return type. You do not
 
 ## Features
 
-- **Errors as values** — Thrown errors come back as part of the return type, not through a hidden side channel.
-- **Execution policies** — Add retries, one total deadline, and cancellation without changing the work itself.
-- **Sync and async parity** — `runSync(...)` uses the same mental model as `run(...)`.
-- **Named task orchestration** — Run concurrent and ordered workflows as named task objects, not positional arrays.
-- **Instrumentation hooks** — Observe execution with `wrap(...)` for logs, traces, and metrics.
-- **Resource cleanup** — Register teardown that survives async boundaries with `disposer()` and task disposers.
-- **No runtime dependencies** — The published package ships without runtime dependencies.
+- **Errors as values.** Thrown errors come back as part of the return type, not through a hidden side channel.
+- **Execution policies.** Add retries, one total deadline, and cancellation without changing the work itself.
+- **Sync and async parity.** `runSync(...)` follows the same rules as `run(...)`.
+- **Named task orchestration.** Run concurrent and ordered workflows as named task objects, not positional arrays.
+- **Instrumentation hooks.** Observe execution with `wrap(...)` for logs, traces, and metrics.
+- **Resource cleanup.** Register teardown that survives async boundaries with `disposer()` and task disposers.
+- **No runtime dependencies.** Installing `tryharder` installs one package and nothing else.
 
 ## Installation
 
@@ -182,7 +182,7 @@ pnpm add tryharder
 
 ### Requirements
 
-`tryharder` needs Node.js 22 or later (declared via `engines`), or any runtime with `AbortSignal.any` and `Promise.withResolvers`. Recent Bun, Deno, and evergreen browsers qualify.
+`tryharder` needs `AbortSignal.any` and `Promise.withResolvers`. Node.js 22 or later has both, and the package declares that floor in its `engines` field. Recent Bun, Deno, and current browsers also qualify.
 
 ## Quick start
 
@@ -264,8 +264,8 @@ Three more tools sit around these layers. `wrap(...)` observes execution without
 | --------------------- | -------------------------------------------------------------------------------- |
 | `run`                 | Async terminal execution that returns a value, mapped failure, or policy failure |
 | `runSync`             | Sync terminal execution for synchronous work only                                |
-| `retry(limit)`        | Retry policy; `limit` is a positive integer counting the first attempt           |
-| `timeout(ms)`         | Total deadline: across attempts for `run(...)`, whole-graph for orchestration    |
+| `retry(limit)`        | Retry policy. `limit` is a positive integer counting the first attempt           |
+| `timeout(ms)`         | Total deadline. Covers all attempts for `run(...)`, the whole graph for orchestration |
 | `signal(abortSignal)` | External cancellation for `run(...)` and root-level orchestration                |
 | `wrap(fn)`            | Top-level observational middleware around terminal APIs                          |
 | `all(tasks)`          | Fail-fast parallel named task graph                                              |
@@ -275,13 +275,13 @@ Three more tools sit around these layers. `wrap(...)` observes execution without
 | `$race(promise)`      | Race a promise against the task's `$signal` inside orchestration                 |
 | `$disposer`           | Register task cleanup that runs when the orchestration settles                   |
 
-The chain has a fixed order. Keep these rules in mind:
+The chain has a fixed order:
 
 - Put `wrap(...)` first. It is not available after `retry(...)`, `timeout(...)`, or an execution-scoped `signal(...)`.
 - `retry(...)` removes the orchestration methods, at the type level and at runtime. A retry of a whole task graph is not meaningful. Apply `retry(...)` to `run(...)` calls inside tasks instead.
 - `timeout(...)` and a root-level `signal(...)` keep orchestration available.
 
-Not sure if `tryharder` is a good fit for your project? See [When not to use tryharder](#when-not-to-use-tryharder).
+To decide whether `tryharder` fits your project at all, see [When not to use tryharder](#when-not-to-use-tryharder).
 
 ## Errors as values
 
@@ -289,7 +289,7 @@ Not sure if `tryharder` is a good fit for your project? See [When not to use try
 
 - **Domain failures** are the values you map into your own types with `catch`. They are expected outcomes of your problem domain, such as `ValidationError`.
 - **Policy failures** come from the chain: `TimeoutError`, `CancellationError`, and `RetryExhaustedError`. They appear in the result union when you add the matching policy.
-- **Panics** signal programmer misuse, such as an invalid builder chain or an invalid task graph. `tryharder` throws `Panic`; a panic is never part of a result union.
+- **Panics** signal programmer misuse, such as an invalid builder chain or an invalid task graph. `tryharder` throws `Panic`. A panic is never part of a result union.
 
 ```ts
 import * as try$ from "tryharder"
@@ -332,7 +332,7 @@ if (isTimeoutError(outcome)) {
 }
 ```
 
-Without `catch`, unmapped failures are wrapped. You get `RetryExhaustedError` when a retry policy gave up for any reason — the limit ran out or `shouldRetry` declined — and `UnhandledException` otherwise. The original error is always available as `cause`.
+Without `catch`, `tryharder` wraps unmapped failures. When a retry policy gives up, whether the limit ran out or `shouldRetry` declined, you get `RetryExhaustedError`. Otherwise you get `UnhandledException`. The original error is always available as `cause`.
 
 ## Run one operation
 
@@ -389,7 +389,7 @@ const body = try$.runSync({
 
 ### retry, timeout, and signal
 
-Use these builders to put execution policy around one unit of work. They decorate `run(...)` or `runSync(...)` and keep policy separate from business logic. `timeout(...)` and `signal(...)` widen the result union; `retry(...)` changes how persistent failure is reported.
+Use these builders to put execution policy around one unit of work. They decorate `run(...)` or `runSync(...)` and keep policy separate from business logic. `timeout(...)` and `signal(...)` widen the result union. `retry(...)` changes how persistent failure is reported.
 
 The full retry policy controls backoff, jitter, and which errors are worth another attempt. `shouldRetry` lets the policy give up early on errors that a retry cannot fix:
 
@@ -434,7 +434,7 @@ const etag = await try$
 
 The function receives a context object. `signal` combines your external signal with the deadline, so one `fetch` option covers both. `retry.attempt` and `retry.limit` describe the current attempt.
 
-`timeout(ms)` measures total execution time — attempts, delays, and `catch` handling together — not one attempt.
+`timeout(ms)` measures total execution time, not one attempt. Attempts, delays, and `catch` handling all count against the deadline.
 
 `runSync(...)` stays available after the numeric retry shorthand (`retry(3)`). It is not available after the object form (`retry({ ... })`) or after `timeout(...)`, because those policies can wait or interrupt, and synchronous execution cannot. This restriction is intentionally conservative: the types also block object policies that would be sync-safe at runtime. If you need retries with `runSync(...)`, use the numeric shorthand.
 
@@ -473,13 +473,13 @@ The orchestration APIs run a group of named tasks with one policy:
 
 Tasks are object properties, so each task has a name. A task can await an earlier task's result through `this.$result`. Each task also receives `this.$signal` for cooperative cancellation and `this.$disposer` to register cleanup that runs when the orchestration settles. Named tasks are easier to scan than positional arrays.
 
-Orchestration supports `timeout(...)` and root-level `signal(...)`. `timeout(ms)` sets one deadline for the whole graph. When it fires, each task's `this.$signal` aborts, and the call rejects with `TimeoutError` (cancellation wins if both fire). Policy failures are thrown; an orchestration-level `catch` never maps them. `retry(...)` is not available for orchestration — apply it to `run(...)` calls inside tasks.
+Orchestration supports `timeout(...)` and root-level `signal(...)`. `timeout(ms)` sets one deadline for the whole graph. When the deadline fires, each task's `this.$signal` aborts, and the call rejects with `TimeoutError`. If the deadline and cancellation both fire, cancellation wins. Orchestration throws policy failures, and an orchestration-level `catch` never maps them. `retry(...)` is not available for orchestration. Apply it to `run(...)` calls inside tasks.
 
-Cancellation is cooperative, like all cancellation in JavaScript. An aborted signal does not stop a task by itself. All three orchestration APIs wait for every in-flight task to settle before they reject. This is a structural guarantee: no task code still runs after the call returns, so a caller can safely retry after a `TimeoutError`. The same holds for `signal(...)`: the call rejects with `CancellationError` only after every in-flight task has settled. For a deadline to bound wall-clock time in practice, your tasks must observe `this.$signal` — check it between steps, pass it to signal-aware I/O such as `fetch`, or wrap an await in `this.$race(...)`. `$race` races a promise against `$signal` and rejects with the abort reason when the signal fires first.
+Cancellation is cooperative, like all cancellation in JavaScript. An aborted signal does not stop a task by itself. All three orchestration APIs wait for every in-flight task to settle before they reject. The wait is a structural guarantee: no task code still runs after the call returns, so a caller can safely retry after a `TimeoutError`. The same holds for `signal(...)`: the call rejects with `CancellationError` only after every in-flight task has settled. For a deadline to bound wall-clock time in practice, your tasks must observe `this.$signal`: check it between steps, pass it to signal-aware I/O such as `fetch`, or wrap an await in `this.$race(...)`. `$race` races a promise against `$signal` and rejects with the abort reason when the signal fires first.
 
 ### all
 
-`all(...)` runs the tasks concurrently and resolves to one object of successful results. Execution is fail-fast: when one task fails, the sibling task signals abort, and the call rejects unless you provide an orchestration-level `catch`.
+`all(...)` runs the tasks concurrently and resolves to one object of successful results. Execution is fail-fast: when one task fails, `this.$signal` aborts in every other task, and the call rejects unless you provide an orchestration-level `catch`.
 
 ```ts
 const page = await try$.all({
@@ -504,7 +504,7 @@ const page = await try$.all({
 
 ### allSettled
 
-`allSettled(...)` uses the same task-graph shape, but keeps every task outcome as settled data, in the same shape as `Promise.allSettled`. Use it when a failure is input to the next decision, not a reason to stop the whole graph.
+`allSettled(...)` takes the same task graph, but keeps every task outcome as settled data, in the same format as `Promise.allSettled`. Use it when a failure is input to the next decision, not a reason to stop the whole graph.
 
 ```ts
 const checks = await try$.allSettled({
@@ -530,7 +530,7 @@ if (checks.api.status === "rejected") {
 
 Use `flow(...)` for stepwise, business-process workflows. Tasks still read earlier results through `this.$result`, but completion is explicit: at least one path must call `this.$exit(...)`. The exit is a visible part of the workflow contract, not an implicit convention.
 
-Tasks start together, like in `all(...)`. `$exit` does not stop tasks that already started: the first exit becomes the flow result and aborts sibling `$signal`s. Observe `this.$signal` in later tasks, or make them await an earlier task through `this.$result` before they start side effects.
+Tasks start together, like in `all(...)`. `$exit` does not stop tasks that already started. The first exit becomes the flow result and aborts the other tasks' `$signal`. Observe `this.$signal` in later tasks, or make them await an earlier task through `this.$result` before they start side effects.
 
 ```ts
 const cache = new Map<string, string>()
@@ -585,7 +585,7 @@ const summary = await try$.gen(function* (use) {
 // summary is string | UnhandledException
 ```
 
-`gen(...)` detects failures with `instanceof Error`. A failure value that is not an `Error` instance — for example, a `catch` that maps to a plain object, or an error that crossed a realm boundary — resumes into the generator as a success value. Map failures to `Error` subclasses when you compose with `gen(...)`.
+`gen(...)` detects failures with `instanceof Error`. A failure value that is not an `Error` instance resumes into the generator as a success value. That happens when a `catch` maps to a plain object, or when an error crosses a realm boundary. Map failures to `Error` subclasses when you compose with `gen(...)`.
 
 ### disposer
 
@@ -606,11 +606,11 @@ disposer.defer(() => clearInterval(heartbeat))
 
 // ... send encoding work to the worker ...
 
-// When this scope ends — normally or through an error — the heartbeat
+// When this scope ends, normally or through an error, the heartbeat
 // stops first, then the worker terminates (reverse order).
 ```
 
-`tryharder` handles the cleanup bookkeeping internally, so the native `DisposableStack` and `AsyncDisposableStack` globals are not required.
+`tryharder` handles the cleanup bookkeeping internally, so it does not need the native `DisposableStack` and `AsyncDisposableStack` globals.
 
 ## API reference
 
@@ -639,11 +639,11 @@ Exports from `tryharder/errors`:
 | --------------------- | --------------------------------------------------------------------------------------------------------- |
 | `CancellationError`   | Returned or thrown when execution is externally cancelled                                                 |
 | `TimeoutError`        | Returned when timed execution expires                                                                     |
-| `RetryExhaustedError` | Returned when a retry policy gives up and no `catch` is provided; the last attempt's error is the `cause` |
+| `RetryExhaustedError` | Returned when a retry policy gives up and no `catch` is provided. The last attempt's error is the `cause` |
 | `UnhandledException`  | Returned when function-form execution throws                                                              |
 | `Panic`               | Thrown for programmer misuse and invalid API usage                                                        |
 
-Each error class has a matching type guard: `isCancellationError`, `isTimeoutError`, `isRetryExhaustedError`, `isUnhandledException`, and `isPanic`. Prefer the guards over `instanceof` — they also match by `error.name`, so they keep working when two copies of `tryharder` end up in one dependency graph, or when errors cross realm boundaries, where `instanceof` silently fails.
+Each error class has a matching type guard: `isCancellationError`, `isTimeoutError`, `isRetryExhaustedError`, `isUnhandledException`, and `isPanic`. Prefer the guards over `instanceof`. The guards also match by `error.name`, so they keep working when two copies of `tryharder` end up in one dependency graph, or when errors cross realm boundaries. In both cases `instanceof` silently fails.
 
 ```ts
 import { isTimeoutError } from "tryharder/errors"
@@ -789,7 +789,7 @@ const data = await try$.signal(controller.signal).all({
 
 ### Wrap signal-unaware work in $race
 
-Some work cannot take an `AbortSignal`, such as a legacy client or driver. Wrap the await in `this.$race(...)` so graph deadlines and cancellation still bound how long the task runs. Note that `$race` hands control back to the orchestration; it cannot stop the underlying work, so the abandoned promise keeps running in the background.
+Some work cannot take an `AbortSignal`, such as a legacy client or driver. Wrap the await in `this.$race(...)` so graph deadlines and cancellation still bound how long the task runs. `$race` hands control back to the orchestration. It cannot stop the underlying work, so the abandoned promise keeps running in the background.
 
 ```ts
 async function buildReport(legacy: { generateReport(): Promise<{ rows: number }> }) {
