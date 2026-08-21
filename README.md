@@ -158,7 +158,7 @@ You can read the failure behavior of a function from its return type. You do not
 
 - **Errors as values.** Thrown errors come back as part of the return type, not through a hidden side channel.
 - **Execution policies.** Add retries, one total deadline, and cancellation without changing the work itself.
-- **Sync and async parity.** `runSync(...)` follows the same rules as `run(...)`.
+- **Sync and async parity.** `runSync(...)` maps failures and builds result unions the same way as `run(...)`. Policies that wait or interrupt are async only.
 - **Named task orchestration.** Run concurrent and ordered workflows as named task objects, not positional arrays.
 - **Instrumentation hooks.** Observe execution with `wrap(...)` for logs, traces, and metrics.
 - **Resource cleanup.** Register teardown that survives async boundaries with `disposer()` and task disposers.
