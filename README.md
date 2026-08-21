@@ -260,20 +260,20 @@ if (rate instanceof RateUnavailableError) {
 
 Three more tools sit around these layers. `wrap(...)` observes execution without changing it. `gen(...)` composes result unions in a linear style. `disposer()` registers cleanup that runs when the work is done.
 
-| Term                  | Meaning                                                                          |
-| --------------------- | -------------------------------------------------------------------------------- |
-| `run`                 | Async terminal execution that returns a value, mapped failure, or policy failure |
-| `runSync`             | Sync terminal execution for synchronous work only                                |
-| `retry(limit)`        | Retry policy. `limit` is a positive integer counting the first attempt           |
+| Term                  | Meaning                                                                               |
+| --------------------- | ------------------------------------------------------------------------------------- |
+| `run`                 | Async terminal execution that returns a value, mapped failure, or policy failure      |
+| `runSync`             | Sync terminal execution for synchronous work only                                     |
+| `retry(limit)`        | Retry policy. `limit` is a positive integer counting the first attempt                |
 | `timeout(ms)`         | Total deadline. Covers all attempts for `run(...)`, the whole graph for orchestration |
-| `signal(abortSignal)` | External cancellation for `run(...)` and root-level orchestration                |
-| `wrap(fn)`            | Top-level observational middleware around terminal APIs                          |
-| `all(tasks)`          | Fail-fast parallel named task graph                                              |
-| `allSettled(tasks)`   | Settled parallel named task graph                                                |
-| `flow(tasks)`         | Ordered task workflow with explicit early exit                                   |
-| `$exit(value)`        | Stop a `flow(...)` early and return `value`                                      |
-| `$race(promise)`      | Race a promise against the task's `$signal` inside orchestration                 |
-| `$disposer`           | Register task cleanup that runs when the orchestration settles                   |
+| `signal(abortSignal)` | External cancellation for `run(...)` and root-level orchestration                     |
+| `wrap(fn)`            | Top-level observational middleware around terminal APIs                               |
+| `all(tasks)`          | Fail-fast parallel named task graph                                                   |
+| `allSettled(tasks)`   | Settled parallel named task graph                                                     |
+| `flow(tasks)`         | Ordered task workflow with explicit early exit                                        |
+| `$exit(value)`        | Stop a `flow(...)` early and return `value`                                           |
+| `$race(promise)`      | Race a promise against the task's `$signal` inside orchestration                      |
+| `$disposer`           | Register task cleanup that runs when the orchestration settles                        |
 
 The chain has a fixed order:
 
