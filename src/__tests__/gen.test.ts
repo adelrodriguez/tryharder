@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test"
+import fc from "fast-check"
 import { CancellationError, Panic, TimeoutError, UnhandledException } from "../errors"
 import * as try$ from "../index"
 
@@ -12,13 +13,22 @@ class ProjectNotFoundError extends Error {
 
 describe("gen", () => {
   it("returns sync success value when all yielded values are sync", () => {
-    const result = try$.gen(function* (use) {
-      const a = yield* use(20)
-      const b = yield* use(22)
-      return a + b
-    })
+    fc.assert(
+      fc.property(fc.array(fc.integer()), (values) => {
+        const observed: number[] = []
 
-    expect(result).toBe(42)
+        const result = try$.gen(function* (use) {
+          for (const value of values) {
+            observed.push(yield* use(value))
+          }
+
+          return observed.length
+        })
+
+        expect(result).toBe(values.length)
+        expect(observed).toEqual(values)
+      })
+    )
   })
 
   it("short-circuits sync execution on yielded Error", () => {
