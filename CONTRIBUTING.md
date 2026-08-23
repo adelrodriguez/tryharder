@@ -130,6 +130,9 @@ Allows flow tasks to observe external cancellation consistently.
 - Ensure all tests pass before submitting
 - Public API type changes must be covered in `src/__tests__/types.test.ts`
 - Test files live in `src/__tests__/` and `src/lib/__tests__/`
+- Use `fast-check` for invariants that must hold across many inputs. Keep fixed examples for named cases and exact contracts.
+- To replay a property failure, pass the reported `seed` and `path` to `fc.assert`.
+- After you fix a property failure, add the minimized counterexample as a fixed regression test beside the property.
 
 ## Changesets Workflow
 

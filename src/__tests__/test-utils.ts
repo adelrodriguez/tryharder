@@ -11,17 +11,3 @@ export function expectPanic(error: unknown, code: PanicCode) {
   expect(error).toBeInstanceOf(Panic)
   expect((error as Panic).code).toBe(code)
 }
-
-export function createRandomGenerator(target: number) {
-  let attempts = 0
-
-  return {
-    get attempts() {
-      return attempts
-    },
-    next() {
-      attempts += 1
-      return attempts === 3 ? target : 0
-    },
-  }
-}

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test"
+import fc from "fast-check"
 import {
   CancellationError,
   Panic,
@@ -7,7 +8,7 @@ import {
   UnhandledException,
 } from "../errors"
 import * as try$ from "../index"
-import { createRandomGenerator, expectPanic, sleep } from "./test-utils"
+import { expectPanic, sleep } from "./test-utils"
 
 class InvalidInputError extends Error {
   override name = "InvalidInputError"
@@ -344,36 +345,34 @@ describe("retry behavior", () => {
     expect(result).toBe(limit)
   })
 
-  it("supports runSync after numeric retry shorthand", () => {
-    const target = 7
-    const succeedsOnThirdTry = createRandomGenerator(target)
+  it("runs no more than the numeric retry limit", () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ max: 100, min: 1 }),
+        fc.integer({ max: 100, min: 1 }),
+        (limit, successfulAttempt) => {
+          let attempts = 0
 
-    const result = try$.retry(3).runSync(() => {
-      const value = succeedsOnThirdTry.next()
+          const result = try$.retry(limit).runSync(() => {
+            attempts += 1
 
-      if (value !== target) {
-        throw new Error("try again")
-      }
+            if (attempts < successfulAttempt) {
+              throw new Error("try again")
+            }
 
-      return value
-    })
+            return successfulAttempt
+          })
 
-    expect(result).toBe(target)
-    expect(succeedsOnThirdTry.attempts).toBe(3)
+          expect(attempts).toBe(Math.min(limit, successfulAttempt))
 
-    const failsAfterTwoTries = createRandomGenerator(target)
-    const exhausted = try$.retry(2).runSync(() => {
-      const value = failsAfterTwoTries.next()
-
-      if (value !== target) {
-        throw new Error("try again")
-      }
-
-      return value
-    })
-
-    expect(exhausted).toBeInstanceOf(RetryExhaustedError)
-    expect(failsAfterTwoTries.attempts).toBe(2)
+          if (successfulAttempt <= limit) {
+            expect(result).toBe(successfulAttempt)
+          } else {
+            expect(result).toBeInstanceOf(RetryExhaustedError)
+          }
+        }
+      )
+    )
   })
 
   it("stops retrying when shouldRetry returns false", async () => {
