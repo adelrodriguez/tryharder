@@ -27,10 +27,14 @@ describe("bundle compatibility", () => {
     const outDir = join(process.cwd(), outDirName)
 
     try {
-      const build = spawnSync("pnpm", ["exec", "tsdown", "--out-dir", outDirName], {
-        cwd: process.cwd(),
-        encoding: "utf8",
-      })
+      const build = spawnSync(
+        "pnpm",
+        ["exec", "tsdown", "--platform", "browser", "--out-dir", outDirName],
+        {
+          cwd: process.cwd(),
+          encoding: "utf8",
+        }
+      )
 
       if (build.status !== 0) {
         throw new Error(build.stderr || build.stdout)
