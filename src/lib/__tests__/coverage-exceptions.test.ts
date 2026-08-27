@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it } from "vitest"
 import type { BuilderConfig } from "../builder"
 import { Panic } from "../../errors"
 import { createAsyncDisposer } from "../../shims/disposer"

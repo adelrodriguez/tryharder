@@ -21,10 +21,19 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
-      - name: Setup Bun
-        uses: ./.github/actions/setup-bun
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
 
-      - name: Build
-        run: bun run build
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify build
+        run: pnpm run build:verify

@@ -1,5 +1,5 @@
-import { describe, expect, it } from "bun:test"
 import fc from "fast-check"
+import { describe, expect, it } from "vitest"
 import {
   CancellationError,
   Panic,
@@ -35,14 +35,15 @@ function captureScheduledDelays() {
   const values: number[] = []
   const originalSetTimeout = globalThis.setTimeout
 
-  globalThis.setTimeout = ((
-    callback: Parameters<typeof globalThis.setTimeout>[0],
-    ms?: number,
-    ...args: unknown[]
-  ) => {
-    values.push(ms ?? 0)
-    return originalSetTimeout(callback, 0, ...args)
-  }) as typeof globalThis.setTimeout
+  const capturedSetTimeout = Object.assign(
+    <TArgs extends unknown[]>(callback: (...args: TArgs) => void, ms?: number, ...args: TArgs) => {
+      values.push(ms ?? 0)
+      return originalSetTimeout(callback, 0, ...args)
+    },
+    { __promisify__: originalSetTimeout.__promisify__ }
+  )
+
+  globalThis.setTimeout = capturedSetTimeout
 
   return {
     restore() {

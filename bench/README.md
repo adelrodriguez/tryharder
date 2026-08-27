@@ -5,13 +5,13 @@ The benchmark suite tracks relative performance trends for `tryharder` without t
 ## Commands
 
 ```bash
-bun run bench
-bun run bench:ci
+pnpm run bench
+pnpm run bench:ci
 ```
 
-`bun run bench` builds the package and prints human-readable `mitata` output.
+`pnpm run bench` builds the package and prints human-readable `mitata` output.
 
-`bun run bench:ci` builds the package, emits structured benchmark JSON, and writes these artifacts:
+`pnpm run bench:ci` builds the package, emits structured benchmark JSON, and writes these artifacts:
 
 - `bench-results/latest.json`
 - `bench-results/summary.md`
@@ -22,7 +22,7 @@ bun run bench:ci
 - Cases stay deterministic and timer-free. Do not use `sleep`, real timeout expiry, or cancellation races in this suite.
 - Reuse task graphs and builder fixtures where setup can stay outside the measured loop.
 - Route results through the shared sink in `bench/shared.ts` so the runtime cannot optimize work away.
-- Run on the same Bun version when comparing history. This repo pins benchmark runs to `bun@1.3.14`.
+- Run on the same Node.js version when comparing history. This repo declares the development version in `.node-version`.
 - Treat results as trend signals. Do not infer product-level latency from these microbenchmarks.
 
 ## How to read these benchmarks
@@ -33,4 +33,4 @@ bun run bench:ci
 - Prefer absolute changes in `ns/iter` or `us/iter` when reading results. A `+200 ns` regression on a hot-path benchmark is usually more meaningful than a percentage quoted without context.
 - Read policy benchmarks as incremental overhead on top of execution. `wrap/runSync/success`, `signal/runSync/success`, `timeout/run/success-no-expiry`, and `retry/runSync/succeeds-on-third-attempt` show the cost of enabling those features even when they do not fail. The async control cases `signal/run/async-success-no-abort`, `timeout/run/async-success-no-expiry`, and `signal-timeout/run/async-success-no-abort-no-expiry` are the cases to watch when evaluating `resolveWithAbort()` changes.
 - Read orchestration benchmarks as framework cost for very small graphs. `all`, `allSettled`, and `flow` are expected to be much slower than `Promise.all` in these tiny cases because they are doing dependency tracking, cancellation wiring, and result shaping. Compare unused-feature cases with exercised-feature cases like `all/two-independent-sync-tasks-with-signal`, `all/two-independent-sync-tasks-with-disposer`, `allSettled/two-successful-tasks-with-disposer`, and `flow/two-node-dependency-then-exit` to see where fixed setup cost is going.
-- Only compare history across runs that use the same Bun version, machine class, and benchmark suite version. Cross-machine numbers are not reliable enough for regression calls.
+- Only compare history across runs that use the same Node.js version, machine class, and benchmark suite version. Cross-machine numbers are not reliable enough for regression calls.

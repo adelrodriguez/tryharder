@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it } from "vitest"
 import {
   normalizeBenchmarkPayload,
   parseRawBenchmarkPayload,
@@ -42,7 +42,7 @@ describe("benchmark reporting", () => {
             cpu: {
               name: "Test CPU",
             },
-            version: "1.3.1",
+            version: "v24.0.0",
           },
         },
         suiteVersion: 1,
@@ -75,10 +75,10 @@ describe("benchmark reporting", () => {
       ],
       meta: {
         arch: "arm64",
-        bunVersion: "1.3.1",
         cpuModel: "Test CPU",
         date: "2026-03-07T00:00:00.000Z",
         gitSha: "abc123",
+        nodeVersion: "v24.0.0",
         platform: "darwin",
         suiteVersion: 1,
       },
@@ -118,9 +118,9 @@ describe("benchmark reporting", () => {
       },
       {
         arch: "arm64",
-        bunVersion: "1.3.1",
         date: "2026-03-07T00:00:00.000Z",
         gitSha: "abc123",
+        nodeVersion: "v24.0.0",
         platform: "darwin",
       }
     )

@@ -1,4 +1,4 @@
-import { expect } from "bun:test"
+import { expect } from "vitest"
 import { Panic, type PanicCode } from "../errors"
 
 export function sleep(ms: number): Promise<void> {
