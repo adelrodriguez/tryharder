@@ -1,7 +1,8 @@
-import { describe, expect, it } from "bun:test"
+import { spawnSync } from "node:child_process"
 import { readdir, readFile, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { pathToFileURL } from "node:url"
+import { describe, expect, it } from "vitest"
 
 async function findJavaScriptFiles(root: string): Promise<string[]> {
   const entries = await readdir(root, { withFileTypes: true })
@@ -26,15 +27,17 @@ describe("bundle compatibility", () => {
     const outDir = join(process.cwd(), outDirName)
 
     try {
-      const build = Bun.spawnSync({
-        cmd: ["bun", "x", "bunup", "--target", "browser", "--out-dir", outDirName],
-        cwd: process.cwd(),
-        stderr: "pipe",
-        stdout: "pipe",
-      })
+      const build = spawnSync(
+        "pnpm",
+        ["exec", "tsdown", "--platform", "browser", "--out-dir", outDirName],
+        {
+          cwd: process.cwd(),
+          encoding: "utf8",
+        }
+      )
 
-      if (build.exitCode !== 0) {
-        throw new Error(build.stderr.toString() || build.stdout.toString())
+      if (build.status !== 0) {
+        throw new Error(build.stderr || build.stdout)
       }
 
       const jsFiles = await findJavaScriptFiles(outDir)
@@ -80,18 +83,16 @@ describe("bundle compatibility", () => {
         ].join("\n")
       )
 
-      const smoke = Bun.spawnSync({
-        cmd: ["bun", smokePath],
+      const smoke = spawnSync(process.execPath, [smokePath], {
         cwd: process.cwd(),
-        stderr: "pipe",
-        stdout: "pipe",
+        encoding: "utf8",
       })
 
-      if (smoke.exitCode !== 0) {
-        throw new Error(smoke.stderr.toString() || smoke.stdout.toString())
+      if (smoke.status !== 0) {
+        throw new Error(smoke.stderr || smoke.stdout)
       }
     } finally {
       await rm(outDir, { force: true, recursive: true })
     }
-  })
+  }, 30_000)
 })

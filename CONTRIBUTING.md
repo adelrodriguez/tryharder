@@ -6,7 +6,8 @@ Thank you for your interest in contributing to tryharder. This document provides
 
 ### Prerequisites
 
-- [Bun](https://bun.sh) 1.3.14 or higher
+- [Node.js](https://nodejs.org) 24 or higher
+- [pnpm](https://pnpm.io) 12 or higher
 - TypeScript knowledge
 
 ### Installation
@@ -19,7 +20,7 @@ Thank you for your interest in contributing to tryharder. This document provides
    ```
 3. Install dependencies:
    ```bash
-   bun install
+   pnpm install
    ```
 
 ## Project Structure
@@ -49,49 +50,49 @@ src/
 
 ```bash
 # Run all tests
-bun run test
+pnpm run test
 
 # Watch mode for development
-bun run test:watch
+pnpm run test:watch
 
 # With coverage
-bun run test:coverage
+pnpm run test:coverage
 ```
 
 ### Code Quality
 
 ```bash
 # Format the codebase
-bun run format
+pnpm run format
 
 # Check linting and types
-bun run check
+pnpm run check
 
 # Auto-fix linting and formatting issues
-bun run fix
+pnpm run fix
 
 # Analyze dependency usage
-bun run analyze
+pnpm run analyze
 ```
 
-Run `bun run format` after editing files. Before submitting a PR, run:
+Run `pnpm run format` after editing files. Before submitting a PR, run:
 
 ```bash
-bun run check
-bun run test
-bun run build
+pnpm run check
+pnpm run test
+pnpm run build:verify
 ```
 
-Run `bun run analyze` after installing or removing dependencies.
+Run `pnpm run analyze` after installing or removing dependencies.
 
 ### Building
 
 ```bash
 # Build the package
-bun run build
+pnpm run build
 
 # Watch mode
-bun run dev
+pnpm run dev
 ```
 
 ## Making Changes
@@ -156,7 +157,7 @@ Skip changesets for:
 ### Creating a Changeset
 
 ```bash
-bunx changeset
+pnpm exec changeset
 ```
 
 Follow the prompts to:
@@ -181,10 +182,10 @@ This project is currently in `v0`, so breaking changes are acceptable when they 
 Ensure your PR meets these requirements:
 
 - [ ] Code follows the project's style guidelines
-- [ ] Code is formatted (`bun run format`)
-- [ ] Linting and checks pass (`bun run check`)
-- [ ] Tests pass (`bun run test`)
-- [ ] Build succeeds (`bun run build`)
+- [ ] Code is formatted (`pnpm run format`)
+- [ ] Linting and checks pass (`pnpm run check`)
+- [ ] Tests pass (`pnpm run test`)
+- [ ] Build verification succeeds (`pnpm run build:verify`)
 - [ ] Changeset added, if applicable
 - [ ] Documentation updated, if needed
 

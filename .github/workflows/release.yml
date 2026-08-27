@@ -88,39 +88,35 @@ jobs:
             core.setFailed(`Timed out waiting for required workflows for ${sha}`);
 
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      # Setup Node.js to enable trusted publishing with OIDC authentication.
-      # The registry-url configures npm to use GitHub Actions OIDC tokens for
-      # authentication, eliminating the need for NPM_TOKEN secrets. When
-      # changeset publish runs npm publish, it will automatically use OIDC
-      # and generate provenance attestations.
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: "24"
-          registry-url: "https://registry.npmjs.org"
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
 
-      - name: Setup Bun
-        uses: ./.github/actions/setup-bun
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: ".node-version"
+          registry-url: "https://registry.npmjs.org"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Build
-        run: bun run build
+        run: pnpm run build
 
       - name: Verify package contents
         run: npm pack --dry-run
 
-      - name: Configure npm authentication
-        run: echo '//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}' >> .npmrc
-
       - name: Create Release Pull Request or Publish to npm
         id: changesets
-        uses: changesets/action@v1
+        uses: changesets/action@v2
         with:
-          publish: bun run release
-          version: bun run version
-          title: "chore: release"
+          publish-script: pnpm run release
+          version-script: pnpm run version
+          pr-title: "chore: release"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it } from "vitest"
 import { CancellationError, Panic, TimeoutError } from "../errors"
 import * as try$ from "../index"
 import { expectPanic, sleep } from "./test-utils"

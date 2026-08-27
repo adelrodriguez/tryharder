@@ -40,7 +40,7 @@ if (isJson) {
           cpu: {
             name: results.context.cpu.name,
           },
-          version: Bun.version,
+          version: process.version,
         },
       },
       suiteVersion: BENCHMARK_SUITE_VERSION,

@@ -1,5 +1,7 @@
+import { spawnSync } from "node:child_process"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
+import { text } from "node:stream/consumers"
 import { BENCHMARK_SUITE_VERSION } from "./constants"
 
 const OUTPUT_DIR = "bench-results"
@@ -47,7 +49,7 @@ export type BenchmarkArtifact = {
   cases: BenchmarkCase[]
   meta: {
     arch: string
-    bunVersion: string
+    nodeVersion: string
     cpuModel: string | null
     date: string
     gitSha: string | null
@@ -64,7 +66,7 @@ export function normalizeBenchmarkPayload(
   payload: RawBenchmarkPayload,
   options: {
     arch?: string
-    bunVersion?: string
+    nodeVersion?: string
     cpuModel?: string | null
     date?: string
     gitSha?: string | null
@@ -81,14 +83,14 @@ export function normalizeBenchmarkPayload(
     cases,
     meta: {
       arch: options.arch ?? process.arch,
-      bunVersion:
-        options.bunVersion ??
-        normalizeOptionalString(payload.results?.context?.version) ??
-        Bun.version,
       cpuModel:
         options.cpuModel ?? normalizeOptionalString(payload.results?.context?.cpu?.name) ?? null,
       date: options.date ?? new Date().toISOString(),
       gitSha: options.gitSha ?? getGitSha(),
+      nodeVersion:
+        options.nodeVersion ??
+        normalizeOptionalString(payload.results?.context?.version) ??
+        process.version,
       platform: options.platform ?? process.platform,
       suiteVersion,
     },
@@ -101,7 +103,7 @@ export function renderBenchmarkSummary(artifact: BenchmarkArtifact) {
     "",
     `- Date: ${artifact.meta.date}`,
     `- Git SHA: ${artifact.meta.gitSha ?? "unknown"}`,
-    `- Bun: ${artifact.meta.bunVersion}`,
+    `- Node.js: ${artifact.meta.nodeVersion}`,
     `- Platform: ${artifact.meta.platform} (${artifact.meta.arch})`,
     `- CPU: ${artifact.meta.cpuModel ?? "unknown"}`,
     `- Suite version: ${artifact.meta.suiteVersion}`,
@@ -142,7 +144,7 @@ export async function writeBenchmarkArtifacts(artifact: BenchmarkArtifact) {
 }
 
 if (import.meta.main) {
-  const rawInput = await readStdin()
+  const rawInput = await text(process.stdin)
   const artifact = normalizeBenchmarkPayload(parseRawBenchmarkPayload(rawInput))
   const result = await writeBenchmarkArtifacts(artifact)
 
@@ -234,10 +236,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
 }
 
-async function readStdin() {
-  return await new Response(Bun.stdin.stream()).text()
-}
-
 function getGitSha() {
   const gitSha = process.env.GITHUB_SHA
 
@@ -245,16 +243,15 @@ function getGitSha() {
     return gitSha
   }
 
-  const result = Bun.spawnSync({
-    cmd: ["git", "rev-parse", "HEAD"],
-    stderr: "ignore",
-    stdout: "pipe",
+  const result = spawnSync("git", ["rev-parse", "HEAD"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
   })
 
-  if (result.exitCode !== 0) {
+  if (result.status !== 0) {
     return null
   }
 
-  const value = result.stdout.toString().trim()
+  const value = result.stdout.trim()
   return value.length > 0 ? value : null
 }
