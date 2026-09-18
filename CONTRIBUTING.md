@@ -23,6 +23,10 @@ Thank you for your interest in contributing to tryharder. This document provides
    pnpm install
    ```
 
+Use the pnpm version pinned in `package.json`. pnpm 12 writes two YAML documents in
+`pnpm-lock.yaml`: one for the package manager and one for project dependencies.
+Keep both documents. Older pnpm versions can reject this format.
+
 ## Project Structure
 
 ```text

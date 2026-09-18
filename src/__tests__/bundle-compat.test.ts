@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process"
 import { readdir, readFile, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { pathToFileURL } from "node:url"
+import { fileURLToPath, pathToFileURL } from "node:url"
 import { describe, expect, it } from "vitest"
 
 async function findJavaScriptFiles(root: string): Promise<string[]> {
@@ -28,8 +28,14 @@ describe("bundle compatibility", () => {
 
     try {
       const build = spawnSync(
-        "pnpm",
-        ["exec", "tsdown", "--platform", "browser", "--out-dir", outDirName],
+        process.execPath,
+        [
+          fileURLToPath(import.meta.resolve("tsdown/run")),
+          "--platform",
+          "browser",
+          "--out-dir",
+          outDirName,
+        ],
         {
           cwd: process.cwd(),
           encoding: "utf8",
@@ -37,7 +43,7 @@ describe("bundle compatibility", () => {
       )
 
       if (build.status !== 0) {
-        throw new Error(build.stderr || build.stdout)
+        throw build.error ?? new Error(build.stderr || build.stdout)
       }
 
       const jsFiles = await findJavaScriptFiles(outDir)
@@ -89,7 +95,7 @@ describe("bundle compatibility", () => {
       })
 
       if (smoke.status !== 0) {
-        throw new Error(smoke.stderr || smoke.stdout)
+        throw smoke.error ?? new Error(smoke.stderr || smoke.stdout)
       }
     } finally {
       await rm(outDir, { force: true, recursive: true })

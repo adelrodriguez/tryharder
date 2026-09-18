@@ -37,3 +37,6 @@ jobs:
 
       - name: Verify build
         run: pnpm run build:verify
+
+      - name: Dry-run publishing
+        run: pnpm publish --dry-run --no-git-checks --access public
