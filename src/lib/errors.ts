@@ -37,7 +37,6 @@ export const PanicMessages = {
   TIMEOUT_INVALID_MS: "timeout() requires a non-negative finite millisecond value.",
   UNREACHABLE_RETRY_POLICY_BACKOFF: "Panic: unreachable retry policy backoff",
 } as const satisfies Record<PanicCode, string>
-export type PanicMessages = typeof PanicMessages
 
 /**
  * @internal

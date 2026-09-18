@@ -1,1 +1,1 @@
-export const BENCHMARK_SUITE_VERSION = 2
+export const BENCHMARK_SUITE_VERSION = 3

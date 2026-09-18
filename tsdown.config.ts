@@ -1,10 +1,11 @@
-import { defineConfig } from "bunup"
+import { defineConfig } from "tsdown"
 
 export default defineConfig({
+  clean: true,
   dts: true,
   entry: ["src/index.ts", "src/errors.ts", "src/types.ts"],
-  format: "esm",
+  fixedExtension: false,
   outDir: "dist",
+  platform: "browser",
   sourcemap: true,
-  target: "browser",
 })

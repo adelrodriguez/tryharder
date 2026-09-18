@@ -1,17 +1,6 @@
 {
   "packages": [
     {
-      "name": "adamantite",
-      "registry": "npm",
-      "source": {
-        "host": "github.com",
-        "type": "repository",
-        "url": "https://github.com/adelrodriguez/adamantite"
-      },
-      "tracking": "dependency",
-      "version": "0.33.0"
-    },
-    {
       "name": "antfu-collective/taze",
       "registry": "github",
       "source": {
@@ -21,6 +10,17 @@
       },
       "tracking": "manual",
       "version": "abd639e0d46790e504d48a5826cba06985dd3922"
+    },
+    {
+      "name": "adamantite",
+      "registry": "npm",
+      "source": {
+        "host": "github.com",
+        "type": "repository",
+        "url": "https://github.com/adelrodriguez/adamantite"
+      },
+      "tracking": "dependency",
+      "version": "0.37.0"
     }
   ]
 }
