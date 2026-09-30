@@ -280,18 +280,13 @@ export abstract class TaskGraphExecutionBase<
   protected onTaskResult?(taskName: keyof T, value: unknown): void
   protected onTaskError?(taskName: keyof T, error: unknown): void
 
-  // The three methods below are polymorphic defaults overridden by
+  // The two methods below are polymorphic defaults overridden by
   // subclasses (template-method pattern); they must stay instance methods
   // even though the base implementations do not touch `this`.
 
   // oxlint-disable-next-line class-methods-use-this -- polymorphic default
   protected mapStoredError(error: unknown): Error {
     return error instanceof Error ? error : new UnhandledException(undefined, { cause: error })
-  }
-
-  // oxlint-disable-next-line class-methods-use-this -- polymorphic default
-  protected shouldAbortOnTaskError(_error: unknown): boolean {
-    return false
   }
 
   // oxlint-disable-next-line class-methods-use-this -- polymorphic default
@@ -303,6 +298,7 @@ export abstract class TaskGraphExecutionBase<
     this.firstRejection ??= error
   }
 
+  protected abstract shouldAbortOnTaskError(error: unknown): boolean
   protected abstract createTaskContext(resultProxy: ResultProxy<T>): TContext
 
   protected async runTask(taskName: keyof T): Promise<void> {
@@ -409,10 +405,16 @@ export class FailFastTaskExecution<T extends TaskRecord> extends TaskExecution<T
 
 export class SettledTaskExecution<T extends TaskRecord> extends TaskExecution<T> {
   readonly #returnValue: Record<string, unknown> = {}
+  #panic: Panic | undefined
 
   async execute(): Promise<AllSettledResult<T>> {
     void this.startTasks()
     await this.waitForTasksToSettle()
+
+    // A Panic is programmer misuse, not a settled outcome, so it never becomes part of the result.
+    if (this.#panic) {
+      throw this.#panic
+    }
 
     return this.#returnValue as AllSettledResult<T>
   }
@@ -422,7 +424,16 @@ export class SettledTaskExecution<T extends TaskRecord> extends TaskExecution<T>
   }
 
   protected override onTaskError(taskName: keyof T, error: unknown): void {
+    if (error instanceof Panic) {
+      this.#panic ??= error
+    }
+
     this.#returnValue[taskName as string] = { reason: error, status: "rejected" }
+  }
+
+  // oxlint-disable-next-line class-methods-use-this -- polymorphic override
+  protected override shouldAbortOnTaskError(error: unknown): boolean {
+    return error instanceof Panic
   }
 
   // oxlint-disable-next-line class-methods-use-this -- polymorphic override

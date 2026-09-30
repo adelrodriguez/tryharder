@@ -1,5 +1,5 @@
 import type { BuilderConfig } from "../builder"
-import { CancellationError, Panic } from "../errors"
+import { Panic } from "../errors"
 import { checkIsPromiseLike } from "../utils"
 import {
   FailFastTaskExecution,
@@ -42,13 +42,15 @@ class AllExecution<T extends TaskRecord, C> extends OrchestrationExecution<AllVa
       return { thrown: controlAfterFailure }
     }
 
-    if (!catchFn) {
+    // Defects never pass through catch, the same as in run().
+    if (!catchFn || error instanceof Panic) {
       return { thrown: error }
     }
 
     const context = {
       failedTask: execution.failedTask,
-      partial: execution.returnValue as Partial<AllValue<T>>,
+      // Siblings keep settling while an async catch runs, so pass a snapshot.
+      partial: { ...execution.returnValue } as Partial<AllValue<T>>,
       signal: execution.signal,
     }
 
@@ -62,10 +64,6 @@ class AllExecution<T extends TaskRecord, C> extends OrchestrationExecution<AllVa
       try {
         const raced = (await this.raceWithCancellation(
           Promise.resolve(mapped).catch((catchError: unknown) => {
-            if (catchError instanceof CancellationError) {
-              throw catchError
-            }
-
             throw new Panic("ALL_CATCH_HANDLER_REJECT", { cause: catchError })
           }),
           error

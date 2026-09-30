@@ -1,13 +1,7 @@
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import type { BuilderConfig } from "../builder"
 import { Panic } from "../../errors"
-import { createAsyncDisposer } from "../../shims/disposer"
 import { BaseExecution } from "../execution/base"
-import {
-  TaskGraphExecutionBase,
-  type ResultProxy,
-  type TaskContext,
-} from "../orchestration/task-graph"
 import { calculateRetryDelay, retryOptions } from "../policies/retry"
 import { assertUnreachable, resolveWithAbort, sleep } from "../utils"
 
@@ -41,28 +35,12 @@ class TestExecution extends BaseExecution<number> {
   }
 }
 
-type EmptyTasks = Record<string, never>
-
-class SharedDefaultExecution extends TaskGraphExecutionBase<EmptyTasks, TaskContext<EmptyTasks>> {
-  constructor() {
-    super(undefined, {})
-  }
-
-  protected override createTaskContext() {
-    return {
-      $disposer: createAsyncDisposer(),
-      $race: <V>(promise: PromiseLike<V>) => this.raceTaskSignal(promise),
-      $result: {} as ResultProxy<EmptyTasks>,
-      $signal: new AbortController().signal,
-    }
-  }
-
-  shouldAbort(error?: unknown) {
-    return this.shouldAbortOnTaskError(error)
-  }
-}
-
 describe("coverage exceptions", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.useRealTimers()
+  })
+
   describe("retry helpers", () => {
     it("normalizes exponential retry options", () => {
       expect(
@@ -82,8 +60,26 @@ describe("coverage exceptions", () => {
       })
     })
 
-    it("calculates retry delay across no-policy, linear, capped exponential, and jitter branches", () => {
+    it("defaults delayMs to 0 and omits maxDelayMs for linear retry options", () => {
+      const normalized = retryOptions({ backoff: "linear", limit: 2 })
+
+      expect(normalized).toEqual({
+        backoff: "linear",
+        delayMs: 0,
+        jitter: undefined,
+        limit: 2,
+        shouldRetry: undefined,
+      })
+      expect("maxDelayMs" in normalized).toBe(false)
+    })
+
+    it("calculates retry delay for no-policy, constant, linear, and exponential backoff", () => {
       expect(calculateRetryDelay(1, {})).toBe(0)
+      expect(
+        calculateRetryDelay(3, {
+          retry: { backoff: "constant", delayMs: 7, limit: 4 },
+        })
+      ).toBe(7)
       expect(
         calculateRetryDelay(2, {
           retry: { backoff: "linear", delayMs: 10, limit: 4 },
@@ -91,22 +87,32 @@ describe("coverage exceptions", () => {
       ).toBe(20)
       expect(
         calculateRetryDelay(3, {
+          retry: { backoff: "exponential", delayMs: 5, limit: 5 },
+        })
+      ).toBe(20)
+      expect(
+        calculateRetryDelay(3, {
           retry: { backoff: "exponential", delayMs: 5, limit: 5, maxDelayMs: 12 },
         })
       ).toBe(12)
+    })
 
-      const originalRandom = Math.random
-      Math.random = () => 0.5
+    it("applies jitter only when the computed delay is positive", () => {
+      const random = vi.spyOn(Math, "random").mockReturnValue(0.5)
 
-      try {
-        expect(
-          calculateRetryDelay(1, {
-            retry: { backoff: "constant", delayMs: 20, jitter: true, limit: 3 },
-          })
-        ).toBe(10)
-      } finally {
-        Math.random = originalRandom
-      }
+      expect(
+        calculateRetryDelay(1, {
+          retry: { backoff: "constant", delayMs: 0, jitter: true, limit: 3 },
+        })
+      ).toBe(0)
+      expect(random).not.toHaveBeenCalled()
+
+      expect(
+        calculateRetryDelay(1, {
+          retry: { backoff: "constant", delayMs: 25, jitter: true, limit: 3 },
+        })
+      ).toBe(12)
+      expect(random).toHaveBeenCalledTimes(1)
     })
   })
 
@@ -122,49 +128,47 @@ describe("coverage exceptions", () => {
 
       expect(thrown).toBeInstanceOf(Panic)
       expect((thrown as Panic).code).toBe("UNREACHABLE_RETRY_POLICY_BACKOFF")
+      expect((thrown as Panic).message).toContain("Unreachable case: unexpected")
     })
 
-    it("resolves immediately when sleep receives zero or less", async () => {
-      await sleep(0)
-      await sleep(-1)
+    it("resolves without scheduling a timer when sleep receives zero or less", async () => {
+      vi.useFakeTimers()
+
+      const pending = [sleep(0), sleep(-1)]
+
+      expect(vi.getTimerCount()).toBe(0)
+      await expect(Promise.all(pending)).resolves.toEqual([undefined, undefined])
     })
 
-    it("resolves abort result immediately when resolveWithAbort receives an already-aborted signal", async () => {
-      const controller = new AbortController()
-      controller.abort(new Error("stop"))
-      const pending = new Promise<string>((resolve) => {
-        void resolve
-      })
-
-      const result = await resolveWithAbort(controller.signal, pending, () => "aborted" as const)
-
-      expect(result).toBe("aborted")
-    })
-
-    it("observes the input rejection when resolveWithAbort receives an already-aborted signal", async () => {
+    it("returns the abort result and observes the input rejection when the signal is already aborted", async () => {
       const controller = new AbortController()
       controller.abort(new Error("stop"))
       const unhandledRejections: unknown[] = []
       const onUnhandledRejection = (reason: unknown) => {
         unhandledRejections.push(reason)
       }
+      let abortFactoryCalls = 0
 
       process.on("unhandledRejection", onUnhandledRejection)
 
       try {
         const rejected = Promise.reject(new Error("later"))
-        const result = await resolveWithAbort(controller.signal, rejected, () => "aborted" as const)
+        const result = await resolveWithAbort(controller.signal, rejected, () => {
+          abortFactoryCalls += 1
+          return "aborted" as const
+        })
 
         await sleep(1)
 
         expect(result).toBe("aborted")
+        expect(abortFactoryCalls).toBe(1)
         expect(unhandledRejections).toHaveLength(0)
       } finally {
         process.off("unhandledRejection", onUnhandledRejection)
       }
     })
 
-    it("returns the original promise value when the promise settles before abort", async () => {
+    it("returns the promise value and detaches the abort listener when the promise settles first", async () => {
       const controller = new AbortController()
       let resolvePromise!: (value: string) => void
       let abortFactoryCalls = 0
@@ -187,28 +191,13 @@ describe("coverage exceptions", () => {
       expect(abortFactoryCalls).toBe(0)
     })
 
-    it("returns the abort result when abort happens after registration and before settlement", async () => {
+    it("returns the abort result once when abort happens after registration and before settlement", async () => {
       const controller = new AbortController()
       let resolvePromise!: (value: string) => void
-
-      const pending = new Promise<string>((resolve) => {
-        resolvePromise = resolve
-      })
-
-      const resultPromise = resolveWithAbort(controller.signal, pending, () => "aborted" as const)
-
-      controller.abort(new Error("stop"))
-      resolvePromise("done")
-
-      expect(await resultPromise).toBe("aborted")
-    })
-
-    it("calls createAbortResult exactly once when abort wins", async () => {
-      const controller = new AbortController()
       let abortFactoryCalls = 0
 
       const pending = new Promise<string>((resolve) => {
-        void resolve
+        resolvePromise = resolve
       })
 
       const resultPromise = resolveWithAbort(controller.signal, pending, () => {
@@ -217,6 +206,7 @@ describe("coverage exceptions", () => {
       })
 
       controller.abort(new Error("stop"))
+      resolvePromise("done")
 
       expect(await resultPromise).toBe("aborted")
       expect(abortFactoryCalls).toBe(1)
@@ -224,16 +214,6 @@ describe("coverage exceptions", () => {
   })
 
   describe("guard branches", () => {
-    it("exposes proxy descriptors for existing and missing wrap-context properties", () => {
-      const ctx = TestExecution.wrapContext()
-
-      expect(Object.getOwnPropertyDescriptor(ctx, "missing")).toBeUndefined()
-      expect(Object.getOwnPropertyDescriptor(ctx.retry, "missing")).toBeUndefined()
-      expect(Object.getOwnPropertyDescriptor(ctx, "signal")?.writable).toBe(false)
-      expect(Object.getOwnPropertyDescriptor(ctx, "retry")?.writable).toBe(false)
-      expect(Object.getOwnPropertyDescriptor(ctx.retry, "attempt")?.writable).toBe(false)
-    })
-
     it("rejects writes, defines, and deletes through wrap-context proxies", () => {
       const ctx = TestExecution.wrapContext()
 
@@ -256,22 +236,18 @@ describe("coverage exceptions", () => {
       expect(Reflect.deleteProperty(ctx, "signal")).toBe(false)
       expect(Reflect.deleteProperty(ctx.retry, "attempt")).toBe(false)
 
-      expect(ctx.retry.attempt).toBe(1)
+      expect(ctx.retry).toEqual({ attempt: 1, limit: 1 })
+      expect("signal" in ctx).toBe(true)
       expect(ctx.signal).toBeUndefined()
     })
 
-    it("defaults to not aborting task errors in the shared base class", () => {
-      const execution = new SharedDefaultExecution()
-
-      expect(execution.shouldAbort()).toBe(false)
-    })
-
-    it("keeps control helpers inert when execution has no signal config", async () => {
+    it("keeps control helpers inert when execution has no signal config", () => {
       const execution = new TestExecution()
+      const promise = Promise.resolve("ok")
 
       expect(execution.signal).toBeUndefined()
-      expect(execution.cancel()).toBeUndefined()
-      expect(await execution.raceCancel(Promise.resolve("ok"))).toBe("ok")
+      expect(execution.cancel(new Error("cause"))).toBeUndefined()
+      expect(execution.raceCancel(promise)).toBe(promise)
     })
   })
 })

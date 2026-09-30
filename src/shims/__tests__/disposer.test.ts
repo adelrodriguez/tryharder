@@ -10,47 +10,51 @@ import {
   InternalDisposableStack,
 } from "../disposer"
 
-describe("disposer shim", () => {
-  it("uses runtime-compatible disposal symbols", () => {
-    const nativeDispose = Reflect.get(Symbol, "dispose")
-    const nativeAsyncDispose = Reflect.get(Symbol, "asyncDispose")
+type SuppressedErrorLike = Error & { error: unknown; suppressed: unknown }
 
-    expect(DISPOSE).toBe(
-      typeof nativeDispose === "symbol" ? nativeDispose : Symbol.for("Symbol.dispose")
-    )
-    expect(ASYNC_DISPOSE).toBe(
-      typeof nativeAsyncDispose === "symbol"
-        ? nativeAsyncDispose
-        : Symbol.for("Symbol.asyncDispose")
-    )
+function catchError(fn: () => void): unknown {
+  try {
+    fn()
+  } catch (error) {
+    return error
+  }
+
+  return expect.unreachable("should have thrown")
+}
+
+describe("disposer shim", () => {
+  it("uses the native disposal symbols when the runtime provides them", () => {
+    expect(DISPOSE).toBe(Symbol.dispose)
+    expect(ASYNC_DISPOSE).toBe(Symbol.asyncDispose)
   })
 
-  it("installs a sync dispose alias that delegates through the instance", () => {
+  it("installs a non-enumerable sync dispose alias that calls the instance dispose method", () => {
     class SyncAliasTarget {
-      disposed = 0
+      calls: string[] = []
 
       dispose(): void {
-        this.disposed += 1
+        this.calls.push("prototype")
       }
     }
 
     defineDisposeAlias(SyncAliasTarget.prototype)
 
-    const instance = new SyncAliasTarget() as SyncAliasTarget & { [DISPOSE](): void }
-    const disposeAlias = instance[DISPOSE]
-
-    expect(typeof disposeAlias).toBe("function")
-
-    if (!disposeAlias) {
-      throw new Error("missing sync dispose alias")
+    const instance = new SyncAliasTarget() as SyncAliasTarget & Disposable
+    instance.dispose = () => {
+      instance.calls.push("own")
     }
 
-    disposeAlias.call(instance)
+    instance[Symbol.dispose]()
 
-    expect(instance.disposed).toBe(1)
+    expect(instance.calls).toEqual(["own"])
+    expect(Object.getOwnPropertyDescriptor(SyncAliasTarget.prototype, DISPOSE)).toMatchObject({
+      configurable: true,
+      enumerable: false,
+      writable: true,
+    })
   })
 
-  it("installs an async dispose alias that delegates through the instance", async () => {
+  it("installs a non-enumerable async dispose alias that awaits the instance dispose method", async () => {
     class AsyncAliasTarget {
       disposed = 0
 
@@ -62,219 +66,244 @@ describe("disposer shim", () => {
 
     defineAsyncDisposeAlias(AsyncAliasTarget.prototype)
 
-    const instance = new AsyncAliasTarget() as AsyncAliasTarget & {
-      [ASYNC_DISPOSE](): Promise<void>
-    }
-    const disposeAsyncAlias = instance[ASYNC_DISPOSE]
+    const instance = new AsyncAliasTarget() as AsyncAliasTarget & AsyncDisposable
+    const pending = instance[Symbol.asyncDispose]()
 
-    expect(typeof disposeAsyncAlias).toBe("function")
+    expect(instance.disposed).toBe(0)
 
-    if (!disposeAsyncAlias) {
-      throw new Error("missing async dispose alias")
-    }
-
-    await disposeAsyncAlias.call(instance)
+    await pending
 
     expect(instance.disposed).toBe(1)
+    expect(
+      Object.getOwnPropertyDescriptor(AsyncAliasTarget.prototype, ASYNC_DISPOSE)
+    ).toMatchObject({
+      configurable: true,
+      enumerable: false,
+      writable: true,
+    })
   })
 
-  it("defines configurable and writable alias descriptors", () => {
-    let syncDisposeCalls = 0
-    let asyncDisposeCalls = 0
+  describe("InternalDisposableStack", () => {
+    it("runs deferred cleanups in LIFO order through the sync symbol alias", () => {
+      const calls: string[] = []
+      const stack = new InternalDisposableStack()
 
-    class SyncDescriptorTarget {
-      disposed = 0
+      stack.defer(() => {
+        calls.push("first")
+      })
 
-      dispose(): void {
-        this.disposed += 1
-        syncDisposeCalls += 1
+      stack.defer(() => {
+        calls.push("second")
+      })
+
+      stack[Symbol.dispose]()
+
+      expect(calls).toEqual(["second", "first"])
+    })
+
+    it("returns used resources and disposes them only when the stack is disposed", () => {
+      const calls: string[] = []
+      const stack = new InternalDisposableStack()
+      const missing = undefined
+
+      const resource: DisposableLike = {
+        [DISPOSE]() {
+          calls.push("resource")
+        },
       }
-    }
 
-    class AsyncDescriptorTarget {
-      disposed = 0
+      expect(stack.use(resource)).toBe(resource)
+      expect(stack.use(null)).toBeNull()
+      stack.use(missing)
+      expect(calls).toEqual([])
 
-      async dispose(): Promise<void> {
-        await Promise.resolve()
-        this.disposed += 1
-        asyncDisposeCalls += 1
-      }
-    }
+      stack.dispose()
 
-    defineDisposeAlias(SyncDescriptorTarget.prototype)
-    defineAsyncDisposeAlias(AsyncDescriptorTarget.prototype)
-
-    const syncDescriptor = Object.getOwnPropertyDescriptor(SyncDescriptorTarget.prototype, DISPOSE)
-    const asyncDescriptor = Object.getOwnPropertyDescriptor(
-      AsyncDescriptorTarget.prototype,
-      ASYNC_DISPOSE
-    )
-
-    expect(syncDescriptor).toBeDefined()
-    expect(syncDescriptor?.configurable).toBe(true)
-    expect(syncDescriptor?.writable).toBe(true)
-
-    expect(asyncDescriptor).toBeDefined()
-    expect(asyncDescriptor?.configurable).toBe(true)
-    expect(asyncDescriptor?.writable).toBe(true)
-
-    void syncDisposeCalls
-    void asyncDisposeCalls
-  })
-
-  it("exposes a callable sync symbol alias on InternalDisposableStack", () => {
-    const calls: string[] = []
-    const stack = new InternalDisposableStack() as InternalDisposableStack & {
-      [DISPOSE](): void
-    }
-    const disposeAlias = stack[DISPOSE]
-
-    stack.defer(() => {
-      calls.push("first")
+      expect(calls).toEqual(["resource"])
     })
 
-    stack.defer(() => {
-      calls.push("second")
+    it("runs cleanups once when disposed more than once", () => {
+      let cleanupCalls = 0
+      const stack = new InternalDisposableStack()
+
+      stack.defer(() => {
+        cleanupCalls += 1
+      })
+
+      stack.dispose()
+      stack.dispose()
+
+      expect(cleanupCalls).toBe(1)
     })
 
-    expect(typeof disposeAlias).toBe("function")
+    it("throws a TypeError for non-disposable resources and non-function cleanups", () => {
+      const stack = new InternalDisposableStack()
 
-    if (!disposeAlias) {
-      throw new Error("missing stack dispose alias")
-    }
-
-    disposeAlias.call(stack)
-
-    expect(calls).toEqual(["second", "first"])
-  })
-
-  it("accepts resources that are disposable only through the shim symbol", () => {
-    const calls: string[] = []
-    const stack = new InternalDisposableStack()
-
-    const resource: DisposableLike = {
-      [DISPOSE]() {
-        calls.push("shim-dispose")
-      },
-    }
-
-    stack.use(resource)
-
-    stack.dispose()
-
-    expect(calls).toEqual(["shim-dispose"])
-  })
-
-  it("exposes a callable async symbol alias on the async disposer", async () => {
-    const calls: string[] = []
-    const disposer = createAsyncDisposer() as ReturnType<typeof createAsyncDisposer> & {
-      [ASYNC_DISPOSE](): Promise<void>
-    }
-    const disposeAsyncAlias = disposer[ASYNC_DISPOSE]
-
-    disposer.defer(() => {
-      calls.push("cleanup")
+      expect(() => {
+        stack.use({} as never)
+      }).toThrow(new TypeError("Object not disposable"))
+      expect(() => {
+        stack.defer(123 as never)
+      }).toThrow(new TypeError("123 is not a function"))
     })
 
-    expect(typeof disposeAsyncAlias).toBe("function")
+    it("rethrows a single cleanup failure as the raw thrown value", () => {
+      const calls: string[] = []
+      const stack = new InternalDisposableStack()
 
-    if (!disposeAsyncAlias) {
-      throw new Error("missing async disposer alias")
-    }
+      stack.defer(() => {
+        calls.push("first")
+      })
 
-    await disposeAsyncAlias.call(disposer)
+      stack.defer(() => {
+        calls.push("second")
+        // oxlint-disable-next-line no-throw-literal, typescript/only-throw-error -- Verify raw non-Error failures are preserved.
+        throw "raw failure"
+      })
 
-    expect(calls).toEqual(["cleanup"])
-  })
-
-  it("runs deferred cleanup through dispose()", async () => {
-    const calls: string[] = []
-    const disposer = createAsyncDisposer()
-
-    disposer.defer(() => {
-      calls.push("cleanup")
+      expect(
+        catchError(() => {
+          stack.dispose()
+        })
+      ).toBe("raw failure")
+      expect(calls).toEqual(["second", "first"])
     })
 
-    await disposer.dispose()
+    it("nests multiple cleanup failures as SuppressedError chains in disposal order", () => {
+      const calls: string[] = []
+      const stack = new InternalDisposableStack()
+      const firstError = new Error("first")
+      const secondError = new Error("second")
+      const thirdError = new Error("third")
 
-    expect(calls).toEqual(["cleanup"])
-  })
+      stack.defer(() => {
+        calls.push("first")
+        throw firstError
+      })
 
-  it("handles async shim-symbol resources and sync shim-symbol fallback in LIFO order", async () => {
-    const calls: string[] = []
-    const disposer = createAsyncDisposer()
+      stack.defer(() => {
+        calls.push("second")
+        throw secondError
+      })
 
-    const syncResource: DisposableLike = {
-      [DISPOSE]() {
-        calls.push("sync")
-      },
-    }
+      stack.defer(() => {
+        calls.push("third")
+        throw thirdError
+      })
 
-    const asyncResource: AsyncDisposableLike = {
-      async [ASYNC_DISPOSE]() {
-        await Promise.resolve()
-        calls.push("async")
-      },
-    }
+      const error = catchError(() => {
+        stack.dispose()
+      }) as SuppressedErrorLike
 
-    disposer.use(syncResource as unknown as Disposable)
-    disposer.use(asyncResource as unknown as AsyncDisposable)
+      expect(calls).toEqual(["third", "second", "first"])
+      expect(error.name).toBe("SuppressedError")
+      expect(error.error).toBe(firstError)
 
-    await disposer.dispose()
+      const inner = error.suppressed as SuppressedErrorLike
 
-    expect(calls).toEqual(["async", "sync"])
-  })
-
-  it("throws a TypeError for non-disposable shim resources", () => {
-    const disposer = createAsyncDisposer()
-
-    expect(() => {
-      disposer.use({} as never)
-    }).toThrow("Object not disposable")
-  })
-
-  it("fails fast before reading a sync disposer from an already disposed stack", () => {
-    const stack = new InternalDisposableStack()
-    let getterCalls = 0
-    const resource = {}
-
-    Object.defineProperty(resource, DISPOSE, {
-      get() {
-        getterCalls += 1
-        return () => {
-          void getterCalls
-        }
-      },
+      expect(inner.name).toBe("SuppressedError")
+      expect(inner.error).toBe(secondError)
+      expect(inner.suppressed).toBe(thirdError)
     })
 
-    stack.dispose()
+    it("fails fast before reading a sync disposer from an already disposed stack", () => {
+      const stack = new InternalDisposableStack()
+      let getterCalls = 0
+      const resource = {}
 
-    expect(() => {
-      stack.use(resource as unknown as Disposable)
-    }).toThrow("DisposableStack already disposed")
-    expect(getterCalls).toBe(0)
+      Object.defineProperty(resource, DISPOSE, {
+        get() {
+          getterCalls += 1
+          return () => null
+        },
+      })
+
+      stack.dispose()
+
+      expect(() => {
+        stack.use(resource as unknown as Disposable)
+      }).toThrow(new ReferenceError("DisposableStack already disposed"))
+      expect(() => {
+        stack.defer(() => null)
+      }).toThrow(new ReferenceError("DisposableStack already disposed"))
+      expect(getterCalls).toBe(0)
+    })
   })
 
-  it("fails fast before reading an async disposer from an already disposed async stack", async () => {
-    const disposer = createAsyncDisposer()
-    let getterCalls = 0
-    const resource = {}
+  describe("createAsyncDisposer", () => {
+    it("runs deferred cleanups through the async symbol alias", async () => {
+      const calls: string[] = []
+      const disposer = createAsyncDisposer()
 
-    Object.defineProperty(resource, ASYNC_DISPOSE, {
-      get() {
-        getterCalls += 1
-        return async () => {
+      disposer.defer(() => {
+        calls.push("cleanup")
+      })
+
+      await disposer[Symbol.asyncDispose]()
+
+      expect(calls).toEqual(["cleanup"])
+    })
+
+    it("runs cleanups once when disposed more than once", async () => {
+      let cleanupCalls = 0
+      const disposer = createAsyncDisposer()
+
+      disposer.defer(() => {
+        cleanupCalls += 1
+      })
+
+      await disposer.dispose()
+      await disposer.dispose()
+
+      expect(cleanupCalls).toBe(1)
+    })
+
+    it("prefers the async dispose method over the sync one on the same resource", async () => {
+      const calls: string[] = []
+      const disposer = createAsyncDisposer()
+
+      const resource: AsyncDisposableLike & DisposableLike = {
+        async [ASYNC_DISPOSE]() {
           await Promise.resolve()
-          void getterCalls
-        }
-      },
+          calls.push("async")
+        },
+        [DISPOSE]() {
+          calls.push("sync")
+        },
+      }
+
+      disposer.use(resource as unknown as AsyncDisposable)
+
+      await disposer.dispose()
+
+      expect(calls).toEqual(["async"])
     })
 
-    await disposer.dispose()
+    it("fails fast before reading an async disposer from an already disposed async stack", async () => {
+      const disposer = createAsyncDisposer()
+      let getterCalls = 0
+      const resource = {}
 
-    expect(() => {
-      disposer.use(resource as unknown as AsyncDisposable)
-    }).toThrow("AsyncDisposableStack already disposed")
-    expect(getterCalls).toBe(0)
+      Object.defineProperty(resource, ASYNC_DISPOSE, {
+        get() {
+          getterCalls += 1
+          return async () => {
+            await Promise.resolve()
+          }
+        },
+      })
+
+      await disposer.dispose()
+
+      expect(() => {
+        disposer.use(resource as unknown as AsyncDisposable)
+      }).toThrow(new ReferenceError("AsyncDisposableStack already disposed"))
+      expect(() => {
+        disposer.defer(async () => {
+          await Promise.resolve()
+        })
+      }).toThrow(new ReferenceError("AsyncDisposableStack already disposed"))
+      expect(getterCalls).toBe(0)
+    })
   })
 })

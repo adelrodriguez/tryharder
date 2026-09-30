@@ -1,6 +1,6 @@
 import { defineDisposeAlias } from "../../shims/disposer"
 import { CancellationError, TimeoutError } from "../errors"
-import { resolveWithAbort } from "../utils"
+import { discardOutcome, resolveWithAbort } from "../utils"
 
 export class SignalController {
   readonly signal?: AbortSignal
@@ -43,6 +43,7 @@ export class SignalController {
     const cancelled = this.checkDidCancel(cause)
 
     if (cancelled) {
+      discardOutcome(promise)
       return Promise.resolve(cancelled)
     }
 

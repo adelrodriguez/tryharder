@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process"
 import { readdir, readFile, rm, writeFile } from "node:fs/promises"
-import { join } from "node:path"
+import { join, relative } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { describe, expect, it } from "vitest"
 
@@ -47,18 +47,21 @@ describe("bundle compatibility", () => {
       }
 
       const jsFiles = await findJavaScriptFiles(outDir)
-      expect(jsFiles.length > 0).toBe(true)
+      expect(jsFiles.map((path) => relative(outDir, path))).toEqual(
+        expect.arrayContaining(["errors.js", "index.js", "types.js"])
+      )
 
       const contents = await Promise.all(jsFiles.map((path) => readFile(path, "utf8")))
 
       for (const content of contents) {
-        expect(/from\s*["']node:/.test(content)).toBe(false)
-        expect(content.includes("new DisposableStack")).toBe(false)
-        expect(content.includes("new AsyncDisposableStack")).toBe(false)
+        expect(content).not.toMatch(/(?:from|import|require)\s*\(?\s*["']node:/)
+        expect(content).not.toContain("new DisposableStack")
+        expect(content).not.toContain("new AsyncDisposableStack")
       }
 
       const smokePath = join(outDir, "smoke.mjs")
       const entrypoint = pathToFileURL(join(outDir, "index.js")).href
+      const errorsEntrypoint = pathToFileURL(join(outDir, "errors.js")).href
 
       await writeFile(
         smokePath,
@@ -77,6 +80,8 @@ describe("bundle compatibility", () => {
           `const try$ = await import(${JSON.stringify(entrypoint)})`,
           "const runResult = await try$.run(() => 1)",
           'if (runResult !== 1) throw new Error("run() smoke test failed")',
+          "const runSyncResult = try$.runSync(() => 2)",
+          'if (runSyncResult !== 2) throw new Error("runSync() smoke test failed")',
           "const allResult = await try$.all({ a() { return 1 } })",
           'if (allResult.a !== 1) throw new Error("all() smoke test failed")',
           'const flowResult = await try$.flow({ a() { return this.$exit("done") } })',
@@ -86,6 +91,9 @@ describe("bundle compatibility", () => {
           "disposer.defer(() => { cleaned = true })",
           "await disposer.dispose()",
           'if (!cleaned) throw new Error("disposer() smoke test failed")',
+          `const errors = await import(${JSON.stringify(errorsEntrypoint)})`,
+          "const timeoutError = new errors.TimeoutError()",
+          'if (!errors.isTimeoutError(timeoutError)) throw new Error("errors smoke test failed")',
         ].join("\n")
       )
 

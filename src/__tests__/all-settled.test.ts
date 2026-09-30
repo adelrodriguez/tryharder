@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest"
-import { CancellationError, Panic, TimeoutError } from "../errors"
+import { describe, expect, it, vi } from "vitest"
+import { CancellationError, TimeoutError } from "../errors"
 import * as try$ from "../index"
 import { expectPanic, sleep } from "./test-utils"
 
@@ -22,72 +22,39 @@ describe("allSettled", () => {
       },
     })
 
-    expect(result.a).toEqual({ status: "fulfilled", value: 1 })
-    expect(result.b).toEqual({ reason: boom, status: "rejected" })
-  })
-
-  it("does not reject outer promise when tasks fail", async () => {
-    const result = await try$.allSettled({
-      a() {
-        throw new Error("a failed")
-      },
-      b() {
-        throw new Error("b failed")
-      },
+    expect(result).toEqual({
+      a: { status: "fulfilled", value: 1 },
+      b: { reason: boom, status: "rejected" },
     })
-
-    expect(result.a.status).toBe("rejected")
-    expect(result.b.status).toBe("rejected")
+    expect((result.b as { reason: unknown }).reason).toBe(boom)
   })
 
   it("allows dependent tasks to handle failed dependencies", async () => {
+    const failure = new Error("a failed")
+    let dependencyError: unknown
+
     const result = await try$.allSettled({
       a() {
-        throw new Error("a failed")
+        throw failure
       },
       async b() {
         try {
           return await this.$result.a
-        } catch {
+        } catch (error) {
+          dependencyError = error
           return "fallback"
         }
       },
     })
 
-    expect(result.a.status).toBe("rejected")
-    expect(result.b).toEqual({ status: "fulfilled", value: "fallback" })
-  })
-
-  it("resolves dependent tasks when referenced task succeeds", async () => {
-    const result = await try$.allSettled({
-      a() {
-        return 10
-      },
-      async b() {
-        const a = await this.$result.a
-        return a + 5
-      },
+    expect(result).toEqual({
+      a: { reason: failure, status: "rejected" },
+      b: { status: "fulfilled", value: "fallback" },
     })
-
-    expect(result.a).toEqual({ status: "fulfilled", value: 10 })
-    expect(result.b).toEqual({ status: "fulfilled", value: 15 })
+    expect(dependencyError).toBe(failure)
   })
 
-  it("passes a non-aborted task signal when no external signal is configured", async () => {
-    let taskSignalAborted: boolean | undefined
-
-    const result = await try$.allSettled({
-      a() {
-        taskSignalAborted = this.$signal.aborted
-        return 1
-      },
-    })
-
-    expect(result.a).toEqual({ status: "fulfilled", value: 1 })
-    expect(taskSignalAborted).toBe(false)
-  })
-
-  it("rejects dependent task when referenced task fails", async () => {
+  it("rejects dependent task with the referenced task failure", async () => {
     const error = new Error("a failed")
 
     const result = await try$.allSettled({
@@ -100,120 +67,153 @@ describe("allSettled", () => {
       },
     })
 
-    expect(result.a).toEqual({ reason: error, status: "rejected" })
+    expect((result.a as { reason: unknown }).reason).toBe(error)
+    expect((result.b as { reason: unknown }).reason).toBe(error)
     expect(result.b.status).toBe("rejected")
   })
 
-  it("marks self-referential task as rejected", async () => {
-    const result = await try$.allSettled({
-      async a() {
-        return await (this.$result as Record<string, Promise<unknown>>).a
-      },
-      b() {
-        return 1
-      },
-    })
-
-    expect(result.a.status).toBe("rejected")
-    expect(result.b).toEqual({ status: "fulfilled", value: 1 })
+  it("throws a Panic from a self-referential task instead of recording it as a result", async () => {
+    try {
+      await try$.allSettled({
+        async a() {
+          return await (this.$result as Record<string, Promise<unknown>>).a
+        },
+        b() {
+          return 1
+        },
+      })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expectPanic(error, "TASK_SELF_REFERENCE")
+    }
   })
 
-  it("rejects when accessing an unknown task result", async () => {
-    const result = await try$.allSettled({
-      async a() {
-        return await (this.$result as Record<string, Promise<unknown>>).doesNotExist
-      },
-    })
+  it("aborts sibling signals on a Panic and waits for siblings to settle before throwing", async () => {
+    const events: string[] = []
+    let siblingReason: unknown
 
-    expect(result.a.status).toBe("rejected")
-    expect((result.a as { reason: unknown }).reason).toBeInstanceOf(Panic)
-    expectPanic((result.a as { reason: unknown }).reason, "TASK_UNKNOWN_REFERENCE")
+    try {
+      await try$.allSettled({
+        async a() {
+          await Promise.resolve()
+          return await (this.$result as Record<string, Promise<unknown>>).a
+        },
+        async b() {
+          await new Promise<void>((resolve) => {
+            this.$signal.addEventListener(
+              "abort",
+              () => {
+                resolve()
+              },
+              { once: true }
+            )
+          })
+          siblingReason = this.$signal.reason
+          await Promise.resolve()
+          events.push("sibling:settled")
+        },
+      })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      events.push("rejected")
+      expectPanic(error, "TASK_SELF_REFERENCE")
+      expect(siblingReason).toBe(error)
+    }
+
+    expect(events).toEqual(["sibling:settled", "rejected"])
   })
 
-  it("rejects invalid handlers in the settled result", async () => {
-    const result = await try$.allSettled({
-      a: 123,
-    } as unknown as {
-      a(): number
-    })
+  it("throws a Panic from an unknown task reference", async () => {
+    try {
+      await try$.allSettled({
+        async a() {
+          return await (this.$result as Record<string, Promise<unknown>>).doesNotExist
+        },
+      })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expectPanic(error, "TASK_UNKNOWN_REFERENCE")
+    }
+  })
 
-    expect(result.a.status).toBe("rejected")
-    expect((result.a as { reason: unknown }).reason).toBeInstanceOf(Panic)
-    expectPanic((result.a as { reason: unknown }).reason, "TASK_INVALID_HANDLER")
+  it("throws a Panic from an invalid handler", async () => {
+    try {
+      await try$.allSettled({
+        a: 123,
+      } as unknown as {
+        a(): number
+      })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expectPanic(error, "TASK_INVALID_HANDLER")
+    }
   })
 
   it("applies nested run() policies inside allSettled tasks", async () => {
-    let attempts = 0
+    vi.useFakeTimers()
 
-    const result = await try$.allSettled({
-      async a() {
-        return await try$.retry(2).run(() => {
-          attempts += 1
+    try {
+      let attempts = 0
 
-          if (attempts === 1) {
-            throw new Error("boom")
+      const promise = try$.allSettled({
+        async a() {
+          return await try$.retry(2).run(() => {
+            attempts += 1
+
+            if (attempts === 1) {
+              throw new Error("boom")
+            }
+
+            return 1
+          })
+        },
+        async b() {
+          const value = await try$.timeout(5).run(async () => {
+            await sleep(20)
+            return 2
+          })
+
+          if (value instanceof Error) {
+            throw value
           }
 
-          return 1
-        })
-      },
-      async b() {
-        const value = await try$.timeout(5).run(async () => {
-          await sleep(20)
-          return 2
-        })
+          return value
+        },
+      })
 
-        if (value instanceof Error) {
-          throw value
-        }
+      await vi.advanceTimersByTimeAsync(20)
+      const result = await promise
 
-        return value
-      },
-    })
-
-    expect(result.a).toEqual({ status: "fulfilled", value: 1 })
-    expect(result.b.status).toBe("rejected")
-    expect(attempts).toBe(2)
+      expect(result.a).toEqual({ status: "fulfilled", value: 1 })
+      expect(result.b.status).toBe("rejected")
+      expect((result.b as { reason: unknown }).reason).toBeInstanceOf(TimeoutError)
+      expect(attempts).toBe(2)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("does not abort sibling signals when one task fails", async () => {
-    let signalAbortedInB = false
+    let signalAbortedAfterFailure: boolean | undefined
 
     const result = await try$.allSettled({
       a() {
         throw new Error("a failed")
       },
       async b() {
-        await sleep(20)
-        signalAbortedInB = this.$signal.aborted
+        // Wait until the sibling failure is observable before reading the signal.
+        await this.$result.a.catch(() => null)
+        signalAbortedAfterFailure = this.$signal.aborted
         return "b done"
       },
     })
 
-    expect(signalAbortedInB).toBe(false)
-    expect(result.b).toEqual({ status: "fulfilled", value: "b done" })
-  })
-
-  it("keeps sibling task signals usable after another task fails", async () => {
-    const signalStates: boolean[] = []
-
-    const result = await try$.allSettled({
-      a() {
-        throw new Error("a failed")
-      },
-      async b() {
-        signalStates.push(this.$signal.aborted)
-        await sleep(10)
-        signalStates.push(this.$signal.aborted)
-        return "b done"
-      },
-    })
-
-    expect(signalStates).toEqual([false, false])
+    expect(signalAbortedAfterFailure).toBe(false)
     expect(result.b).toEqual({ status: "fulfilled", value: "b done" })
   })
 
   it("applies wrap middleware around allSettled execution", async () => {
+    const boom = new Error("boom")
     let wrapCalls = 0
 
     const result = await try$
@@ -224,83 +224,23 @@ describe("allSettled", () => {
       })
       .allSettled({
         fail() {
-          throw new Error("boom")
+          throw boom
         },
         ok() {
           return 1
         },
       })
 
-    expect(result.ok).toEqual({ status: "fulfilled", value: 1 })
-    expect(result.fail.status).toBe("rejected")
-    expect(wrapCalls).toBe(1)
-  })
-
-  it("runs wrap promise cleanup when allSettled() starts with an already-aborted signal", async () => {
-    const controller = new AbortController()
-    let cleaned = false
-
-    controller.abort(new Error("stop"))
-
-    try {
-      await try$
-        .wrap((_, next) =>
-          Promise.resolve(next()).finally(() => {
-            cleaned = true
-          })
-        )
-        .signal(controller.signal)
-        .allSettled({
-          a() {
-            return 1
-          },
-        })
-      expect.unreachable("should have thrown")
-    } catch (error) {
-      expect(error).toBeInstanceOf(CancellationError)
-    }
-
-    expect(cleaned).toBe(true)
-  })
-
-  it("honors cancellation signal from builder options", async () => {
-    const controller = new AbortController()
-
-    const pending = try$.signal(controller.signal).allSettled({
-      async a() {
-        await sleep(20)
-
-        if (this.$signal.aborted) {
-          throw this.$signal.reason
-        }
-
-        return 1
-      },
-      async b() {
-        await sleep(25)
-
-        if (this.$signal.aborted) {
-          throw this.$signal.reason
-        }
-
-        return 2
-      },
+    expect(result).toEqual({
+      fail: { reason: boom, status: "rejected" },
+      ok: { status: "fulfilled", value: 1 },
     })
-
-    setTimeout(() => {
-      controller.abort(new Error("stop"))
-    }, 5)
-
-    try {
-      await pending
-      expect.unreachable("should have thrown")
-    } catch (error) {
-      expect(error).toBeInstanceOf(CancellationError)
-    }
+    expect(wrapCalls).toBe(1)
   })
 
   it("holds cancellation until non-cooperative tasks settle", async () => {
     const controller = new AbortController()
+    const reason = new Error("stop")
     let markStarted!: () => void
     let markFinished!: () => void
     let releaseTask!: () => void
@@ -328,7 +268,7 @@ describe("allSettled", () => {
     })
 
     await started
-    controller.abort(new Error("stop"))
+    controller.abort(reason)
 
     const observed = pending.then(
       () => "resolved" as const,
@@ -342,28 +282,14 @@ describe("allSettled", () => {
     releaseTask()
     await finished
 
-    expect(await observed).toBeInstanceOf(CancellationError)
+    const error = await observed
+
+    expect(error).toBeInstanceOf(CancellationError)
+    expect((error as CancellationError).cause).toBe(reason)
   })
 
-  it("runs disposer cleanup after all tasks settle", async () => {
-    let cleaned = false
-
-    await try$.allSettled({
-      a() {
-        this.$disposer.defer(() => {
-          cleaned = true
-        })
-        return 1
-      },
-      b() {
-        throw new Error("boom")
-      },
-    })
-
-    expect(cleaned).toBe(true)
-  })
-
-  it("runs disposer cleanup for both fulfilled and rejected tasks without external signals", async () => {
+  it("runs disposer cleanup for both fulfilled and rejected tasks", async () => {
+    const boom = new Error("boom")
     let cleanedA = false
     let cleanedB = false
 
@@ -378,88 +304,52 @@ describe("allSettled", () => {
         this.$disposer.defer(() => {
           cleanedB = true
         })
-        throw new Error("boom")
+        throw boom
       },
     })
 
-    expect(result.a).toEqual({ status: "fulfilled", value: 1 })
-    expect(result.b.status).toBe("rejected")
+    expect(result).toEqual({
+      a: { status: "fulfilled", value: 1 },
+      b: { reason: boom, status: "rejected" },
+    })
     expect(cleanedA).toBe(true)
     expect(cleanedB).toBe(true)
   })
 
-  it("rejects with TimeoutError when the graph deadline fires", async () => {
-    try {
-      await try$.timeout(10).allSettled({
-        async a() {
-          await sleep(40)
-          return "late" as const
-        },
-      })
-      expect.unreachable("should have thrown")
-    } catch (error) {
-      expect(error).toBeInstanceOf(TimeoutError)
-    }
-  })
-
   it("waits for in-flight tasks to settle before rejecting on the graph deadline", async () => {
-    let taskSettled = false
+    vi.useFakeTimers()
 
     try {
-      await try$.timeout(10).allSettled({
-        async a() {
-          await sleep(40)
-          taskSettled = true
-          return "late" as const
-        },
-      })
-      expect.unreachable("should have thrown")
-    } catch (error) {
-      expect(error).toBeInstanceOf(TimeoutError)
+      let taskSettled = false
+      let rejection: unknown
+
+      const promise = try$
+        .timeout(10)
+        .allSettled({
+          async a() {
+            await sleep(40)
+            taskSettled = true
+            return "late" as const
+          },
+        })
+        .then(
+          () => expect.unreachable("should have thrown"),
+          (error: unknown) => {
+            rejection = error
+          }
+        )
+
+      await vi.advanceTimersByTimeAsync(10)
+      expect(rejection).toBeUndefined()
+      expect(taskSettled).toBe(false)
+
+      await vi.advanceTimersByTimeAsync(30)
+      await promise
+
+      expect(taskSettled).toBe(true)
+      expect(rejection).toBeInstanceOf(TimeoutError)
+    } finally {
+      vi.useRealTimers()
     }
-
-    expect(taskSettled).toBe(true)
-  })
-
-  it("bounds the deadline with $race for signal-unaware work", async () => {
-    const startedAt = Date.now()
-
-    try {
-      await try$.timeout(10).allSettled({
-        async a() {
-          await this.$race(sleep(200))
-          return "late" as const
-        },
-      })
-      expect.unreachable("should have thrown")
-    } catch (error) {
-      expect(error).toBeInstanceOf(TimeoutError)
-    }
-
-    expect(Date.now() - startedAt).toBeLessThan(150)
-  })
-
-  it("waits for in-flight tasks to settle before rejecting on cancellation", async () => {
-    const controller = new AbortController()
-    let taskSettled = false
-
-    setTimeout(() => {
-      controller.abort(new Error("stop"))
-    }, 5)
-
-    try {
-      await try$.signal(controller.signal).allSettled({
-        async a() {
-          await sleep(30)
-          taskSettled = true
-          return 1
-        },
-      })
-      expect.unreachable("should have thrown")
-    } catch (error) {
-      expect(error).toBeInstanceOf(CancellationError)
-    }
-
-    expect(taskSettled).toBe(true)
   })
 })

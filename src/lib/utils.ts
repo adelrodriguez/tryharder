@@ -29,15 +29,21 @@ export function checkIsPromiseLike(value: unknown): value is PromiseLike<unknown
   )
 }
 
+/**
+ * Attaches a no-op rejection handler to a promise whose outcome is being discarded, so a later
+ * rejection is not reported as unhandled.
+ */
+export function discardOutcome(promise: PromiseLike<unknown>): void {
+  void Promise.resolve(promise).catch((error: unknown) => void error)
+}
+
 export async function resolveWithAbort<V, E>(
   signal: AbortSignal,
   promise: PromiseLike<V>,
   createAbortResult: () => E
 ): Promise<V | E> {
   if (signal.aborted) {
-    // We return the abort result immediately, so attach a no-op handler to
-    // avoid an unhandled rejection if the original promise rejects later.
-    void Promise.resolve(promise).catch((error: unknown) => void error)
+    discardOutcome(promise)
     return createAbortResult()
   }
 

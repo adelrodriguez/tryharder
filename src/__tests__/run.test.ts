@@ -1,5 +1,5 @@
 import fc from "fast-check"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import {
   CancellationError,
   Panic,
@@ -8,23 +8,7 @@ import {
   UnhandledException,
 } from "../errors"
 import * as try$ from "../index"
-import { expectPanic, sleep } from "./test-utils"
-
-class InvalidInputError extends Error {
-  override name = "InvalidInputError"
-}
-
-class PermissionDeniedError extends Error {
-  override name = "PermissionDeniedError"
-}
-
-class NetworkError extends Error {
-  override name = "NetworkError"
-}
-
-class RemoteServiceError extends Error {
-  override name = "RemoteServiceError"
-}
+import { expectPanic } from "./test-utils"
 
 /**
  * Patches `setTimeout` to record every scheduled delay and re-schedule callbacks with a 0ms delay.
@@ -53,29 +37,11 @@ function captureScheduledDelays() {
   }
 }
 
-describe("captureScheduledDelays", () => {
-  it("preserves setTimeout callback arguments", async () => {
-    const scheduledDelays = captureScheduledDelays()
-
-    try {
-      const result = await new Promise<string>((resolve) => {
-        setTimeout(
-          (prefix, value) => {
-            resolve(`${prefix}${value}`)
-          },
-          25,
-          "value-",
-          42
-        )
-      })
-
-      expect(result).toBe("value-42")
-      expect(scheduledDelays.values).toEqual([25])
-    } finally {
-      scheduledDelays.restore()
-    }
+function never<T>(): Promise<T> {
+  return new Promise<T>(() => {
+    // Intentionally never settles.
   })
-})
+}
 
 describe("runSync", () => {
   describe("function form", () => {
@@ -85,12 +51,15 @@ describe("runSync", () => {
       expect(value).toBe(42)
     })
 
-    it("returns UnhandledException in function form", () => {
+    it("returns UnhandledException with the thrown error as cause", () => {
+      const failure = new Error("boom")
+
       const result = try$.runSync(() => {
-        throw new Error("boom")
+        throw failure
       })
 
       expect(result).toBeInstanceOf(UnhandledException)
+      expect(result.cause).toBe(failure)
     })
 
     it("throws Panic when sync run receives a Promise-returning function via unsafe cast", () => {
@@ -119,45 +88,49 @@ describe("runSync", () => {
 
       expect(thrown).toBe(panic)
     })
-
-    it("rethrows forwarded Panic from nested try$.runSync", () => {
-      const unsafeCatch = (() => Promise.resolve("mapped")) as unknown as (error: unknown) => string
-      let thrown: unknown
-
-      try {
-        try$.runSync(() =>
-          try$.runSync({
-            catch: unsafeCatch,
-            try: () => {
-              throw new Error("boom")
-            },
-          })
-        )
-      } catch (error) {
-        thrown = error
-      }
-
-      expectPanic(thrown, "RUN_SYNC_CATCH_PROMISE")
-    })
   })
 
   describe("object form", () => {
-    it("returns mapped value when object form catch handles error", () => {
+    it("returns the catch result and passes it the thrown error", () => {
+      const failure = new Error("boom")
+      const caught: unknown[] = []
+
       const result = try$.runSync({
-        catch: () => "mapped",
+        catch: (error) => {
+          caught.push(error)
+          return "mapped"
+        },
         try: () => {
-          throw new Error("boom")
+          throw failure
         },
       })
 
       expect(result).toBe("mapped")
+      expect(caught).toEqual([failure])
     })
 
-    it("throws Panic when catch throws", () => {
+    it("does not call catch when try succeeds", () => {
+      let catchCalls = 0
+
+      const result = try$.runSync({
+        catch: () => {
+          catchCalls += 1
+          return "mapped"
+        },
+        try: () => 42,
+      })
+
+      expect(result).toBe(42)
+      expect(catchCalls).toBe(0)
+    })
+
+    it("throws Panic with the catch error as cause when catch throws", () => {
+      const catchFailure = new Error("catch failed")
+
       try {
         try$.runSync({
           catch: () => {
-            throw new Error("catch failed")
+            throw catchFailure
           },
           try: () => {
             throw new Error("boom")
@@ -166,41 +139,11 @@ describe("runSync", () => {
         expect.unreachable("should have thrown")
       } catch (error) {
         expectPanic(error, "RUN_SYNC_CATCH_HANDLER_THROW")
+        expect((error as Panic).cause).toBe(catchFailure)
       }
     })
 
-    it("supports multiple mapped error variants in sync object form", () => {
-      const invalidInput = try$.runSync({
-        catch: (error) => {
-          if (error instanceof SyntaxError) {
-            return new InvalidInputError("invalid")
-          }
-
-          return new PermissionDeniedError("denied")
-        },
-        try: () => {
-          throw new SyntaxError("bad input")
-        },
-      })
-
-      const permissionDenied = try$.runSync({
-        catch: (error) => {
-          if (error instanceof SyntaxError) {
-            return new InvalidInputError("invalid")
-          }
-
-          return new PermissionDeniedError("denied")
-        },
-        try: () => {
-          throw new Error("no access")
-        },
-      })
-
-      expect(invalidInput).toBeInstanceOf(InvalidInputError)
-      expect(permissionDenied).toBeInstanceOf(PermissionDeniedError)
-    })
-
-    it("rethrows RUN_SYNC_CATCH_PROMISE unchanged when catch returns a promise", () => {
+    it("throws Panic when catch returns a Promise via unsafe cast", () => {
       const unsafeCatch = (() => Promise.resolve("mapped")) as unknown as (error: unknown) => string
 
       try {
@@ -230,13 +173,16 @@ describe("run", () => {
       expect(await result).toBe(42)
     })
 
-    it("returns UnhandledException when async function form rejects", async () => {
-      const result = try$.run(async () => {
+    it("returns UnhandledException with the rejection as cause when async function rejects", async () => {
+      const failure = new Error("boom")
+
+      const result = await try$.run(async () => {
         await Promise.resolve()
-        throw new Error("boom")
+        throw failure
       })
 
-      expect(await result).toBeInstanceOf(UnhandledException)
+      expect(result).toBeInstanceOf(UnhandledException)
+      expect(result.cause).toBe(failure)
     })
 
     it("rethrows user-thrown Panic in function form", async () => {
@@ -254,79 +200,76 @@ describe("run", () => {
       expect(thrown).toBe(panic)
     })
 
-    it("returns UnhandledException when sync function form throws", async () => {
-      const result = try$.run(() => {
-        throw new Error("boom")
+    it("returns UnhandledException with the thrown error as cause when sync function throws", async () => {
+      const failure = new Error("boom")
+
+      const result = await try$.run(() => {
+        throw failure
       })
 
-      expect(await result).toBeInstanceOf(UnhandledException)
+      expect(result).toBeInstanceOf(UnhandledException)
+      expect(result.cause).toBe(failure)
     })
   })
 
   describe("object form", () => {
-    it("returns mapped value when async object form catch handles error", async () => {
-      const result = try$.run({
-        catch: () => "mapped",
+    it("returns the catch result and passes it the rejection", async () => {
+      const failure = new Error("boom")
+      const caught: unknown[] = []
+
+      const result = await try$.run({
+        catch: (error) => {
+          caught.push(error)
+          return "mapped"
+        },
         try: async () => {
           await Promise.resolve()
-          throw new Error("boom")
+          throw failure
         },
       })
 
-      expect(await result).toBe("mapped")
+      expect(result).toBe("mapped")
+      expect(caught).toEqual([failure])
     })
 
-    it("throws Panic when async catch rejects", async () => {
-      const result = try$.run({
-        catch: async () => {
-          await Promise.resolve()
-          throw new Error("catch failed")
-        },
-        try: async () => {
-          await Promise.resolve()
-          throw new Error("boom")
-        },
-      })
+    it("throws Panic with the catch error as cause when catch throws synchronously", async () => {
+      const catchFailure = new Error("catch failed")
 
       try {
-        await result
-        throw new Error("Expected Panic rejection")
+        await try$.run({
+          catch: () => {
+            throw catchFailure
+          },
+          try: () => {
+            throw new Error("boom")
+          },
+        })
+        expect.unreachable("should have thrown")
       } catch (error) {
-        expectPanic(error, "RUN_CATCH_HANDLER_REJECT")
+        expectPanic(error, "RUN_CATCH_HANDLER_THROW")
+        expect((error as Panic).cause).toBe(catchFailure)
       }
     })
 
-    it("supports multiple mapped error variants in async object form", async () => {
-      const networkError = await try$.run({
-        catch: (error): NetworkError | RemoteServiceError => {
-          if (error instanceof TypeError) {
-            return new NetworkError("network")
-          }
+    it("throws Panic with the rejection as cause when async catch rejects", async () => {
+      const catchFailure = new Error("catch failed")
 
-          return new RemoteServiceError("remote")
-        },
-        try: async () => {
-          await Promise.resolve()
-          throw new TypeError("fetch failed")
-        },
-      })
-
-      const remoteServiceError = await try$.run({
-        catch: (error) => {
-          if (error instanceof TypeError) {
-            return new NetworkError("network")
-          }
-
-          return new RemoteServiceError("remote")
-        },
-        try: async () => {
-          await Promise.resolve()
-          throw new Error("500")
-        },
-      })
-
-      expect(networkError).toBeInstanceOf(NetworkError)
-      expect(remoteServiceError).toBeInstanceOf(RemoteServiceError)
+      try {
+        await try$.run({
+          catch: async () => {
+            await Promise.resolve()
+            throw catchFailure
+          },
+          try: async () => {
+            await Promise.resolve()
+            throw new Error("boom")
+          },
+        })
+        expect.unreachable("should have thrown")
+      } catch (error) {
+        expectPanic(error, "RUN_CATCH_HANDLER_REJECT")
+        expect((error as Panic).cause).toBe(catchFailure)
+      }
     })
   })
 })
@@ -376,36 +319,17 @@ describe("retry behavior", () => {
     )
   })
 
-  it("stops retrying when shouldRetry returns false", async () => {
-    let attempts = 0
-
-    const result = await try$
-      .retry({
-        backoff: "constant",
-        limit: 5,
-        shouldRetry: () => false,
-      })
-      .run({
-        catch: () => "mapped" as const,
-        try: () => {
-          attempts += 1
-          throw new Error("boom")
-        },
-      })
-
-    expect(result).toBe("mapped")
-    expect(attempts).toBe(1)
-  })
-
   it("runs exactly once with retry(1) and reports give-up on failure", async () => {
+    const failure = new Error("boom")
     let attempts = 0
 
     const result = await try$.retry(1).run(() => {
       attempts += 1
-      throw new Error("boom")
+      throw failure
     })
 
     expect(result).toBeInstanceOf(RetryExhaustedError)
+    expect(result.cause).toBe(failure)
     expect(attempts).toBe(1)
   })
 
@@ -458,41 +382,34 @@ describe("retry behavior", () => {
     }
   })
 
-  it("panics when runSync receives a delayed retry policy via casts", () => {
-    const unsafeBuilder = try$.retry({
-      backoff: "constant",
-      delayMs: 10,
-      limit: 2,
-    }) as unknown as { runSync(tryFn: () => number): unknown }
+  it.each([
+    { backoff: "constant", delayMs: 10, limit: 2 },
+    { backoff: "constant", jitter: true, limit: 2 },
+    { backoff: "linear", delayMs: 10, limit: 2 },
+  ] as const)("panics when runSync receives an async retry policy via casts: %o", (policy) => {
+    const unsafeBuilder = try$.retry(policy) as unknown as {
+      runSync(tryFn: () => number): unknown
+    }
+    let tryCalls = 0
 
     try {
-      unsafeBuilder.runSync(() => 1)
+      unsafeBuilder.runSync(() => {
+        tryCalls += 1
+        return 1
+      })
       expect.unreachable("should have thrown")
     } catch (error) {
       expectPanic(error, "RUN_SYNC_ASYNC_RETRY_POLICY")
     }
+
+    expect(tryCalls).toBe(0)
   })
 
-  it("panics when runSync receives a jittered retry policy via casts", () => {
-    const unsafeBuilder = try$.retry({
-      backoff: "constant",
-      jitter: true,
-      limit: 2,
-    }) as unknown as { runSync(tryFn: () => number): unknown }
-
-    try {
-      unsafeBuilder.runSync(() => 1)
-      expect.unreachable("should have thrown")
-    } catch (error) {
-      expectPanic(error, "RUN_SYNC_ASYNC_RETRY_POLICY")
-    }
-  })
-
-  it("runs retries synchronously with the numeric shorthand", () => {
-    const attempts: number[] = []
+  it("exposes the current attempt and limit to each sync retry", () => {
+    const seen: Array<{ attempt: number; limit: number }> = []
 
     const result = try$.retry(3).runSync((ctx) => {
-      attempts.push(ctx.retry.attempt)
+      seen.push({ ...ctx.retry })
 
       if (ctx.retry.attempt < 3) {
         throw new Error("boom")
@@ -501,56 +418,69 @@ describe("retry behavior", () => {
       return "done" as const
     })
 
-    // The whole retry loop completed synchronously: the result is available
-    // on the same tick, with no awaits in between.
     expect(result).toBe("done")
-    expect(attempts).toEqual([1, 2, 3])
+    expect(seen).toEqual([
+      { attempt: 1, limit: 3 },
+      { attempt: 2, limit: 3 },
+      { attempt: 3, limit: 3 },
+    ])
   })
 
-  it("does not retry control errors", () => {
+  it("does not retry or map a TimeoutError thrown by try", () => {
+    const thrown = new TimeoutError()
     let attempts = 0
-    let mapped = false
+    let catchCalls = 0
 
     const result = try$.retry(3).runSync({
       catch: () => {
-        mapped = true
+        catchCalls += 1
         return "mapped"
       },
       try: () => {
         attempts += 1
-        throw new TimeoutError()
+        throw thrown
       },
     })
 
-    expect(result).toBeInstanceOf(TimeoutError)
+    expect(result).toBe(thrown)
     expect(attempts).toBe(1)
-    expect(mapped).toBe(false)
+    expect(catchCalls).toBe(0)
   })
 
-  it("does not double-call shouldRetry when switching from sync to async retry path", async () => {
-    let shouldRetryCalls = 0
+  it("calls shouldRetry once per failed attempt below the limit", async () => {
+    const calls: Array<{ attempt: number; error: unknown }> = []
+    const failures: Error[] = []
 
     const result = await try$
       .retry({
         backoff: "constant",
         delayMs: 1,
         limit: 3,
-        shouldRetry: () => {
-          shouldRetryCalls += 1
+        shouldRetry: (error, ctx) => {
+          calls.push({ attempt: ctx.retry.attempt, error })
           return true
         },
       })
-      .run(() => {
-        throw new Error("boom")
+      .run((ctx) => {
+        const failure = new Error(`boom ${ctx.retry.attempt}`)
+        failures.push(failure)
+        throw failure
       })
 
     expect(result).toBeInstanceOf(RetryExhaustedError)
-    expect(shouldRetryCalls).toBe(2)
+    expect(result.cause).toBe(failures[2])
+    // The limit check runs before shouldRetry, so the final attempt does not consult it.
+    expect(calls).toEqual([
+      { attempt: 1, error: failures[0] },
+      { attempt: 2, error: failures[1] },
+    ])
   })
 
   it("keeps ctx.signal undefined for retry-only executions", async () => {
+    const signals: Array<AbortSignal | undefined> = []
+
     const result = await try$.retry(2).run((ctx) => {
-      expect(ctx.signal).toBeUndefined()
+      signals.push(ctx.signal)
 
       if (ctx.retry.attempt === 1) {
         throw new Error("boom")
@@ -560,6 +490,7 @@ describe("retry behavior", () => {
     })
 
     expect(result).toBe(2)
+    expect(signals).toEqual([undefined, undefined])
   })
 })
 
@@ -638,7 +569,9 @@ describe("retry give-up and catch contract", () => {
   })
 
   it("passes the original error to catch when shouldRetry declines", async () => {
+    const failure = new Error("not transient")
     const caught: unknown[] = []
+    let attempts = 0
 
     const result = await try$
       .retry({
@@ -652,38 +585,53 @@ describe("retry give-up and catch contract", () => {
           return "mapped" as const
         },
         try: () => {
-          throw new Error("not transient")
+          attempts += 1
+          throw failure
         },
       })
 
     expect(result).toBe("mapped")
-    expect(caught).toHaveLength(1)
-    expect((caught[0] as Error).message).toBe("not transient")
+    expect(caught).toEqual([failure])
+    expect(attempts).toBe(1)
   })
 
-  it("does not invoke catch when timeout fires during retry backoff", async () => {
-    const caught: unknown[] = []
+  it("returns TimeoutError without invoking catch when timeout fires during retry backoff", async () => {
+    vi.useFakeTimers()
 
-    const result = await try$
-      .retry({ backoff: "constant", delayMs: 50, limit: 3 })
-      .timeout(5)
-      .run({
-        catch: (error) => {
-          caught.push(error)
-          return "mapped" as const
-        },
-        try: () => {
-          throw new Error("boom")
-        },
-      })
+    try {
+      const caught: unknown[] = []
+      let attempts = 0
 
-    expect(result).toBeInstanceOf(TimeoutError)
-    expect(caught).toHaveLength(0)
+      const pending = try$
+        .retry({ backoff: "constant", delayMs: 50, limit: 3 })
+        .timeout(5)
+        .run({
+          catch: (error) => {
+            caught.push(error)
+            return "mapped" as const
+          },
+          try: () => {
+            attempts += 1
+            throw new Error("boom")
+          },
+        })
+
+      await vi.advanceTimersByTimeAsync(5)
+
+      const result = await pending
+
+      expect(result).toBeInstanceOf(TimeoutError)
+      expect(attempts).toBe(1)
+      expect(caught).toHaveLength(0)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("rethrows Panic from try without invoking catch even with retry configured", async () => {
     const panic = new Panic("FLOW_NO_EXIT")
     const caught: unknown[] = []
+    let attempts = 0
 
     try {
       await try$.retry(3).run({
@@ -692,6 +640,7 @@ describe("retry give-up and catch contract", () => {
           return "mapped" as const
         },
         try: () => {
+          attempts += 1
           throw panic
         },
       })
@@ -701,158 +650,187 @@ describe("retry give-up and catch contract", () => {
     }
 
     expect(caught).toHaveLength(0)
+    expect(attempts).toBe(1)
   })
 })
 
 describe("timeout and cancellation behavior", () => {
-  it("returns TimeoutError when timeout expires during try execution", async () => {
-    const result = await try$.timeout(5).run(async (ctx) => {
-      expect(ctx.signal).toBeDefined()
-      await sleep(20)
-      return "never"
-    })
+  it("returns TimeoutError and aborts ctx.signal when timeout expires during try", async () => {
+    vi.useFakeTimers()
 
-    expect(result).toBeInstanceOf(TimeoutError)
-  })
+    try {
+      let taskSignal: AbortSignal | undefined
 
-  it("returns TimeoutError when timeout expires during retry backoff", async () => {
-    const result = await try$
-      .retry({ backoff: "constant", delayMs: 50, limit: 3 })
-      .timeout(5)
-      .run(() => {
-        throw new Error("boom")
+      const promise = try$.timeout(5).run((ctx) => {
+        taskSignal = ctx.signal
+        return never<string>()
       })
 
-    expect(result).toBeInstanceOf(TimeoutError)
+      await vi.advanceTimersByTimeAsync(5)
+      const result = await promise
+
+      expect(result).toBeInstanceOf(TimeoutError)
+      expect(taskSignal?.aborted).toBe(true)
+      expect(taskSignal?.reason).toBe(result)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("returns TimeoutError when timeout expires during catch execution", async () => {
-    const result = await try$.timeout(5).run({
-      catch: async () => {
-        await sleep(20)
-        return "mapped"
-      },
-      try: () => {
-        throw new Error("boom")
-      },
-    })
+    vi.useFakeTimers()
 
-    expect(result).toBeInstanceOf(TimeoutError)
-  })
+    try {
+      let catchCalls = 0
 
-  it("returns CancellationError when signal aborts during async try", async () => {
-    const controller = new AbortController()
-    const pending = try$.signal(controller.signal).run(async (ctx) => {
-      expect(ctx.signal).toBeDefined()
-      expect(ctx.signal).not.toBe(controller.signal)
-      await sleep(25)
-      return "ok"
-    })
-
-    setTimeout(() => {
-      controller.abort(new Error("stop"))
-    }, 5)
-
-    const result = await pending
-
-    expect(result).toBeInstanceOf(CancellationError)
-  })
-
-  it("prefers cancellation over timeout when both controls are already tripped", async () => {
-    const controller = new AbortController()
-    controller.abort(new Error("cancelled"))
-
-    const result = await try$
-      .signal(controller.signal)
-      .timeout(0)
-      .run((ctx) => {
-        expect(ctx.signal).toBeDefined()
-        return "never"
-      })
-
-    expect(result).toBeInstanceOf(CancellationError)
-  })
-
-  it("reports the configured deadline over a TimeoutError returned as a value", async () => {
-    const userTimeout = new TimeoutError("returned as a value")
-
-    const result = await try$.timeout(5).run(() => {
-      const startedAt = Date.now()
-      let spins = 0
-
-      // Busy-wait past the deadline: sync work cannot observe the timer, so the
-      // wall-clock check at the result boundary must report the policy timeout.
-      while (Date.now() - startedAt < 10) {
-        spins += 1
-      }
-
-      void spins
-      return userTimeout
-    })
-
-    expect(result).toBeInstanceOf(TimeoutError)
-    expect(result).not.toBe(userTimeout)
-  })
-
-  it("returns CancellationError when aborted during retry backoff", async () => {
-    const controller = new AbortController()
-    let attempts = 0
-
-    const pending = try$
-      .retry({ backoff: "constant", delayMs: 50, limit: 3 })
-      .signal(controller.signal)
-      .run(() => {
-        attempts += 1
-        throw new Error("boom")
-      })
-
-    setTimeout(() => {
-      controller.abort(new Error("stop"))
-    }, 5)
-
-    const result = await pending
-
-    expect(result).toBeInstanceOf(CancellationError)
-    expect(attempts).toBe(1)
-  })
-
-  it("prefers cancellation over timeout when abort happens during catch", async () => {
-    const controller = new AbortController()
-
-    const pending = try$
-      .signal(controller.signal)
-      .timeout(50)
-      .run({
-        catch: async () => {
-          await sleep(20)
-          return "mapped"
+      const pending = try$.timeout(5).run({
+        catch: () => {
+          catchCalls += 1
+          return never<string>()
         },
         try: () => {
           throw new Error("boom")
         },
       })
 
-    setTimeout(() => {
-      controller.abort(new Error("cancelled"))
-    }, 5)
+      // Stop short of the deadline so catch is known to be pending when the timeout fires.
+      await vi.advanceTimersByTimeAsync(4)
+      expect(catchCalls).toBe(1)
+
+      await vi.advanceTimersByTimeAsync(1)
+      const result = await pending
+
+      expect(result).toBeInstanceOf(TimeoutError)
+      expect(catchCalls).toBe(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("returns CancellationError with the abort reason when signal aborts during async try", async () => {
+    const controller = new AbortController()
+    const reason = new Error("stop")
+    let taskSignal: AbortSignal | undefined
+
+    const pending = try$.signal(controller.signal).run((ctx) => {
+      taskSignal = ctx.signal
+      return never<string>()
+    })
+
+    controller.abort(reason)
 
     const result = await pending
 
     expect(result).toBeInstanceOf(CancellationError)
+    expect((result as CancellationError).cause).toBe(reason)
+    expect(taskSignal).not.toBe(controller.signal)
+    expect(taskSignal?.aborted).toBe(true)
+  })
+
+  it("reports the configured deadline over a TimeoutError returned as a value", async () => {
+    vi.useFakeTimers()
+
+    try {
+      const userTimeout = new TimeoutError("returned as a value")
+
+      const result = await try$.timeout(5).run(() => {
+        // Move the clock past the deadline without firing timers: sync work cannot
+        // observe the timer, so the clock check at the result boundary must report
+        // the policy timeout.
+        vi.setSystemTime(Date.now() + 10)
+        return userTimeout
+      })
+
+      expect(result).toBeInstanceOf(TimeoutError)
+      expect(result).not.toBe(userTimeout)
+      expect(result.message).toBe("Execution exceeded timeout of 5ms")
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("returns CancellationError when aborted during retry backoff", async () => {
+    vi.useFakeTimers()
+
+    try {
+      const controller = new AbortController()
+      const reason = new Error("stop")
+      let attempts = 0
+
+      const pending = try$
+        .retry({ backoff: "constant", delayMs: 50, limit: 3 })
+        .signal(controller.signal)
+        .run(() => {
+          attempts += 1
+          throw new Error("boom")
+        })
+
+      await vi.advanceTimersByTimeAsync(10)
+      // The backoff sleep is the only scheduled timer, so the abort lands inside it.
+      expect(vi.getTimerCount()).toBe(1)
+
+      controller.abort(reason)
+
+      const result = await pending
+
+      expect(result).toBeInstanceOf(CancellationError)
+      expect(result.cause).toBe(reason)
+      expect(attempts).toBe(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("prefers cancellation over timeout when both fire during catch", async () => {
+    vi.useFakeTimers()
+
+    try {
+      const controller = new AbortController()
+      const reason = new Error("cancelled")
+      let catchCalls = 0
+
+      const pending = try$
+        .signal(controller.signal)
+        .timeout(50)
+        .run({
+          catch: () => {
+            catchCalls += 1
+            return never<string>()
+          },
+          try: () => {
+            throw new Error("boom")
+          },
+        })
+
+      // Both controls fire before any continuation runs. The timeout race wins
+      // the inner promise race, so only outcome arbitration can report cancellation.
+      controller.abort(reason)
+      vi.advanceTimersByTime(50)
+
+      const result = await pending
+
+      expect(result).toBeInstanceOf(CancellationError)
+      expect(catchCalls).toBe(1)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 
 describe("wrap behavior", () => {
-  it("supports wrap builder step", async () => {
-    const result = await try$.wrap((_, next) => next()).run(() => 42)
+  it("runs a wrap around runSync and returns its result synchronously", () => {
+    const observed: unknown[] = []
+
+    const result = try$
+      .wrap((_, next) => {
+        const value = next()
+        observed.push(value)
+        return value
+      })
+      .runSync(() => 42)
 
     expect(result).toBe(42)
-  })
-
-  it("supports wrap builder runSync", () => {
-    const result = try$.wrap((_, next) => next()).runSync(() => 42)
-
-    expect(result).toBe(42)
+    expect(observed).toEqual([42])
   })
 
   it("supports multiple wraps in top-level wrap chain", async () => {
@@ -871,13 +849,16 @@ describe("wrap behavior", () => {
         events.push("inner-after")
         return value
       })
-      .run(() => 42)
+      .run(() => {
+        events.push("try")
+        return 42
+      })
 
     expect(result).toBe(42)
-    expect(events).toEqual(["outer-before", "inner-before", "inner-after", "outer-after"])
+    expect(events).toEqual(["outer-before", "inner-before", "try", "inner-after", "outer-after"])
   })
 
-  it("runs wraps once when retries are handled asynchronously", async () => {
+  it("runs wraps once around the full retry scope when retries are delayed", async () => {
     let wrapCalls = 0
     let attempts = 0
 

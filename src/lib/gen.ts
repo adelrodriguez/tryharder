@@ -48,6 +48,7 @@ async function executeAsyncGenerator<TYield, TReturn>(
     }
 
     if (currentValue instanceof Error) {
+      iterator.return(undefined as TReturn)
       return currentValue as GenErrors<TYield>
     }
 
@@ -79,6 +80,7 @@ export function driveGen<TYield, TReturn>(
     }
 
     if (step.value instanceof Error) {
+      iterator.return(undefined as TReturn)
       return step.value as GenResult<TYield, TReturn>
     }
 
