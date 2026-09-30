@@ -144,6 +144,46 @@ describe("gen", () => {
     ).rejects.toBe(cleanupFailure)
   })
 
+  it("rejects with the cleanup failure when a finally block returns a rejected promise", async () => {
+    const userError = new UserNotFoundError("missing")
+    const cleanupFailure = new Error("cleanup failed")
+
+    await expect(
+      try$.gen(function* (use) {
+        try {
+          yield* use(userError as number | UserNotFoundError)
+          return Promise.resolve(42)
+        } finally {
+          // oxlint-disable-next-line no-unsafe-finally -- the case under test
+          return Promise.reject<number>(cleanupFailure)
+        }
+      })
+    ).rejects.toBe(cleanupFailure)
+  })
+
+  it("stops the current cleanup block on an Error yielded during cleanup and still runs outer finally blocks", async () => {
+    const events: string[] = []
+    const userError = new UserNotFoundError("missing")
+    const cleanupError = new ProjectNotFoundError("cleanup missing")
+
+    const result = await try$.gen(function* (use) {
+      try {
+        try {
+          yield* use(userError as number | UserNotFoundError)
+          return 42
+        } finally {
+          yield* use(Promise.resolve(cleanupError as number | ProjectNotFoundError))
+          events.push("inner:after")
+        }
+      } finally {
+        events.push("outer")
+      }
+    })
+
+    expect(result).toBe(userError)
+    expect(events).toEqual(["outer"])
+  })
+
   it("stays sync when a finally block yields a sync value after a sync short-circuit", () => {
     const events: string[] = []
     const userError = new UserNotFoundError("missing")

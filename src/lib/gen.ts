@@ -17,8 +17,20 @@ function* use<T>(value: T): Generator<T, GenUnwrap<T>, GenUnwrap<T>> {
 }
 
 /**
+ * Resumes cleanup with a value it yielded. An `Error` short-circuits cleanup the same way it
+ * short-circuits the body: the current `finally` block stops and outer ones still run.
+ */
+function resumeCleanup<TYield, TReturn>(
+  iterator: Generator<TYield, TReturn, unknown>,
+  value: unknown
+): IteratorResult<TYield, TReturn> {
+  return value instanceof Error ? iterator.return(undefined as TReturn) : iterator.next(value)
+}
+
+/**
  * Runs the generator's `finally` blocks after a short-circuit. Cleanup may itself yield, so keep
- * resuming it (awaiting yielded promises) until the generator is done, then report `result`.
+ * resuming it (awaiting yielded promises) until the generator is done, then report `result`. A
+ * cleanup failure, including a rejected promise returned from `finally`, replaces `result`.
  */
 async function closeAsync<TYield, TReturn, R>(
   iterator: Generator<TYield, TReturn, unknown>,
@@ -38,15 +50,17 @@ async function closeAsync<TYield, TReturn, R>(
       continue
     }
 
-    currentStep = iterator.next(currentValue)
+    currentStep = resumeCleanup(iterator, currentValue)
   }
+
+  await currentStep.value
 
   return result
 }
 
 /**
- * Sync counterpart of {@link closeAsync}: stays sync unless cleanup yields a promise, then hands the
- * remaining cleanup to {@link closeAsync}.
+ * Sync counterpart of {@link closeAsync}: stays sync unless cleanup yields or returns a promise,
+ * then hands the remaining cleanup to {@link closeAsync}.
  */
 function close<TYield, TReturn, R>(
   iterator: Generator<TYield, TReturn, unknown>,
@@ -59,7 +73,11 @@ function close<TYield, TReturn, R>(
       return closeAsync(iterator, currentStep, result)
     }
 
-    currentStep = iterator.next(currentStep.value)
+    currentStep = resumeCleanup(iterator, currentStep.value)
+  }
+
+  if (checkIsPromiseLike(currentStep.value)) {
+    return closeAsync(iterator, currentStep, result)
   }
 
   return result
