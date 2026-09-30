@@ -147,6 +147,12 @@ export abstract class OrchestrationExecution<TResult> extends BaseExecution<Prom
       await execution.waitForTasksToSettle()
     }
 
+    // A Panic is programmer misuse, so it overrides any result or failure, as in run(): even one
+    // that settled after catch mapped an earlier failure, or after cancellation or the deadline.
+    if (execution.panic) {
+      throw execution.panic
+    }
+
     // Control state may have changed while tasks ran or settled, and it takes
     // priority over whatever was thrown; the shared chain reports cancellation
     // over the graph deadline when both fired.
@@ -154,12 +160,6 @@ export abstract class OrchestrationExecution<TResult> extends BaseExecution<Prom
 
     if (controlError) {
       throw controlError
-    }
-
-    // A Panic is programmer misuse, so it overrides any result or failure, even one that settled
-    // after catch already mapped an earlier failure.
-    if (execution.panic) {
-      throw execution.panic
     }
 
     if (threw) {

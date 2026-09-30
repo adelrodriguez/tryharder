@@ -381,6 +381,26 @@ describe("all", () => {
     expect(catchErrors).toEqual([])
   })
 
+  it("throws a task Panic even when cancellation fires while siblings settle", async () => {
+    const controller = new AbortController()
+
+    try {
+      await try$.signal(controller.signal).all({
+        async a() {
+          return await (this.$result as Record<string, Promise<unknown>>).a
+        },
+        async b() {
+          await waitForAbort(this.$signal)
+          controller.abort(new Error("stop"))
+          await Promise.resolve()
+        },
+      })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expectPanic(error, "TASK_SELF_REFERENCE")
+    }
+  })
+
   it("throws a Panic from a sibling that settles after catch mapped an earlier failure", async () => {
     const release = Promise.withResolvers<boolean>()
 
