@@ -331,6 +331,31 @@ describe("all", () => {
     expect(catchErrors).toEqual([])
   })
 
+  it("throws a Panic from another copy of tryharder without passing it through catch", async () => {
+    const foreignPanic = Object.assign(new Error("foreign panic"), {
+      code: "TASK_SELF_REFERENCE",
+      name: "Panic",
+    })
+    const catchErrors: unknown[] = []
+
+    await expect(
+      try$.all(
+        {
+          a() {
+            throw foreignPanic
+          },
+        },
+        {
+          catch: (error) => {
+            catchErrors.push(error)
+            return "mapped" as const
+          },
+        }
+      )
+    ).rejects.toBe(foreignPanic)
+    expect(catchErrors).toEqual([])
+  })
+
   it("throws a Panic from a sibling that settles after catch mapped an earlier failure", async () => {
     const release = Promise.withResolvers<boolean>()
 

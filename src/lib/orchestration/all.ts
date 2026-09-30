@@ -1,5 +1,5 @@
 import type { BuilderConfig } from "../builder"
-import { Panic } from "../errors"
+import { Panic, isPanic } from "../errors"
 import { checkIsPromiseLike } from "../utils"
 import {
   FailFastTaskExecution,
@@ -43,7 +43,7 @@ class AllExecution<T extends TaskRecord, C> extends OrchestrationExecution<AllVa
     }
 
     // Defects never pass through catch, the same as in run().
-    if (!catchFn || error instanceof Panic) {
+    if (!catchFn || isPanic(error)) {
       return { thrown: error }
     }
 

@@ -1,7 +1,7 @@
 import type { AsyncDisposer } from "../../shims/disposer"
 import type { BuilderConfig } from "../builder"
 import { createAsyncDisposer, defineAsyncDisposeAlias } from "../../shims/disposer"
-import { Panic, UnhandledException } from "../errors"
+import { Panic, UnhandledException, isPanic } from "../errors"
 import { BaseExecution } from "../execution/base"
 import { invariant, resolveWithAbort } from "../utils"
 
@@ -325,7 +325,7 @@ export abstract class TaskGraphExecutionBase<
     } catch (error) {
       const mappedError = this.mapStoredError(error)
 
-      if (error instanceof Panic) {
+      if (isPanic(error)) {
         this.#panic ??= error
       }
 
@@ -439,7 +439,7 @@ export class SettledTaskExecution<T extends TaskRecord> extends TaskExecution<T>
 
   // oxlint-disable-next-line class-methods-use-this -- polymorphic override
   protected override shouldAbortOnTaskError(error: unknown): boolean {
-    return error instanceof Panic
+    return isPanic(error)
   }
 
   // oxlint-disable-next-line class-methods-use-this -- polymorphic override
