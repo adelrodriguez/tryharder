@@ -91,6 +91,23 @@ describe("flow", () => {
     expect(events).toEqual(["awaiting:start:aborted=false", "awaiting:settled", "cleanup"])
   })
 
+  it("throws a Panic from a sibling that settles after the first $exit", async () => {
+    try {
+      await try$.flow({
+        async awaiting() {
+          await waitForAbort(this.$signal)
+          return await (this.$result as Record<string, Promise<unknown>>).missing
+        },
+        exiting() {
+          return this.$exit("cached" as const)
+        },
+      })
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expectPanic(error, "TASK_UNKNOWN_REFERENCE")
+    }
+  })
+
   it("resolves exactly one winner when two tasks exit near-simultaneously", async () => {
     const disposed: string[] = []
     const exitAttempts: string[] = []

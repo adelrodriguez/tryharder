@@ -532,7 +532,7 @@ A `Panic` is never kept as settled data. If a task panics, for example by readin
 
 Use `flow(...)` for stepwise, business-process workflows. Tasks still read earlier results through `this.$result`, but completion is explicit: at least one path must call `this.$exit(...)`. The exit is a visible part of the workflow contract, not an implicit convention.
 
-Tasks start together, like in `all(...)`. `$exit` does not stop tasks that already started. The first exit becomes the flow result and aborts the other tasks' `$signal`. Observe `this.$signal` in later tasks, or make them await an earlier task through `this.$result` before they start side effects.
+Tasks start together, like in `all(...)`. `$exit` does not stop tasks that already started. The first exit becomes the flow result and aborts the other tasks' `$signal`. A `Panic` still wins: if any task panics, even after the first exit, `flow(...)` throws the `Panic`. Observe `this.$signal` in later tasks, or make them await an earlier task through `this.$result` before they start side effects.
 
 ```ts
 const cache = new Map<string, string>()
