@@ -34,7 +34,8 @@ describe("gen", () => {
   it("short-circuits sync execution on yielded Error", () => {
     let didRunAfterError = false
 
-    const maybeUser = new UserNotFoundError("missing") as number | UserNotFoundError
+    const userError = new UserNotFoundError("missing")
+    const maybeUser = userError as number | UserNotFoundError
 
     const result = try$.gen(function* (use) {
       const user = yield* use(maybeUser)
@@ -43,18 +44,31 @@ describe("gen", () => {
       return 42
     })
 
-    expect(result).toBeInstanceOf(UserNotFoundError)
+    expect(result).toBe(userError)
     expect(didRunAfterError).toBe(false)
+  })
+
+  it("runs finally blocks when sync execution short-circuits on a yielded Error", () => {
+    const events: string[] = []
+    const userError = new UserNotFoundError("missing")
+
+    const result = try$.gen(function* (use) {
+      try {
+        yield* use(userError as number | UserNotFoundError)
+        events.push("after")
+        return 42
+      } finally {
+        events.push("finally")
+      }
+    })
+
+    expect(result).toBe(userError)
+    expect(events).toEqual(["finally"])
   })
 
   it("awaits yielded promises and returns async success", async () => {
     const result = await try$.gen(function* (use) {
       const a = yield* use(Promise.resolve(20))
-
-      if (a > 20) {
-        return new Error("boom")
-      }
-
       const b = yield* use(Promise.resolve(22))
       return a + b
     })
@@ -65,9 +79,8 @@ describe("gen", () => {
   it("short-circuits async execution on resolved Error", async () => {
     let didRunAfterError = false
 
-    const maybeProject = Promise.resolve(
-      new ProjectNotFoundError("missing") as number | ProjectNotFoundError
-    )
+    const projectError = new ProjectNotFoundError("missing")
+    const maybeProject = Promise.resolve(projectError as number | ProjectNotFoundError)
 
     const result = await try$.gen(function* (use) {
       const project = yield* use(maybeProject)
@@ -76,64 +89,165 @@ describe("gen", () => {
       return 42
     })
 
-    expect(result).toBeInstanceOf(ProjectNotFoundError)
+    expect(result).toBe(projectError)
     expect(didRunAfterError).toBe(false)
   })
 
-  it("rejects with the original reason when a yielded promise rejects", async () => {
-    try {
-      await try$.gen(function* (use) {
-        const value = yield* use(Promise.reject<unknown>(new Error("boom")))
-        return value
-      })
-      expect.unreachable("should have thrown")
-    } catch (error) {
-      expect(error).toBeInstanceOf(Error)
-      expect((error as Error).message).toBe("boom")
-    }
+  it("runs finally blocks when async execution short-circuits on a resolved Error", async () => {
+    const events: string[] = []
+    const projectError = new ProjectNotFoundError("missing")
+
+    const result = await try$.gen(function* (use) {
+      try {
+        yield* use(Promise.resolve(projectError as number | ProjectNotFoundError))
+        events.push("after")
+        return 42
+      } finally {
+        events.push("finally")
+      }
+    })
+
+    expect(result).toBe(projectError)
+    expect(events).toEqual(["finally"])
   })
 
-  it("preserves TimeoutError from a rejected yielded promise", async () => {
-    const timeout = new TimeoutError("timed out")
+  it("completes a finally block that yields a promise after an async short-circuit", async () => {
+    const events: string[] = []
+    const projectError = new ProjectNotFoundError("missing")
 
-    try {
-      await try$.gen(function* (use) {
-        const value = yield* use(Promise.reject<unknown>(timeout))
-        return value
-      })
-      expect.unreachable("should have thrown")
-    } catch (error) {
-      expect(error).toBe(timeout)
-    }
+    const result = await try$.gen(function* (use) {
+      try {
+        yield* use(Promise.resolve(projectError as number | ProjectNotFoundError))
+        return 42
+      } finally {
+        events.push(`cleanup:${String(yield* use(Promise.resolve(1)))}`)
+      }
+    })
+
+    expect(result).toBe(projectError)
+    expect(events).toEqual(["cleanup:1"])
   })
 
-  it("runs finally blocks when the first yielded promise rejects", async () => {
+  it("rejects with the cleanup failure when a finally block yields a rejected promise", async () => {
+    const projectError = new ProjectNotFoundError("missing")
+    const cleanupFailure = new Error("cleanup failed")
+
+    await expect(
+      try$.gen(function* (use) {
+        try {
+          yield* use(Promise.resolve(projectError as number | ProjectNotFoundError))
+          return 42
+        } finally {
+          yield* use(Promise.reject<number>(cleanupFailure))
+        }
+      })
+    ).rejects.toBe(cleanupFailure)
+  })
+
+  it("rejects with the cleanup failure when a finally block returns a rejected promise", async () => {
+    const userError = new UserNotFoundError("missing")
+    const cleanupFailure = new Error("cleanup failed")
+
+    await expect(
+      try$.gen(function* (use) {
+        try {
+          yield* use(userError as number | UserNotFoundError)
+          return Promise.resolve(42)
+        } finally {
+          // oxlint-disable-next-line no-unsafe-finally -- the case under test
+          return Promise.reject<number>(cleanupFailure)
+        }
+      })
+    ).rejects.toBe(cleanupFailure)
+  })
+
+  it("stops the current cleanup block on an Error yielded during cleanup and still runs outer finally blocks", async () => {
+    const events: string[] = []
+    const userError = new UserNotFoundError("missing")
+    const cleanupError = new ProjectNotFoundError("cleanup missing")
+
+    const result = await try$.gen(function* (use) {
+      try {
+        try {
+          yield* use(userError as number | UserNotFoundError)
+          return 42
+        } finally {
+          yield* use(Promise.resolve(cleanupError as number | ProjectNotFoundError))
+          events.push("inner:after")
+        }
+      } finally {
+        events.push("outer")
+      }
+    })
+
+    expect(result).toBe(userError)
+    expect(events).toEqual(["outer"])
+  })
+
+  it("stays sync when a finally block yields a sync value after a sync short-circuit", () => {
+    const events: string[] = []
+    const userError = new UserNotFoundError("missing")
+
+    const result = try$.gen(function* (use) {
+      try {
+        yield* use(userError as number | UserNotFoundError)
+        return 42
+      } finally {
+        events.push(`cleanup:${String(yield* use(1))}`)
+      }
+    })
+
+    expect(result).toBe(userError)
+    expect(events).toEqual(["cleanup:1"])
+  })
+
+  it("completes a finally block that yields a promise after a sync short-circuit", async () => {
+    const events: string[] = []
+    const userError = new UserNotFoundError("missing")
+
+    const result = try$.gen(function* (use) {
+      try {
+        yield* use(userError as number | UserNotFoundError)
+        return 42
+      } finally {
+        events.push(`cleanup:${String(yield* use(Promise.resolve(1)))}`)
+      }
+    })
+
+    expect(events).toEqual([])
+    expect(await result).toBe(userError)
+    expect(events).toEqual(["cleanup:1"])
+  })
+
+  it("rejects with the original reason and runs finally blocks when the first yielded promise rejects", async () => {
+    const failure = new TimeoutError("timed out")
     let finalized = false
 
     try {
       await try$.gen(function* (use) {
         try {
-          yield* use(Promise.reject<unknown>(new Error("boom")))
+          yield* use(Promise.reject<unknown>(failure))
         } finally {
           finalized = true
         }
       })
       expect.unreachable("should have thrown")
     } catch (error) {
-      expect(error).toBeInstanceOf(Error)
-      expect((error as Error).message).toBe("boom")
+      expect(error).toBe(failure)
     }
 
     expect(finalized).toBe(true)
   })
 
   it("lets the generator catch a rejected yielded promise and recover", async () => {
+    const failure = new Error("boom")
+    let caught: unknown
+
     const result = await try$.gen(function* (use) {
       try {
-        yield* use(Promise.reject<unknown>(new Error("boom")))
+        yield* use(Promise.reject<unknown>(failure))
       } catch (error) {
-        expect(error).toBeInstanceOf(Error)
-        expect((error as Error).message).toBe("boom")
+        caught = error
         return 42
       }
 
@@ -141,21 +255,10 @@ describe("gen", () => {
     })
 
     expect(result).toBe(42)
+    expect(caught).toBe(failure)
   })
 
   it("throws the original error when factory throws", () => {
-    try {
-      try$.gen(() => {
-        throw new Error("factory failed")
-      })
-      expect.unreachable("should have thrown")
-    } catch (error) {
-      expect(error).toBeInstanceOf(Error)
-      expect((error as Error).message).toBe("factory failed")
-    }
-  })
-
-  it("preserves Panic when factory throws Panic", () => {
     const panic = new Panic("FLOW_NO_EXIT")
 
     try {
@@ -168,20 +271,7 @@ describe("gen", () => {
     }
   })
 
-  it("throws the original error when generator body throws after yield", () => {
-    try {
-      try$.gen(function* (use) {
-        void (yield* use(1))
-        throw new Error("generator failed")
-      })
-      expect.unreachable("should have thrown")
-    } catch (error) {
-      expect(error).toBeInstanceOf(Error)
-      expect((error as Error).message).toBe("generator failed")
-    }
-  })
-
-  it("preserves Panic when generator body throws after a sync yield", () => {
+  it("throws the original error when generator body throws after a sync yield", () => {
     const panic = new Panic("FLOW_NO_EXIT")
 
     try {
@@ -196,26 +286,27 @@ describe("gen", () => {
   })
 
   it("returns explicit error values without throwing", () => {
+    const projectError = new ProjectNotFoundError("from return")
+
     const result = try$.gen(function* (use) {
       void (yield* use(1))
-      return new ProjectNotFoundError("from return")
+      return projectError
     })
 
-    expect(result).toBeInstanceOf(ProjectNotFoundError)
-    expect(result.message).toBe("from return")
+    expect(result).toBe(projectError)
   })
 
   it("returns explicit async error values without throwing", async () => {
+    const projectError = new ProjectNotFoundError("async return")
+
     const result = try$.gen(function* (use) {
       const value = yield* use(Promise.resolve(1))
       void value
-      return Promise.resolve(new ProjectNotFoundError("async return"))
+      return Promise.resolve(projectError)
     })
 
-    const resolved = await result
-
-    expect(resolved).toBeInstanceOf(ProjectNotFoundError)
-    expect(resolved.message).toBe("async return")
+    expect(result).toBeInstanceOf(Promise)
+    expect(await result).toBe(projectError)
   })
 
   it("throws raw non-Error values without wrapping", () => {
@@ -231,19 +322,6 @@ describe("gen", () => {
   })
 
   it("rejects with the original error when the generator throws after entering async path", async () => {
-    try {
-      await try$.gen(function* (use) {
-        void (yield* use(Promise.resolve(1)))
-        throw new Error("async throw")
-      })
-      expect.unreachable("should have thrown")
-    } catch (error) {
-      expect(error).toBeInstanceOf(Error)
-      expect((error as Error).message).toBe("async throw")
-    }
-  })
-
-  it("preserves CancellationError when generator throws after entering async path", async () => {
     const cancellation = new CancellationError("cancelled")
 
     try {
@@ -258,19 +336,6 @@ describe("gen", () => {
   })
 
   it("rejects with the original error when the final returned promise rejects", async () => {
-    try {
-      await try$.gen(function* (use) {
-        void (yield* use(Promise.resolve(1)))
-        return Promise.reject(new Error("final reject"))
-      })
-      expect.unreachable("should have thrown")
-    } catch (error) {
-      expect(error).toBeInstanceOf(Error)
-      expect((error as Error).message).toBe("final reject")
-    }
-  })
-
-  it("preserves TimeoutError from a rejected final returned promise in async path", async () => {
     const timeout = new TimeoutError("timed out")
 
     try {
@@ -284,21 +349,8 @@ describe("gen", () => {
     }
   })
 
-  it("rejects with the original reason when a later async yield rejects", async () => {
-    try {
-      await try$.gen(function* (use) {
-        void (yield* use(Promise.resolve(1)))
-        const value = yield* use(Promise.reject<unknown>(new Error("second reject")))
-        return value
-      })
-      expect.unreachable("should have thrown")
-    } catch (error) {
-      expect(error).toBeInstanceOf(Error)
-      expect((error as Error).message).toBe("second reject")
-    }
-  })
-
-  it("runs finally blocks when a later async yield rejects", async () => {
+  it("rejects with the original reason and runs finally blocks when a later async yield rejects", async () => {
+    const failure = new Error("second reject")
     let finalized = false
 
     try {
@@ -306,15 +358,14 @@ describe("gen", () => {
         void (yield* use(Promise.resolve(1)))
 
         try {
-          yield* use(Promise.reject<unknown>(new Error("second reject")))
+          yield* use(Promise.reject<unknown>(failure))
         } finally {
           finalized = true
         }
       })
       expect.unreachable("should have thrown")
     } catch (error) {
-      expect(error).toBeInstanceOf(Error)
-      expect((error as Error).message).toBe("second reject")
+      expect(error).toBe(failure)
     }
 
     expect(finalized).toBe(true)
@@ -333,17 +384,17 @@ describe("gen", () => {
   it("short-circuits on sync Error yielded after entering async path", async () => {
     let didRunAfterError = false
 
+    const userError = new UserNotFoundError("sync error in async")
+
     const result = await try$.gen(function* (use) {
       void (yield* use(Promise.resolve(1)))
-      const value = yield* use(
-        new UserNotFoundError("sync error in async") as number | UserNotFoundError
-      )
+      const value = yield* use(userError as number | UserNotFoundError)
       void value
       didRunAfterError = true
       return 42
     })
 
-    expect(result).toBeInstanceOf(UserNotFoundError)
+    expect(result).toBe(userError)
     expect(didRunAfterError).toBe(false)
   })
 
@@ -373,10 +424,12 @@ describe("gen composition", () => {
   }
 
   it("short-circuits with error from try$.runSync inside gen", () => {
+    const failure = new Error("boom")
+
     const result = try$.gen(function* (use) {
       const value = yield* use(
         try$.runSync((): number => {
-          throw new Error("boom")
+          throw failure
         })
       )
 
@@ -384,14 +437,17 @@ describe("gen composition", () => {
     })
 
     expect(result).toBeInstanceOf(UnhandledException)
+    expect((result as UnhandledException).cause).toBe(failure)
   })
 
   it("short-circuits with error from try$.run inside gen", async () => {
+    const failure = new Error("boom")
+
     const result = await try$.gen(function* (use) {
       const value = yield* use(
         try$.run(async (): Promise<number> => {
           await Promise.resolve()
-          throw new Error("boom")
+          throw failure
         })
       )
 
@@ -399,9 +455,12 @@ describe("gen composition", () => {
     })
 
     expect(result).toBeInstanceOf(UnhandledException)
+    expect((result as UnhandledException).cause).toBe(failure)
   })
 
   it("composes multiple try$ calls and returns success or mapped errors", async () => {
+    let projectCalls = 0
+
     const runFlow = (mode: "ok" | "permission-denied" | "project-not-found" | "user-not-found") => {
       const getUser = () =>
         try$.run({
@@ -427,8 +486,10 @@ describe("gen composition", () => {
           },
         })
 
-      const getProject = (userId: string) =>
-        try$.run({
+      const getProject = (userId: string) => {
+        projectCalls += 1
+
+        return try$.run({
           catch: (): ProjectNotFoundInFlowError =>
             new ProjectNotFoundInFlowError("missing project"),
           try: async () => {
@@ -441,6 +502,7 @@ describe("gen composition", () => {
             return { id: `p_${userId}` }
           },
         })
+      }
 
       return try$.gen(function* (use) {
         const user = yield* use(getUser())
@@ -450,9 +512,14 @@ describe("gen composition", () => {
     }
 
     const ok = await runFlow("ok")
+    const projectNotFound = await runFlow("project-not-found")
+
+    expect(projectCalls).toBe(2)
+
     const userNotFound = await runFlow("user-not-found")
     const permissionDenied = await runFlow("permission-denied")
-    const projectNotFound = await runFlow("project-not-found")
+
+    expect(projectCalls).toBe(2)
 
     expect(ok).toBe("u_1:p_u_1")
     expect(userNotFound).toBeInstanceOf(UserNotFoundInFlowError)

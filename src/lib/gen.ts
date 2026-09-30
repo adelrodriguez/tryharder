@@ -16,6 +16,73 @@ function* use<T>(value: T): Generator<T, GenUnwrap<T>, GenUnwrap<T>> {
   return yield value
 }
 
+/**
+ * Resumes cleanup with a value it yielded. An `Error` short-circuits cleanup the same way it
+ * short-circuits the body: the current `finally` block stops and outer ones still run.
+ */
+function resumeCleanup<TYield, TReturn>(
+  iterator: Generator<TYield, TReturn, unknown>,
+  value: unknown
+): IteratorResult<TYield, TReturn> {
+  return value instanceof Error ? iterator.return(undefined as TReturn) : iterator.next(value)
+}
+
+/**
+ * Runs the generator's `finally` blocks after a short-circuit. Cleanup may itself yield, so keep
+ * resuming it (awaiting yielded promises) until the generator is done, then report `result`. A
+ * cleanup failure, including a rejected promise returned from `finally`, replaces `result`.
+ */
+async function closeAsync<TYield, TReturn, R>(
+  iterator: Generator<TYield, TReturn, unknown>,
+  initialStep: IteratorResult<TYield, TReturn>,
+  result: R
+): Promise<R> {
+  let currentStep = initialStep
+
+  while (!currentStep.done) {
+    let currentValue: unknown
+
+    try {
+      // oxlint-disable-next-line no-await-in-loop
+      currentValue = await currentStep.value
+    } catch (error) {
+      currentStep = iterator.throw(error)
+      continue
+    }
+
+    currentStep = resumeCleanup(iterator, currentValue)
+  }
+
+  await currentStep.value
+
+  return result
+}
+
+/**
+ * Sync counterpart of {@link closeAsync}: stays sync unless cleanup yields or returns a promise,
+ * then hands the remaining cleanup to {@link closeAsync}.
+ */
+function close<TYield, TReturn, R>(
+  iterator: Generator<TYield, TReturn, unknown>,
+  result: R
+): R | Promise<R> {
+  let currentStep = iterator.return(undefined as TReturn)
+
+  while (!currentStep.done) {
+    if (checkIsPromiseLike(currentStep.value)) {
+      return closeAsync(iterator, currentStep, result)
+    }
+
+    currentStep = resumeCleanup(iterator, currentStep.value)
+  }
+
+  if (checkIsPromiseLike(currentStep.value)) {
+    return closeAsync(iterator, currentStep, result)
+  }
+
+  return result
+}
+
 async function executeAsyncGenerator<TYield, TReturn>(
   iterator: Generator<TYield, TReturn, unknown>,
   initialStep: IteratorResult<TYield, TReturn>
@@ -48,7 +115,8 @@ async function executeAsyncGenerator<TYield, TReturn>(
     }
 
     if (currentValue instanceof Error) {
-      return currentValue as GenErrors<TYield>
+      // oxlint-disable-next-line no-await-in-loop
+      return await close(iterator, currentValue as GenErrors<TYield>)
     }
 
     currentStep = iterator.next(currentValue)
@@ -79,7 +147,7 @@ export function driveGen<TYield, TReturn>(
     }
 
     if (step.value instanceof Error) {
-      return step.value as GenResult<TYield, TReturn>
+      return close(iterator, step.value) as GenResult<TYield, TReturn>
     }
 
     currentValue = step.value

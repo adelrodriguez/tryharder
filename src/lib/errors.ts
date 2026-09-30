@@ -99,35 +99,59 @@ export class Panic extends Error {
 // `name` also passes. Within the unions returned by tryharder APIs this cannot
 // occur.
 
+/**
+ * `Error.isError` recognizes errors from any realm but is missing on Node 22, which the package
+ * supports. Fall back to the built-in `[object Error]` tag there, which cross-realm errors also
+ * carry. The tag comes from the internal error slot only when `Symbol.toStringTag` does not
+ * override it, so reject objects that define one.
+ */
+function checkIsError(value: unknown): value is Error {
+  // oxlint-disable-next-line typescript/no-unnecessary-condition -- absent on Node 22
+  if (typeof Error.isError === "function") {
+    return Error.isError(value)
+  }
+
+  if (value instanceof Error) {
+    return true
+  }
+
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !(Symbol.toStringTag in value) &&
+    Object.prototype.toString.call(value) === "[object Error]"
+  )
+}
+
 export function isCancellationError(error: unknown): error is CancellationError {
   return (
     error instanceof CancellationError ||
-    (Error.isError(error) && error.name === "CancellationError")
+    (checkIsError(error) && error.name === "CancellationError")
   )
 }
 
 export function isTimeoutError(error: unknown): error is TimeoutError {
-  return error instanceof TimeoutError || (Error.isError(error) && error.name === "TimeoutError")
+  return error instanceof TimeoutError || (checkIsError(error) && error.name === "TimeoutError")
 }
 
 export function isRetryExhaustedError(error: unknown): error is RetryExhaustedError {
   return (
     error instanceof RetryExhaustedError ||
-    (Error.isError(error) && error.name === "RetryExhaustedError")
+    (checkIsError(error) && error.name === "RetryExhaustedError")
   )
 }
 
 export function isUnhandledException(error: unknown): error is UnhandledException {
   return (
     error instanceof UnhandledException ||
-    (Error.isError(error) && error.name === "UnhandledException")
+    (checkIsError(error) && error.name === "UnhandledException")
   )
 }
 
 export function isPanic(error: unknown): error is Panic {
   return (
     error instanceof Panic ||
-    (Error.isError(error) &&
+    (checkIsError(error) &&
       error.name === "Panic" &&
       "code" in error &&
       typeof error.code === "string")

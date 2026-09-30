@@ -1,7 +1,7 @@
 import type { AsyncDisposer } from "../../shims/disposer"
 import type { BuilderConfig } from "../builder"
 import { createAsyncDisposer, defineAsyncDisposeAlias } from "../../shims/disposer"
-import { Panic, UnhandledException } from "../errors"
+import { Panic, UnhandledException, isPanic } from "../errors"
 import { BaseExecution } from "../execution/base"
 import { invariant, resolveWithAbort } from "../utils"
 
@@ -80,6 +80,7 @@ export type AllSettledResult<T extends TaskRecord> = {
 }
 
 interface TaskGraphRun<R> extends AsyncDisposable {
+  readonly panic: Panic | undefined
   execute(): Promise<R>
   waitForTasksToSettle(): Promise<void>
 }
@@ -146,6 +147,12 @@ export abstract class OrchestrationExecution<TResult> extends BaseExecution<Prom
       await execution.waitForTasksToSettle()
     }
 
+    // A Panic is programmer misuse, so it overrides any result or failure, as in run(): even one
+    // that settled after catch mapped an earlier failure, or after cancellation or the deadline.
+    if (execution.panic) {
+      throw execution.panic
+    }
+
     // Control state may have changed while tasks ran or settled, and it takes
     // priority over whatever was thrown; the shared chain reports cancellation
     // over the graph deadline when both fired.
@@ -177,6 +184,7 @@ export abstract class TaskGraphExecutionBase<
   protected readonly taskSignal: AbortSignal
   protected readonly disposer: AsyncDisposer = createAsyncDisposer()
   protected firstRejection: unknown
+  #panic: Panic | undefined
   declare [Symbol.asyncDispose]: () => Promise<void>
 
   constructor(signal: AbortSignal | undefined, tasks: T) {
@@ -185,6 +193,10 @@ export abstract class TaskGraphExecutionBase<
     this.taskSignal = signal
       ? AbortSignal.any([signal, this.internalController.signal])
       : this.internalController.signal
+  }
+
+  get panic(): Panic | undefined {
+    return this.#panic
   }
 
   async dispose(): Promise<void> {
@@ -280,18 +292,13 @@ export abstract class TaskGraphExecutionBase<
   protected onTaskResult?(taskName: keyof T, value: unknown): void
   protected onTaskError?(taskName: keyof T, error: unknown): void
 
-  // The three methods below are polymorphic defaults overridden by
+  // The two methods below are polymorphic defaults overridden by
   // subclasses (template-method pattern); they must stay instance methods
   // even though the base implementations do not touch `this`.
 
   // oxlint-disable-next-line class-methods-use-this -- polymorphic default
   protected mapStoredError(error: unknown): Error {
     return error instanceof Error ? error : new UnhandledException(undefined, { cause: error })
-  }
-
-  // oxlint-disable-next-line class-methods-use-this -- polymorphic default
-  protected shouldAbortOnTaskError(_error: unknown): boolean {
-    return false
   }
 
   // oxlint-disable-next-line class-methods-use-this -- polymorphic default
@@ -303,6 +310,7 @@ export abstract class TaskGraphExecutionBase<
     this.firstRejection ??= error
   }
 
+  protected abstract shouldAbortOnTaskError(error: unknown): boolean
   protected abstract createTaskContext(resultProxy: ResultProxy<T>): TContext
 
   protected async runTask(taskName: keyof T): Promise<void> {
@@ -316,6 +324,10 @@ export abstract class TaskGraphExecutionBase<
       this.onTaskResult?.(taskName, result)
     } catch (error) {
       const mappedError = this.mapStoredError(error)
+
+      if (isPanic(error)) {
+        this.#panic ??= error
+      }
 
       this.setFirstRejection(error)
       this.taskSettlement(taskName).reject(mappedError)
@@ -423,6 +435,11 @@ export class SettledTaskExecution<T extends TaskRecord> extends TaskExecution<T>
 
   protected override onTaskError(taskName: keyof T, error: unknown): void {
     this.#returnValue[taskName as string] = { reason: error, status: "rejected" }
+  }
+
+  // oxlint-disable-next-line class-methods-use-this -- polymorphic override
+  protected override shouldAbortOnTaskError(error: unknown): boolean {
+    return isPanic(error)
   }
 
   // oxlint-disable-next-line class-methods-use-this -- polymorphic override

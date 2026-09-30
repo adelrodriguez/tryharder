@@ -1,11 +1,19 @@
 import { describe, it } from "vitest"
 import type {
   CancellationError,
+  PanicCode,
   RetryExhaustedError,
   TimeoutError,
   UnhandledException,
 } from "../errors"
-import type { AsyncDisposer, FlowExit, SettledResult } from "../types"
+import type {
+  AllSettledResult,
+  AsyncDisposer,
+  FlowExit,
+  SettledFulfilled,
+  SettledRejected,
+  SettledResult,
+} from "../types"
 import {
   isCancellationError,
   isPanic,
@@ -17,7 +25,11 @@ import {
 import * as try$ from "../index"
 
 type Expect<T extends true> = T
-type Equal<X, Y> = [X] extends [Y] ? ([Y] extends [X] ? true : false) : false
+// Strict identity check: unlike mutual assignability, it rejects `any` and readonly mismatches.
+/* oxlint-disable typescript/no-unnecessary-type-parameters -- T drives the identity check. */
+type Equal<X, Y> =
+  (<T>() => T extends X ? 1 : 2) extends <T>() => T extends Y ? 1 : 2 ? true : false
+/* oxlint-enable typescript/no-unnecessary-type-parameters */
 const typecheckOnly = (): boolean => false
 
 describe("type inference", () => {
@@ -52,17 +64,9 @@ describe("type inference", () => {
       const disposeResult = disposer.dispose()
       type _assert = Expect<Equal<typeof disposeResult, Promise<void>>>
       type _assertDefer = Expect<Equal<ReturnType<typeof disposer.defer>, void>>
-
-      if (typecheckOnly()) {
-        // @ts-expect-error -- add() was removed; use defer()
-        void disposer.add
-
-        // @ts-expect-error -- cleanup() was removed; use dispose()
-        void disposer.cleanup
-
-        // @ts-expect-error -- disposeAsync() was removed; use dispose()
-        void disposer.disposeAsync
-      }
+      type _assertKeys = Expect<
+        Equal<keyof AsyncDisposer, "defer" | "dispose" | "use" | typeof Symbol.asyncDispose>
+      >
     })
 
     it("disposer defer rejects non-callables at the type level", () => {
@@ -302,6 +306,7 @@ describe("type inference", () => {
 
       if (isPanic(value)) {
         type _assert = Expect<Equal<typeof value, Panic>>
+        type _assertCode = Expect<Equal<typeof value.code, PanicCode>>
       }
 
       if (isCancellationError(value)) {
@@ -368,45 +373,21 @@ describe("type inference", () => {
   })
 
   describe("with retry", () => {
-    it("constant zero-delay retry run returns Promise union", () => {
-      const result = try$.retry(3).run(() => 42)
-
-      type _assert = Expect<Equal<typeof result, Promise<number | RetryExhaustedError>>>
-    })
-
-    it("retry run returns Promise union", () => {
+    it("retry run unwraps an async result into the Promise union", () => {
       const result = try$.retry(3).run(() => Promise.resolve(42))
 
       type _assert = Expect<Equal<typeof result, Promise<number | RetryExhaustedError>>>
     })
 
-    it("ctx.retry is available when retry config is present", () => {
-      const result = try$.retry(3).run((ctx) => ctx.retry.attempt)
-      type _assert = Expect<Equal<typeof result, Promise<number | RetryExhaustedError>>>
-    })
-
-    it("ctx.retry supports async usage when retry config is present", () => {
-      const result = try$.retry(3).run((ctx) => Promise.resolve(ctx.retry.limit))
-      type _assert = Expect<Equal<typeof result, Promise<number | RetryExhaustedError>>>
-    })
-  })
-
-  describe("with timeout", () => {
-    it("run function returns Promise<T | UnhandledException | TimeoutError>", () => {
-      const result = try$.timeout(5000).run(() => 42)
-      type _assert = Expect<
-        Equal<typeof result, Promise<number | UnhandledException | TimeoutError>>
-      >
-    })
-  })
-
-  describe("with signal", () => {
-    it("run function returns Promise<T | UnhandledException | CancellationError>", () => {
-      const ac = new AbortController()
-      const result = try$.signal(ac.signal).run(() => 42)
-      type _assert = Expect<
-        Equal<typeof result, Promise<number | UnhandledException | CancellationError>>
-      >
+    it("ctx exposes retry attempt and limit when retry config is present", () => {
+      if (typecheckOnly()) {
+        void try$.retry(3).run((ctx) => {
+          const { retry, signal } = ctx
+          type _assertRetry = Expect<Equal<typeof retry, { attempt: number; limit: number }>>
+          type _assertSignal = Expect<Equal<typeof signal, AbortSignal | undefined>>
+          return retry.attempt
+        })
+      }
     })
   })
 
@@ -431,7 +412,7 @@ describe("type inference", () => {
       >
     })
 
-    it("all three with run keeps Promise union when retry is sync-safe", () => {
+    it("retry + timeout + signal with catch replaces RetryExhaustedError with the catch type", () => {
       const ac = new AbortController()
       const result = try$
         .retry(3)
@@ -443,7 +424,7 @@ describe("type inference", () => {
       >
     })
 
-    it("all three with async catch uses run and returns Promise union", () => {
+    it("retry + timeout + signal with async try and catch returns Promise union", () => {
       const ac = new AbortController()
       const result = try$
         .retry(3)
@@ -472,11 +453,6 @@ describe("type inference", () => {
   })
 
   describe("builder chaining", () => {
-    it("wrap builder exposes runSync", () => {
-      const result = try$.wrap((_, next) => next()).runSync(() => 42)
-      type _assert = Expect<Equal<typeof result, number | UnhandledException>>
-    })
-
     it("wrap builder still exposes run", () => {
       const result = try$.wrap((_, next) => next()).run(() => 42)
       type _assert = Expect<Equal<typeof result, Promise<number | UnhandledException>>>
@@ -517,20 +493,6 @@ describe("type inference", () => {
       type _assert = Expect<
         Equal<typeof result, Promise<number | UnhandledException | CancellationError>>
       >
-    })
-
-    it("retry chain does not expose wrap", () => {
-      if (typecheckOnly()) {
-        // @ts-expect-error -- wrap is top-level only and not available after retry()
-        void try$.retry(3).wrap
-      }
-    })
-
-    it("wrap builder does not expose gen", () => {
-      if (typecheckOnly()) {
-        // @ts-expect-error -- gen is unavailable after wrap()
-        void try$.wrap((_, next) => next()).gen
-      }
     })
   })
 
@@ -831,12 +793,18 @@ describe("type inference", () => {
 
   describe("allSettled", () => {
     it("exports settled result types from the dedicated types entrypoint", () => {
-      if (typecheckOnly()) return
-
-      const settled = { status: "fulfilled", value: "ok" } as const satisfies SettledResult<"ok">
-
-      type _assert = Expect<
-        Equal<typeof settled, { readonly status: "fulfilled"; readonly value: "ok" }>
+      type _assertFulfilled = Expect<
+        Equal<SettledFulfilled<"ok">, { status: "fulfilled"; value: "ok" }>
+      >
+      type _assertRejected = Expect<Equal<SettledRejected, { status: "rejected"; reason: unknown }>>
+      type _assertSettled = Expect<
+        Equal<SettledResult<"ok">, SettledFulfilled<"ok"> | SettledRejected>
+      >
+      type _assertAllSettled = Expect<
+        Equal<
+          AllSettledResult<{ a: () => Promise<number>; b: () => "ok" }>,
+          { a: SettledResult<number>; b: SettledResult<"ok"> }
+        >
       >
     })
 
@@ -917,12 +885,16 @@ describe("type inference", () => {
   })
 
   describe("flow", () => {
-    it("exports flow exit types from the dedicated types entrypoint", () => {
-      if (typecheckOnly()) return
-
-      const exitValue = null as unknown as FlowExit<"done">
-
-      type _assert = Expect<Equal<typeof exitValue, FlowExit<"done">>>
+    it("$exit returns the FlowExit type from the dedicated types entrypoint", () => {
+      if (typecheckOnly()) {
+        void try$.flow({
+          a() {
+            const exit = this.$exit("done" as const)
+            type _assert = Expect<Equal<typeof exit, FlowExit<"done">>>
+            return exit
+          },
+        })
+      }
     })
 
     it("infers union of $exit values", () => {
@@ -1017,6 +989,8 @@ describe("type inference", () => {
         type _settled = try$.SettledResult<"ok">
         // @ts-expect-error -- flow exit types moved to ../types
         type _flow = try$.FlowExit<"done">
+        // @ts-expect-error -- disposer types moved to ../types
+        type _disposer = try$.AsyncDisposer
       }
     })
   })

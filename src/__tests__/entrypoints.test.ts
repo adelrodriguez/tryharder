@@ -12,7 +12,9 @@ import {
   TimeoutError,
   UnhandledException,
 } from "../errors"
+import * as errors$ from "../errors"
 import * as try$ from "../index"
+import * as types$ from "../types"
 import { expectPanic } from "./test-utils"
 
 function createForeignError(name: string, extras: Record<string, unknown> = {}): Error {
@@ -23,18 +25,46 @@ function createForeignError(name: string, extras: Record<string, unknown> = {}):
 }
 
 describe("entrypoints", () => {
-  it("does not expose errors from the root entrypoint", () => {
-    expect("CancellationError" in try$).toBe(false)
-    expect("Panic" in try$).toBe(false)
-    expect("RetryExhaustedError" in try$).toBe(false)
-    expect("TimeoutError" in try$).toBe(false)
-    expect("UnhandledException" in try$).toBe(false)
-    expect("isCancellationError" in try$).toBe(false)
-    expect("isPanic" in try$).toBe(false)
+  it("exposes only the execution API from the root entrypoint", () => {
+    expect(Object.keys(try$).toSorted()).toEqual([
+      "all",
+      "allSettled",
+      "disposer",
+      "flow",
+      "gen",
+      "retry",
+      "retryOptions",
+      "run",
+      "runSync",
+      "signal",
+      "timeout",
+      "wrap",
+    ])
   })
 
-  it("exposes errors from the dedicated errors entrypoint", () => {
+  it("exposes only errors and type guards from the errors entrypoint", () => {
+    expect(Object.keys(errors$).toSorted()).toEqual([
+      "CancellationError",
+      "Panic",
+      "RetryExhaustedError",
+      "TimeoutError",
+      "UnhandledException",
+      "isCancellationError",
+      "isPanic",
+      "isRetryExhaustedError",
+      "isTimeoutError",
+      "isUnhandledException",
+    ])
+  })
+
+  it("exposes no runtime values from the types entrypoint", () => {
+    expect(Object.keys(types$)).toEqual([])
+  })
+
+  it("constructs errors from the errors entrypoint with stable names and messages", () => {
     const panic = new Panic("FLOW_NO_EXIT")
+
+    expect(panic).toBeInstanceOf(Error)
 
     expect(panic.name).toBe("Panic")
     expect(panic.message).toBe("flow() requires at least one task to call $exit().")

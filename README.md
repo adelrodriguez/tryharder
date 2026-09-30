@@ -473,7 +473,7 @@ The orchestration APIs run a group of named tasks with one policy:
 
 Tasks are object properties, so each task has a name. A task can await an earlier task's result through `this.$result`. Each task also receives `this.$signal` for cooperative cancellation and `this.$disposer` to register cleanup that runs when the orchestration settles. Named tasks are easier to scan than positional arrays.
 
-Orchestration supports `timeout(...)` and root-level `signal(...)`. `timeout(ms)` sets one deadline for the whole graph. When the deadline fires, each task's `this.$signal` aborts, and the call rejects with `TimeoutError`. If the deadline and cancellation both fire, cancellation wins. Orchestration throws policy failures, and an orchestration-level `catch` never maps them. `retry(...)` is not available for orchestration. Apply it to `run(...)` calls inside tasks.
+Orchestration supports `timeout(...)` and root-level `signal(...)`. `timeout(ms)` sets one deadline for the whole graph. When the deadline fires, each task's `this.$signal` aborts, and the call rejects with `TimeoutError`. If the deadline and cancellation both fire, cancellation wins. Orchestration throws policy failures and panics, and an orchestration-level `catch` never maps them. A panic wins over cancellation and the deadline. `retry(...)` is not available for orchestration. Apply it to `run(...)` calls inside tasks.
 
 Cancellation is cooperative, like all cancellation in JavaScript. An aborted signal does not stop a task by itself. All three orchestration APIs wait for every in-flight task to settle before they reject. The wait is a structural guarantee: no task code still runs after the call returns, so a caller can safely retry after a `TimeoutError`. The same holds for `signal(...)`: the call rejects with `CancellationError` only after every in-flight task has settled. For a deadline to bound wall-clock time in practice, your tasks must observe `this.$signal`: check it between steps, pass it to signal-aware I/O such as `fetch`, or wrap an await in `this.$race(...)`. `$race` races a promise against `$signal` and rejects with the abort reason when the signal fires first.
 
@@ -526,11 +526,13 @@ if (checks.api.status === "rejected") {
 // { status: "fulfilled"; value: number } | { status: "rejected"; reason: unknown }
 ```
 
+A `Panic` is never kept as settled data. If a task panics, for example by reading its own `$result`, `allSettled(...)` aborts the other tasks' `$signal`, waits for them to settle, and then throws the `Panic`.
+
 ### flow and $exit
 
 Use `flow(...)` for stepwise, business-process workflows. Tasks still read earlier results through `this.$result`, but completion is explicit: at least one path must call `this.$exit(...)`. The exit is a visible part of the workflow contract, not an implicit convention.
 
-Tasks start together, like in `all(...)`. `$exit` does not stop tasks that already started. The first exit becomes the flow result and aborts the other tasks' `$signal`. Observe `this.$signal` in later tasks, or make them await an earlier task through `this.$result` before they start side effects.
+Tasks start together, like in `all(...)`. `$exit` does not stop tasks that already started. The first exit becomes the flow result and aborts the other tasks' `$signal`. A `Panic` still wins: if any task panics, even after the first exit, `flow(...)` throws the `Panic`. Observe `this.$signal` in later tasks, or make them await an earlier task through `this.$result` before they start side effects.
 
 ```ts
 const cache = new Map<string, string>()
