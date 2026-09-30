@@ -80,6 +80,7 @@ export type AllSettledResult<T extends TaskRecord> = {
 }
 
 interface TaskGraphRun<R> extends AsyncDisposable {
+  readonly panic: Panic | undefined
   execute(): Promise<R>
   waitForTasksToSettle(): Promise<void>
 }
@@ -155,6 +156,12 @@ export abstract class OrchestrationExecution<TResult> extends BaseExecution<Prom
       throw controlError
     }
 
+    // A Panic is programmer misuse, so it overrides any result or failure, even one that settled
+    // after catch already mapped an earlier failure.
+    if (execution.panic) {
+      throw execution.panic
+    }
+
     if (threw) {
       // oxlint-disable-next-line no-throw-literal, typescript/only-throw-error -- Preserve raw task failures for callers/tests.
       throw thrownError
@@ -177,6 +184,7 @@ export abstract class TaskGraphExecutionBase<
   protected readonly taskSignal: AbortSignal
   protected readonly disposer: AsyncDisposer = createAsyncDisposer()
   protected firstRejection: unknown
+  #panic: Panic | undefined
   declare [Symbol.asyncDispose]: () => Promise<void>
 
   constructor(signal: AbortSignal | undefined, tasks: T) {
@@ -185,6 +193,10 @@ export abstract class TaskGraphExecutionBase<
     this.taskSignal = signal
       ? AbortSignal.any([signal, this.internalController.signal])
       : this.internalController.signal
+  }
+
+  get panic(): Panic | undefined {
+    return this.#panic
   }
 
   async dispose(): Promise<void> {
@@ -313,6 +325,10 @@ export abstract class TaskGraphExecutionBase<
     } catch (error) {
       const mappedError = this.mapStoredError(error)
 
+      if (error instanceof Panic) {
+        this.#panic ??= error
+      }
+
       this.setFirstRejection(error)
       this.taskSettlement(taskName).reject(mappedError)
       this.onTaskError?.(taskName, error)
@@ -405,16 +421,10 @@ export class FailFastTaskExecution<T extends TaskRecord> extends TaskExecution<T
 
 export class SettledTaskExecution<T extends TaskRecord> extends TaskExecution<T> {
   readonly #returnValue: Record<string, unknown> = {}
-  #panic: Panic | undefined
 
   async execute(): Promise<AllSettledResult<T>> {
     void this.startTasks()
     await this.waitForTasksToSettle()
-
-    // A Panic is programmer misuse, not a settled outcome, so it never becomes part of the result.
-    if (this.#panic) {
-      throw this.#panic
-    }
 
     return this.#returnValue as AllSettledResult<T>
   }
@@ -424,10 +434,6 @@ export class SettledTaskExecution<T extends TaskRecord> extends TaskExecution<T>
   }
 
   protected override onTaskError(taskName: keyof T, error: unknown): void {
-    if (error instanceof Panic) {
-      this.#panic ??= error
-    }
-
     this.#returnValue[taskName as string] = { reason: error, status: "rejected" }
   }
 

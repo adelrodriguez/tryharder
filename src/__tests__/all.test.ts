@@ -331,6 +331,33 @@ describe("all", () => {
     expect(catchErrors).toEqual([])
   })
 
+  it("throws a Panic from a sibling that settles after catch mapped an earlier failure", async () => {
+    const release = Promise.withResolvers<boolean>()
+
+    try {
+      await try$.all(
+        {
+          a() {
+            throw new Error("boom")
+          },
+          async b() {
+            await release.promise
+            return await (this.$result as Record<string, Promise<unknown>>).missing
+          },
+        },
+        {
+          catch: () => {
+            release.resolve(true)
+            return "mapped" as const
+          },
+        }
+      )
+      expect.unreachable("should have thrown")
+    } catch (error) {
+      expectPanic(error, "TASK_UNKNOWN_REFERENCE")
+    }
+  })
+
   it("passes catch a partial snapshot that does not change when siblings settle later", async () => {
     const boom = new Error("boom")
     const release = Promise.withResolvers<boolean>()

@@ -111,6 +111,74 @@ describe("gen", () => {
     expect(events).toEqual(["finally"])
   })
 
+  it("completes a finally block that yields a promise after an async short-circuit", async () => {
+    const events: string[] = []
+    const projectError = new ProjectNotFoundError("missing")
+
+    const result = await try$.gen(function* (use) {
+      try {
+        yield* use(Promise.resolve(projectError as number | ProjectNotFoundError))
+        return 42
+      } finally {
+        events.push(`cleanup:${String(yield* use(Promise.resolve(1)))}`)
+      }
+    })
+
+    expect(result).toBe(projectError)
+    expect(events).toEqual(["cleanup:1"])
+  })
+
+  it("rejects with the cleanup failure when a finally block yields a rejected promise", async () => {
+    const projectError = new ProjectNotFoundError("missing")
+    const cleanupFailure = new Error("cleanup failed")
+
+    await expect(
+      try$.gen(function* (use) {
+        try {
+          yield* use(Promise.resolve(projectError as number | ProjectNotFoundError))
+          return 42
+        } finally {
+          yield* use(Promise.reject<number>(cleanupFailure))
+        }
+      })
+    ).rejects.toBe(cleanupFailure)
+  })
+
+  it("stays sync when a finally block yields a sync value after a sync short-circuit", () => {
+    const events: string[] = []
+    const userError = new UserNotFoundError("missing")
+
+    const result = try$.gen(function* (use) {
+      try {
+        yield* use(userError as number | UserNotFoundError)
+        return 42
+      } finally {
+        events.push(`cleanup:${String(yield* use(1))}`)
+      }
+    })
+
+    expect(result).toBe(userError)
+    expect(events).toEqual(["cleanup:1"])
+  })
+
+  it("completes a finally block that yields a promise after a sync short-circuit", async () => {
+    const events: string[] = []
+    const userError = new UserNotFoundError("missing")
+
+    const result = try$.gen(function* (use) {
+      try {
+        yield* use(userError as number | UserNotFoundError)
+        return 42
+      } finally {
+        events.push(`cleanup:${String(yield* use(Promise.resolve(1)))}`)
+      }
+    })
+
+    expect(events).toEqual([])
+    expect(await result).toBe(userError)
+    expect(events).toEqual(["cleanup:1"])
+  })
+
   it("rejects with the original reason and runs finally blocks when the first yielded promise rejects", async () => {
     const failure = new TimeoutError("timed out")
     let finalized = false
