@@ -1,3 +1,4 @@
+import { runInNewContext } from "node:vm"
 import { describe, expect, it, vi } from "vitest"
 import { CancellationError, TimeoutError, UnhandledException } from "../errors"
 import * as try$ from "../index"
@@ -336,6 +337,30 @@ describe("all", () => {
       code: "TASK_SELF_REFERENCE",
       name: "Panic",
     })
+    const catchErrors: unknown[] = []
+
+    await expect(
+      try$.all(
+        {
+          a() {
+            throw foreignPanic
+          },
+        },
+        {
+          catch: (error) => {
+            catchErrors.push(error)
+            return "mapped" as const
+          },
+        }
+      )
+    ).rejects.toBe(foreignPanic)
+    expect(catchErrors).toEqual([])
+  })
+
+  it("throws a cross-realm Panic without passing it through catch", async () => {
+    const foreignPanic: unknown = runInNewContext(
+      'Object.assign(new Error("foreign panic"), { code: "TASK_SELF_REFERENCE", name: "Panic" })'
+    )
     const catchErrors: unknown[] = []
 
     await expect(
