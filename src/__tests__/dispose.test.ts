@@ -138,9 +138,11 @@ describe("disposer", () => {
       await disposer.dispose()
       expect.unreachable("should have thrown")
     } catch (error) {
-      expect(error).toBeInstanceOf(SuppressedError)
-      expect((error as SuppressedError).error).toBe(first)
-      expect((error as SuppressedError).suppressed).toBe(second)
+      // Node 22 has no native SuppressedError, so check the shape instead of the class.
+      expect(error).toBeInstanceOf(Error)
+      expect((error as Error).name).toBe("SuppressedError")
+      expect((error as Error & { error: unknown }).error).toBe(first)
+      expect((error as Error & { suppressed: unknown }).suppressed).toBe(second)
     }
   })
 
@@ -173,7 +175,7 @@ describe("disposer", () => {
       expect.unreachable("should have thrown")
     } catch (error) {
       expect(error).toBeInstanceOf(Error)
-      expect(error).not.toBeInstanceOf(originalSuppressedError)
+      expect((error as Error).constructor).not.toBe(originalSuppressedError)
       expect((error as Error).name).toBe("SuppressedError")
       expect((error as Error & { error: unknown }).error).toBe(second)
       expect((error as Error & { suppressed: unknown }).suppressed).toBe(third)
