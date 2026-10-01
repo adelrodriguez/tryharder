@@ -39,33 +39,9 @@ jobs:
         run: pnpm run test
 
   # `engines.node` allows Node 22, which lacks newer globals such as `Error.isError` and
-  # `SuppressedError`. Test the minimum supported version so those fallbacks stay covered.
-  unit-node-22:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v7
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v6
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Run tests
-        run: pnpm run test
-
-  # Vitest needs Node 22.12 or later, so `unit-node-22` cannot run on the exact `engines.node`
-  # floor. Build with the default Node.js version, then run the built package on the floor.
-  compatibility:
+  # `SuppressedError`. Vitest needs Node 22.12 or later, so build with the default Node.js
+  # version, then run the built package on the exact floor.
+  compat:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 

@@ -61,7 +61,12 @@ pnpm run test:watch
 
 # With coverage
 pnpm run test:coverage
+
+# Build, then run the bundle on the minimum supported runtime
+pnpm run test:compat
 ```
+
+CI runs the compatibility check on the exact `engines.node` floor (Node.js 22.0.0).
 
 ### Code Quality
 

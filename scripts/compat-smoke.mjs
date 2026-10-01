@@ -1,21 +1,50 @@
-// Runs the built bundle on the minimum supported runtime.
+// Checks that the built bundle runs on the minimum supported runtimes.
 //
-// The README declares the floor: `AbortSignal.any` and `Promise.withResolvers`.
-// This script removes globals that are newer than that floor, so a runtime
-// that is newer than the floor behaves like one at the floor.
+// The bundle must not use Node.js modules or native disposable stacks, so it
+// runs in browsers. The README declares the runtime floor: `AbortSignal.any`
+// and `Promise.withResolvers`. This script removes globals that are newer than
+// that floor, so a runtime that is newer than the floor behaves like one at
+// the floor.
 //
 // Usage: node scripts/compat-smoke.mjs [dist directory]
 
-import { resolve } from "node:path"
+import { readdir, readFile } from "node:fs/promises"
+import { join, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
 
 const distDir = resolve(process.argv[2] ?? "dist")
+
+function check(condition, message) {
+  if (!condition) {
+    throw new Error(`Compatibility smoke test failed: ${message}`)
+  }
+}
+
+const distFiles = await readdir(distDir, { recursive: true })
+const jsFiles = distFiles.filter((path) => path.endsWith(".js"))
+check(
+  ["errors.js", "index.js", "types.js"].every((entry) => jsFiles.includes(entry)),
+  "the bundle has every entrypoint"
+)
+
+const contents = await Promise.all(jsFiles.map((path) => readFile(join(distDir, path), "utf8")))
+
+for (const [index, path] of jsFiles.entries()) {
+  const content = contents[index]
+  check(
+    !/(?:from|import|require)\s*\(?\s*["']node:/.test(content),
+    `${path} imports no Node.js module`
+  )
+  check(!content.includes("new DisposableStack"), `${path} does not use DisposableStack`)
+  check(!content.includes("new AsyncDisposableStack"), `${path} does not use AsyncDisposableStack`)
+}
 
 if (typeof AbortSignal.any !== "function" || typeof Promise.withResolvers !== "function") {
   throw new Error("This runtime is below the supported floor")
 }
 
 delete Error.isError
+delete globalThis.SuppressedError
 globalThis.DisposableStack = undefined
 globalThis.AsyncDisposableStack = undefined
 
@@ -43,12 +72,6 @@ const try$ = await import(pathToFileURL(resolve(distDir, "index.js")).href)
  * @type {typeof import("../src/errors")}
  */
 const errors = await import(pathToFileURL(resolve(distDir, "errors.js")).href)
-
-function check(condition, message) {
-  if (!condition) {
-    throw new Error(`Compatibility smoke test failed: ${message}`)
-  }
-}
 
 const runResult = await try$.run(() => 1)
 check(Object.is(runResult, 1), "run() returns the value")
@@ -82,6 +105,29 @@ disposer.defer(() => {
 })
 await disposer.dispose()
 check(cleaned, "disposer() runs cleanup")
+
+const first = new Error("first")
+const second = new Error("second")
+const failingDisposer = try$.disposer()
+failingDisposer.defer(() => {
+  throw first
+})
+failingDisposer.defer(() => {
+  throw second
+})
+/**
+ * @type {unknown}
+ */
+let disposeError
+try {
+  await failingDisposer.dispose()
+} catch (error) {
+  disposeError = error
+}
+check(
+  disposeError instanceof Error && disposeError.name === "SuppressedError",
+  "disposer() combines cleanup failures in a SuppressedError"
+)
 
 const guards = [
   [errors.isCancellationError, new errors.CancellationError()],
