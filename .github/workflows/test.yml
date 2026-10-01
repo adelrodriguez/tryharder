@@ -65,7 +65,7 @@ jobs:
 
   # Vitest needs Node 22.12 or later, so `unit-node-22` cannot run on the exact `engines.node`
   # floor. Build with the default Node.js version, then run the built package on the floor.
-  compat-node-floor:
+  compatibility:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
