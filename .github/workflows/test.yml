@@ -62,3 +62,37 @@ jobs:
 
       - name: Run tests
         run: pnpm run test
+
+  # Vitest needs Node 22.12 or later, so `unit-node-22` cannot run on the exact `engines.node`
+  # floor. Build with the default Node.js version, then run the built package on the floor.
+  compat-node-floor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm run build
+
+      - name: Setup minimum Node.js
+        uses: actions/setup-node@v7
+        with:
+          # Keep equal to the `engines.node` floor in package.json.
+          node-version: "22.0.0"
+
+      - name: Run compatibility smoke test
+        run: node scripts/compat-smoke.mjs dist

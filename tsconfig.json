@@ -12,6 +12,6 @@
     "verbatimModuleSyntax": true,
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "bench/**/*.ts", "scripts/**/*.ts", "*.config.ts"],
+  "include": ["src/**/*.ts", "bench/**/*.ts", "scripts/**/*.ts", "scripts/**/*.mjs", "*.config.ts"],
   "exclude": ["node_modules", "dist", ".packref"]
 }

@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process"
-import { readdir, readFile, rm, writeFile } from "node:fs/promises"
+import { readdir, readFile, rm } from "node:fs/promises"
 import { join, relative } from "node:path"
-import { fileURLToPath, pathToFileURL } from "node:url"
+import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 
 async function findJavaScriptFiles(root: string): Promise<string[]> {
@@ -22,7 +22,7 @@ async function findJavaScriptFiles(root: string): Promise<string[]> {
 }
 
 describe("bundle compatibility", () => {
-  it("builds a browser-safe bundle that runs without native disposable stack globals", async () => {
+  it("builds a browser-safe bundle that runs on the minimum supported runtime", async () => {
     const outDirName = `.tmp-bundle-compat-${Date.now()}-${Math.random().toString(16).slice(2)}`
     const outDir = join(process.cwd(), outDirName)
 
@@ -59,45 +59,7 @@ describe("bundle compatibility", () => {
         expect(content).not.toContain("new AsyncDisposableStack")
       }
 
-      const smokePath = join(outDir, "smoke.mjs")
-      const entrypoint = pathToFileURL(join(outDir, "index.js")).href
-      const errorsEntrypoint = pathToFileURL(join(outDir, "errors.js")).href
-
-      await writeFile(
-        smokePath,
-        [
-          "globalThis.DisposableStack = undefined",
-          "globalThis.AsyncDisposableStack = undefined",
-          "const NativeSymbol = globalThis.Symbol",
-          "const SymbolShim = function (description) { return NativeSymbol(description) }",
-          "const symbolDescriptors = Object.getOwnPropertyDescriptors(NativeSymbol)",
-          "delete symbolDescriptors.dispose",
-          "delete symbolDescriptors.asyncDispose",
-          "Object.defineProperties(SymbolShim, symbolDescriptors)",
-          "Object.defineProperty(SymbolShim, 'dispose', { value: undefined, writable: true, configurable: true })",
-          "Object.defineProperty(SymbolShim, 'asyncDispose', { value: undefined, writable: true, configurable: true })",
-          "globalThis.Symbol = SymbolShim",
-          `const try$ = await import(${JSON.stringify(entrypoint)})`,
-          "const runResult = await try$.run(() => 1)",
-          'if (runResult !== 1) throw new Error("run() smoke test failed")',
-          "const runSyncResult = try$.runSync(() => 2)",
-          'if (runSyncResult !== 2) throw new Error("runSync() smoke test failed")',
-          "const allResult = await try$.all({ a() { return 1 } })",
-          'if (allResult.a !== 1) throw new Error("all() smoke test failed")',
-          'const flowResult = await try$.flow({ a() { return this.$exit("done") } })',
-          'if (flowResult !== "done") throw new Error("flow() smoke test failed")',
-          "let cleaned = false",
-          "const disposer = try$.disposer()",
-          "disposer.defer(() => { cleaned = true })",
-          "await disposer.dispose()",
-          'if (!cleaned) throw new Error("disposer() smoke test failed")',
-          `const errors = await import(${JSON.stringify(errorsEntrypoint)})`,
-          "const timeoutError = new errors.TimeoutError()",
-          'if (!errors.isTimeoutError(timeoutError)) throw new Error("errors smoke test failed")',
-        ].join("\n")
-      )
-
-      const smoke = spawnSync(process.execPath, [smokePath], {
+      const smoke = spawnSync(process.execPath, ["scripts/compat-smoke.mjs", outDirName], {
         cwd: process.cwd(),
         encoding: "utf8",
       })

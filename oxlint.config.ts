@@ -8,4 +8,11 @@ export default defineConfig({
     typeAware: true,
     typeCheck: true,
   },
+  overrides: [
+    {
+      // JSDoc is the only type syntax available in plain JavaScript files.
+      files: ["scripts/**/*.mjs"],
+      rules: { "jsdoc/check-tag-names": ["error", { typed: false }] },
+    },
+  ],
 })
