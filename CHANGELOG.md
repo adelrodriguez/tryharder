@@ -1,5 +1,25 @@
 # tryharder
 
+## 0.4.0
+
+### Minor Changes
+
+- 65717ba: Align orchestration with the `run(...)` catch contract and never lose a `Panic`:
+
+  - A `Panic` from a task is thrown and never passes through `catch`. This includes a `Panic` from a task that settles after `catch` mapped an earlier failure.
+  - When `catch` rejects with a `CancellationError`, `all` now throws a `Panic` with code `ALL_CATCH_HANDLER_REJECT`, the same as for any other rejection. Before, the `CancellationError` passed through unchanged. Real cancellation still rejects with `CancellationError`, because `all` checks the signal after `catch` runs.
+  - `ctx.partial` is now a snapshot taken when `catch` is called. Before, it was a live object, so results from tasks that settled while an async `catch` ran could appear in it.
+  - A `Panic` from any orchestration task is never lost. `flow` throws a `Panic` from a task that settles after the first `$exit`, and `all`, `allSettled`, and `flow` throw it even when cancellation or the graph deadline fires while tasks settle.
+
+### Patch Changes
+
+- 65717ba: Fix four bugs:
+
+  - `gen` now runs the generator's `finally` blocks when it short-circuits on a yielded `Error`, on both the sync and async paths. Before, the generator stayed suspended and its cleanup code never ran. A `finally` block can yield, and `gen` awaits yielded promises before it returns the error. If cleanup fails, `gen` rejects with the cleanup failure.
+  - `all`, `allSettled`, and `flow` no longer cause an unhandled rejection when a task aborts the external signal synchronously and then throws. The orchestration still rejects with `CancellationError`.
+  - `allSettled` now throws a `Panic` from a task instead of recording it as `{ status: "rejected", reason: Panic }`. It aborts the other tasks' `$signal` and waits for them to settle before it throws.
+  - The error type guards (`isPanic`, `isTimeoutError`, and the others) no longer throw a `TypeError` on Node 22, which has no `Error.isError`. They fall back to the built-in error tag and reject objects that fake it with `Symbol.toStringTag`.
+
 ## 0.3.0
 
 ### Minor Changes
