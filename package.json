@@ -53,6 +53,7 @@
     "format": "adamantite format",
     "release": "changeset publish",
     "test": "vitest run",
+    "test:compat": "pnpm run build && node scripts/compat-smoke.mjs",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
     "version": "changeset version && pnpm run format"
