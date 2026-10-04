@@ -3,7 +3,7 @@ import type { NonPromise } from "../utils"
 import type { BaseTryCtx } from "./context"
 import { Panic, type UnhandledException } from "../errors"
 import { checkIsPromiseLike } from "../utils"
-import { BaseExecution, RetryDirective, type RetryDecision, type RunnerError } from "./base"
+import { BaseExecution, RetryDirective, type RunnerError } from "./base"
 
 export type RunTryFn<T, Ctx extends BaseTryCtx = BaseTryCtx> = (
   ctx: Ctx
@@ -43,7 +43,7 @@ class RunExecution<T, E, Ctx extends BaseTryCtx> extends BaseExecution<
   }
 
   protected override executeCore(): Promise<T | E | RunnerError> {
-    return this.#runAttemptLoop(1)
+    return this.#runAttemptLoop()
   }
 
   /**
@@ -83,9 +83,9 @@ class RunExecution<T, E, Ctx extends BaseTryCtx> extends BaseExecution<
     return this.resolveOutcome(mapped, error)
   }
 
-  async #runAttemptLoop(attempt: number): Promise<T | E | RunnerError> {
-    let currentAttempt = attempt
-    let currentDecision: RetryDecision | undefined
+  async #runAttemptLoop(): Promise<T | E | RunnerError> {
+    let currentAttempt = 1
+    let retry: RetryDirective | undefined
 
     // oxlint-disable-next-line typescript/no-unnecessary-condition
     while (true) {
@@ -95,9 +95,9 @@ class RunExecution<T, E, Ctx extends BaseTryCtx> extends BaseExecution<
         return controlBeforeAttempt
       }
 
-      if (currentDecision) {
+      if (retry) {
         // oxlint-disable-next-line no-await-in-loop
-        const delayControlResult = await this.waitForRetryDelay(currentDecision.delay)
+        const delayControlResult = await this.waitForRetryDelay(retry.delay)
 
         if (delayControlResult) {
           return delayControlResult
@@ -124,7 +124,7 @@ class RunExecution<T, E, Ctx extends BaseTryCtx> extends BaseExecution<
           return resolved
         }
 
-        currentDecision = resolved.decision
+        retry = resolved
         currentAttempt += 1
       }
     }

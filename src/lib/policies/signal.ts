@@ -1,4 +1,3 @@
-import { defineDisposeAlias } from "../../shims/disposer"
 import { CancellationError, TimeoutError } from "../errors"
 import { discardOutcome, resolveWithAbort } from "../utils"
 
@@ -11,7 +10,6 @@ export class SignalController {
    * running.
    */
   readonly #cancelSignal?: AbortSignal
-  declare [Symbol.dispose]: () => void
 
   constructor(signals: readonly AbortSignal[] = [], timeoutSignal?: AbortSignal) {
     if (signals.length > 0) {
@@ -57,12 +55,4 @@ export class SignalController {
       () => new CancellationError(undefined, { cause: cause ?? this.signal?.reason })
     )
   }
-
-  dispose(): void {
-    // Intentionally a no-op: AbortSignal.any() does not create resources that
-    // need explicit teardown, so nothing needs to be released here. The method
-    // exists to satisfy the Disposable interface shared with TimeoutController.
-    void this.signal
-  }
 }
-defineDisposeAlias(SignalController.prototype)
