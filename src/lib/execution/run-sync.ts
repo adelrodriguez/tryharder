@@ -49,7 +49,7 @@ class RunSyncExecution<T, E, Ctx extends BaseTryCtx> extends BaseExecution<T | E
   }
 
   protected override executeCore(): T | E | RunnerError {
-    return this.#runAttemptLoop(1)
+    return this.#runAttemptLoop()
   }
 
   #resolveFailure(error: unknown): E | RunnerError | RetryDirective {
@@ -80,8 +80,8 @@ class RunSyncExecution<T, E, Ctx extends BaseTryCtx> extends BaseExecution<T | E
     return this.resolveOutcome(mapped, error)
   }
 
-  #runAttemptLoop(attempt: number): T | E | RunnerError {
-    let currentAttempt = attempt
+  #runAttemptLoop(): T | E | RunnerError {
+    let currentAttempt = 1
 
     // oxlint-disable-next-line typescript/no-unnecessary-condition
     while (true) {
@@ -101,7 +101,7 @@ class RunSyncExecution<T, E, Ctx extends BaseTryCtx> extends BaseExecution<T | E
         const resolved = this.#resolveFailure(error)
 
         if (resolved instanceof RetryDirective) {
-          if (resolved.decision.delay > 0) {
+          if (resolved.delay > 0) {
             throw new Panic("RUN_SYNC_ASYNC_RETRY_POLICY")
           }
 

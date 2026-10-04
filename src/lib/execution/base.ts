@@ -14,15 +14,6 @@ import { SignalController } from "../policies/signal"
 import { TimeoutController } from "../policies/timeout"
 import { sleep } from "../utils"
 
-interface BaseExecutionOptions {
-  retryLimit?: number
-}
-
-export type RetryDecision = {
-  delay: number
-  shouldAttemptRetry: boolean
-}
-
 export type RunnerError =
   | CancellationError
   | RetryExhaustedError
@@ -30,10 +21,10 @@ export type RunnerError =
   | UnhandledException
 
 export class RetryDirective {
-  readonly decision: RetryDecision
+  readonly delay: number
 
-  constructor(decision: RetryDecision) {
-    this.decision = decision
+  constructor(delay: number) {
+    this.delay = delay
   }
 }
 
@@ -46,7 +37,7 @@ export abstract class BaseExecution<TResult = unknown> implements Disposable {
   readonly #timeoutController: TimeoutController | undefined
   declare [Symbol.dispose]: () => void
 
-  protected constructor(config: BuilderConfig, options: BaseExecutionOptions = {}) {
+  protected constructor(config: BuilderConfig) {
     this.config = config
     this.#timeoutController = BaseExecution.createTimeoutController(config.timeout)
     this.#signalController = BaseExecution.createSignalController(
@@ -54,7 +45,7 @@ export abstract class BaseExecution<TResult = unknown> implements Disposable {
       this.#timeoutController?.signal
     )
     this.executionSignal = this.#signalController?.signal
-    this.ctx = BaseExecution.createContext(config, this.executionSignal, options.retryLimit)
+    this.ctx = BaseExecution.createContext(config, this.executionSignal)
   }
 
   execute(): TResult {
@@ -79,24 +70,14 @@ export abstract class BaseExecution<TResult = unknown> implements Disposable {
   protected abstract executeCore(): TResult
 
   dispose(): void {
-    // Tear down in LIFO order (the signal controller is created after the timeout
-    // controller); the try/finally guarantees a throw from one cannot skip the other.
-    try {
-      this.#signalController?.dispose()
-    } finally {
-      this.#timeoutController?.dispose()
-    }
+    this.#timeoutController?.dispose()
   }
 
-  protected static createContext(
-    config: BuilderConfig,
-    signal: AbortSignal | undefined,
-    retryLimit?: number
-  ): TryCtx {
+  protected static createContext(config: BuilderConfig, signal: AbortSignal | undefined): TryCtx {
     return {
       retry: {
         attempt: 1,
-        limit: retryLimit ?? config.retry?.limit ?? 1,
+        limit: config.retry?.limit ?? 1,
       },
       signal,
     }
@@ -212,23 +193,6 @@ export abstract class BaseExecution<TResult = unknown> implements Disposable {
     return undefined
   }
 
-  protected shouldAttemptRetry(error: unknown): boolean {
-    return checkShouldAttemptRetry(error, this.ctx, this.config)
-  }
-
-  protected retryDelayForCurrentAttempt(): number {
-    return calculateRetryDelay(this.ctx.retry.attempt, this.config)
-  }
-
-  protected buildRetryDecision(error: unknown): RetryDecision {
-    const shouldAttemptRetry = this.shouldAttemptRetry(error)
-
-    return {
-      delay: shouldAttemptRetry ? this.retryDelayForCurrentAttempt() : 0,
-      shouldAttemptRetry,
-    }
-  }
-
   /**
    * Shared prefix of attempt-failure resolution: rethrows defects, passes control errors through,
    * and turns retryable failures into a {@link RetryDirective}. Returns `undefined` when the failure
@@ -249,10 +213,8 @@ export abstract class BaseExecution<TResult = unknown> implements Disposable {
       return controlError
     }
 
-    const retryDecision = this.buildRetryDecision(error)
-
-    if (retryDecision.shouldAttemptRetry) {
-      return new RetryDirective(retryDecision)
+    if (checkShouldAttemptRetry(error, this.ctx, this.config)) {
+      return new RetryDirective(calculateRetryDelay(this.ctx.retry.attempt, this.config))
     }
 
     return undefined

@@ -10,6 +10,29 @@ describe("allSettled", () => {
     expect(result).toEqual({})
   })
 
+  it.each([
+    ["fulfilled", false],
+    ["rejected", true],
+  ])("keeps a %s task result named __proto__ as an own property", async (_status, reject) => {
+    const value = new Error("task value")
+
+    const result = await try$.allSettled({
+      ["__proto__"]() {
+        if (reject) {
+          throw value
+        }
+
+        return value
+      },
+    })
+
+    expect(Object.hasOwn(result, "__proto__")).toBe(true)
+    expect(Object.getOwnPropertyDescriptor(result, "__proto__")?.value).toEqual(
+      reject ? { reason: value, status: "rejected" } : { status: "fulfilled", value }
+    )
+    expect(Object.getPrototypeOf(result)).toBe(Object.prototype)
+  })
+
   it("returns mixed fulfilled and rejected task results", async () => {
     const boom = new Error("boom")
 

@@ -234,6 +234,74 @@ describe("all", () => {
     }
   })
 
+  it.each([undefined, null])(
+    "keeps a first task failure of %s when a later task also fails",
+    async (reason) => {
+      let failedTask: string | undefined
+
+      const result = await try$.all(
+        {
+          first() {
+            // oxlint-disable-next-line no-throw-literal, typescript/only-throw-error -- Task failures can be any JavaScript value.
+            throw reason
+          },
+          second() {
+            throw new Error("later failure")
+          },
+        },
+        {
+          catch(error, ctx) {
+            failedTask = ctx.failedTask
+            return error
+          },
+        }
+      )
+
+      expect(failedTask).toBe("first")
+      expect(result).toBeInstanceOf(UnhandledException)
+      expect((result as UnhandledException).cause).toBe(reason)
+    }
+  )
+
+  it("keeps a task result named __proto__ as an own property", async () => {
+    const value = { answer: 42 }
+
+    const result = await try$.all({
+      ["__proto__"]() {
+        return value
+      },
+    })
+
+    expect(Object.hasOwn(result, "__proto__")).toBe(true)
+    expect(Object.getOwnPropertyDescriptor(result, "__proto__")?.value).toBe(value)
+    expect(Object.getPrototypeOf(result)).toBe(Object.prototype)
+  })
+
+  it("passes catch a partial result named __proto__ as an own property", async () => {
+    const value = { answer: 42 }
+    const boom = new Error("boom")
+
+    const partial = await try$.all(
+      {
+        ["__proto__"]() {
+          return value
+        },
+        async failing() {
+          await Promise.resolve()
+          throw boom
+        },
+      },
+      {
+        catch(_error, ctx) {
+          return ctx.partial
+        },
+      }
+    )
+
+    expect(Object.hasOwn(partial, "__proto__")).toBe(true)
+    expect(Object.getOwnPropertyDescriptor(partial, "__proto__")?.value).toBe(value)
+  })
+
   it("maps non-Error task failures before rejecting dependent tasks", async () => {
     let dependencyError: unknown
 
