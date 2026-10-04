@@ -61,7 +61,6 @@ class FlowExecution<T extends TaskRecord> extends TaskGraphExecutionBase<T, Flow
         return this.firstRejection.value as FlowResult<T>
       }
 
-      // oxlint-disable-next-line typescript/only-throw-error -- Preserve raw task failures for callers/tests.
       throw this.firstRejection
     }
 
@@ -77,10 +76,7 @@ class FlowExecution<T extends TaskRecord> extends TaskGraphExecutionBase<T, Flow
       return
     }
 
-    // Store the mapped rejection so `firstRejection` is always a non-undefined
-    // value once set. This keeps `firstRejection !== undefined` a sound signal
-    // even when a task throws `undefined`, which maps to an UnhandledException.
-    super.setFirstRejection(this.mapStoredError(error))
+    super.setFirstRejection(error)
 
     for (const resolve of this.#firstRejectionWaiters) {
       resolve()

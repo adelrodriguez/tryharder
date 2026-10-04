@@ -7,6 +7,19 @@ import { invariant, resolveWithAbort } from "../utils"
 
 const TASK_RACE_ABORTED = Symbol("tryharder.taskRaceAborted")
 
+/**
+ * Records a task result as an own property. Plain assignment would call the `__proto__` setter for
+ * a task with that name and lose the result.
+ */
+function setTaskResult(target: Record<string, unknown>, taskName: string, value: unknown): void {
+  Object.defineProperty(target, taskName, {
+    configurable: true,
+    enumerable: true,
+    value,
+    writable: true,
+  })
+}
+
 // oxlint-disable-next-line no-explicit-any -- Required for task-map inference
 export type TaskRecord = Record<string, any>
 
@@ -183,7 +196,7 @@ export abstract class TaskGraphExecutionBase<
   protected readonly internalController: AbortController = new AbortController()
   protected readonly taskSignal: AbortSignal
   protected readonly disposer: AsyncDisposer = createAsyncDisposer()
-  protected firstRejection: unknown
+  protected firstRejection: Error | undefined
   #panic: Panic | undefined
   declare [Symbol.asyncDispose]: () => Promise<void>
 
@@ -307,7 +320,9 @@ export abstract class TaskGraphExecutionBase<
   }
 
   protected setFirstRejection(error: unknown): void {
-    this.firstRejection ??= error
+    // Store the mapped error: a task can throw `null` or `undefined`, and a raw
+    // value would let a later failure replace the first one.
+    this.firstRejection ??= this.mapStoredError(error)
   }
 
   protected abstract shouldAbortOnTaskError(error: unknown): boolean
@@ -398,15 +413,15 @@ export class FailFastTaskExecution<T extends TaskRecord> extends TaskExecution<T
   async execute(): Promise<AllValue<T>> {
     try {
       await Promise.all(this.startTasks())
-    } catch {
-      throw this.mapStoredError(this.firstRejection)
+    } catch (error) {
+      throw this.firstRejection ?? error
     }
 
     return this.#returnValue as AllValue<T>
   }
 
   protected override onTaskResult(taskName: keyof T, value: unknown): void {
-    this.#returnValue[taskName as string] = value
+    setTaskResult(this.#returnValue, taskName as string, value)
   }
 
   protected override onTaskError(taskName: keyof T): void {
@@ -430,11 +445,11 @@ export class SettledTaskExecution<T extends TaskRecord> extends TaskExecution<T>
   }
 
   protected override onTaskResult(taskName: keyof T, value: unknown): void {
-    this.#returnValue[taskName as string] = { status: "fulfilled", value }
+    setTaskResult(this.#returnValue, taskName as string, { status: "fulfilled", value })
   }
 
   protected override onTaskError(taskName: keyof T, error: unknown): void {
-    this.#returnValue[taskName as string] = { reason: error, status: "rejected" }
+    setTaskResult(this.#returnValue, taskName as string, { reason: error, status: "rejected" })
   }
 
   // oxlint-disable-next-line class-methods-use-this -- polymorphic override
