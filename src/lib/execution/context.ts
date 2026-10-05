@@ -7,7 +7,8 @@ export interface BaseTryCtx {
   signal?: AbortSignal
 }
 
-export type TryCtxFor<HasRetry extends boolean> = BaseTryCtx &
-  (HasRetry extends true ? { retry: RetryInfo } : Record<never, never>)
+export type TryCtxFor<HasRetry extends boolean> = HasRetry extends true
+  ? BaseTryCtx & { retry: RetryInfo }
+  : BaseTryCtx
 
 export type TryCtx = TryCtxFor<true>

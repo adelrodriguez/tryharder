@@ -71,10 +71,7 @@ CI runs the compatibility check on the exact `engines.node` floor (Node.js 22.0.
 ### Code Quality
 
 ```bash
-# Format the codebase
-pnpm run format
-
-# Check linting and types
+# Check formatting, linting, and types
 pnpm run check
 
 # Auto-fix linting and formatting issues
@@ -84,7 +81,7 @@ pnpm run fix
 pnpm run analyze
 ```
 
-Run `pnpm run format` after editing files. Before submitting a PR, run:
+Run `pnpm run fix` after editing files. Before submitting a PR, run:
 
 ```bash
 pnpm run check
@@ -191,8 +188,7 @@ This project is currently in `v0`, so breaking changes are acceptable when they 
 Ensure your PR meets these requirements:
 
 - [ ] Code follows the project's style guidelines
-- [ ] Code is formatted (`pnpm run format`)
-- [ ] Linting and checks pass (`pnpm run check`)
+- [ ] Formatting, linting, and checks pass (`pnpm run check`)
 - [ ] Tests pass (`pnpm run test`)
 - [ ] Build verification succeeds (`pnpm run build:verify`)
 - [ ] Changeset added, if applicable

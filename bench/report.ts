@@ -88,9 +88,9 @@ export function normalizeBenchmarkPayload(
       date: options.date ?? new Date().toISOString(),
       gitSha: options.gitSha ?? getGitSha(),
       nodeVersion:
-        options.nodeVersion ??
-        normalizeOptionalString(payload.results?.context?.version) ??
-        process.version,
+        options.nodeVersion
+        ?? normalizeOptionalString(payload.results?.context?.version)
+        ?? process.version,
       platform: options.platform ?? process.platform,
       suiteVersion,
     },

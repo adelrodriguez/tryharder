@@ -23,9 +23,9 @@ export function sleep(ms: number): Promise<void> {
 
 export function checkIsPromiseLike(value: unknown): value is PromiseLike<unknown> {
   return (
-    (typeof value === "object" || typeof value === "function") &&
-    value !== null &&
-    typeof (value as { then?: unknown }).then === "function"
+    (typeof value === "object" || typeof value === "function")
+    && value !== null
+    && typeof (value as { then?: unknown }).then === "function"
   )
 }
 

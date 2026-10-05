@@ -36,11 +36,10 @@ Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/ag
 This project uses Adamantite for its managed formatting, linting, type checking, and dependency-analysis setup.
 
 - Prefer the package scripts Adamantite added for this workspace.
-- Run `pnpm run format` after editing files. Direct command: `adamantite format`.
-- Run `pnpm run check` to catch lint and type issues. Direct command: `adamantite check`.
-- Run `pnpm run fix` to apply safe lint fixes. Direct command: `adamantite fix`.
+- Run `pnpm run check` to catch formatting, lint, and type issues. Direct command: `adamantite check`.
+- Run `pnpm run fix` to apply formatting and safe lint fixes. Direct command: `adamantite fix`.
 - Run `pnpm run analyze` after changing dependencies, imports, or exports. Direct command: `adamantite analyze`.
-- Use `adamantite doctor` to inspect managed setup and `adamantite doctor --fix` for safe local fixes.
+- Use `adamantite doctor` to inspect managed setup and follow its findings.
 
 <!-- ADAMANTITE:END -->
 
