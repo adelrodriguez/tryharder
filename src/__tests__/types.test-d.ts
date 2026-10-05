@@ -1,4 +1,5 @@
 // Compile-time checks only: `pnpm run check` enforces this file, and Vitest never runs it.
+import { expectTypeOf } from "vitest"
 import type {
   CancellationError,
   PanicCode,
@@ -24,12 +25,6 @@ import {
 } from "../errors"
 import * as try$ from "../index"
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
-type Equal<A, B> =
-  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false
-
-type Expect<T extends true> = T
-
 // ── Test fixtures ────────────────────────────────────────────────────────────
 class UserNotFoundError extends Error {
   override name = "UserNotFoundError"
@@ -48,35 +43,35 @@ class PermissionDeniedError extends Error {
 {
   const result = try$.runSync(() => 42)
 
-  type _RunSyncResult = Expect<Equal<typeof result, number | UnhandledException>>
+  expectTypeOf(result).toEqualTypeOf<number | UnhandledException>()
 }
 
 // Returns Promise<T | UnhandledException> from run() with a function.
 {
   const result = try$.run(() => 42)
 
-  type _RunResult = Expect<Equal<typeof result, Promise<number | UnhandledException>>>
+  expectTypeOf(result).toEqualTypeOf<Promise<number | UnhandledException>>()
 }
 
 // Returns T | E from runSync() with sync try and catch.
 {
   const result = try$.runSync({ catch: () => "err" as const, try: () => 42 })
 
-  type _RunSyncCatchResult = Expect<Equal<typeof result, number | "err">>
+  expectTypeOf(result).toEqualTypeOf<number | "err">()
 }
 
 // Returns Promise<T | E> from run() with async try and sync catch.
 {
   const result = try$.run({ catch: () => "err" as const, try: () => Promise.resolve(42) })
 
-  type _RunCatchResult = Expect<Equal<typeof result, Promise<number | "err">>>
+  expectTypeOf(result).toEqualTypeOf<Promise<number | "err">>()
 }
 
 // Returns AsyncDisposer from disposer().
 {
   const disposer = try$.disposer()
 
-  type _Disposer = Expect<Equal<typeof disposer, AsyncDisposer>>
+  expectTypeOf(disposer).toEqualTypeOf<AsyncDisposer>()
 }
 
 // Exposes only defer, use, and dispose on AsyncDisposer.
@@ -84,11 +79,11 @@ class PermissionDeniedError extends Error {
   const disposer = try$.disposer()
   const disposeResult = disposer.dispose()
 
-  type _DisposeResult = Expect<Equal<typeof disposeResult, Promise<void>>>
-  type _DeferResult = Expect<Equal<ReturnType<typeof disposer.defer>, void>>
-  type _DisposerKeys = Expect<
-    Equal<keyof AsyncDisposer, "defer" | "dispose" | "use" | typeof Symbol.asyncDispose>
-  >
+  expectTypeOf(disposeResult).toEqualTypeOf<Promise<void>>()
+  expectTypeOf(disposer).toHaveProperty("defer").returns.toBeVoid()
+  expectTypeOf<keyof AsyncDisposer>().toEqualTypeOf<
+    "defer" | "dispose" | "use" | typeof Symbol.asyncDispose
+  >()
 }
 
 // Keeps runSync() on retry(number) builders and adds RetryExhaustedError.
@@ -97,8 +92,8 @@ class PermissionDeniedError extends Error {
   const result = retryBuilder.run(() => 1)
   const syncResult = retryBuilder.runSync((ctx) => ctx.retry.attempt)
 
-  type _RunResult = Expect<Equal<typeof result, Promise<number | RetryExhaustedError>>>
-  type _RunSyncResult = Expect<Equal<typeof syncResult, number | RetryExhaustedError>>
+  expectTypeOf(result).toEqualTypeOf<Promise<number | RetryExhaustedError>>()
+  expectTypeOf(syncResult).toEqualTypeOf<number | RetryExhaustedError>()
 }
 
 // Adds RetryExhaustedError to retry(policy) builder results.
@@ -106,7 +101,7 @@ class PermissionDeniedError extends Error {
   const retryBuilder = try$.retry({ backoff: "constant", delayMs: 1, limit: 3 })
   const result = retryBuilder.run(() => 1)
 
-  type _RunResult = Expect<Equal<typeof result, Promise<number | RetryExhaustedError>>>
+  expectTypeOf(result).toEqualTypeOf<Promise<number | RetryExhaustedError>>()
 }
 
 // Adds TimeoutError to timeout() run results and keeps orchestration results.
@@ -132,12 +127,10 @@ class PermissionDeniedError extends Error {
     },
   })
 
-  type _RunResult = Expect<
-    Equal<typeof result, Promise<number | UnhandledException | TimeoutError>>
-  >
-  type _AllResult = Expect<Equal<typeof allResult, Promise<{ a: 1; b: 1 }>>>
-  type _SettledResult = Expect<Equal<typeof settledResult, Promise<{ a: SettledResult<"ok"> }>>>
-  type _FlowResult = Expect<Equal<typeof flowResult, Promise<"done">>>
+  expectTypeOf(result).toEqualTypeOf<Promise<number | UnhandledException | TimeoutError>>()
+  expectTypeOf(allResult).toEqualTypeOf<Promise<{ a: 1; b: 1 }>>()
+  expectTypeOf(settledResult).toEqualTypeOf<Promise<{ a: SettledResult<"ok"> }>>()
+  expectTypeOf(flowResult).toEqualTypeOf<Promise<"done">>()
 }
 
 // Adds CancellationError to signal() run results and keeps orchestration results.
@@ -163,12 +156,10 @@ class PermissionDeniedError extends Error {
     },
   })
 
-  type _RunResult = Expect<
-    Equal<typeof result, Promise<number | UnhandledException | CancellationError>>
-  >
-  type _AllResult = Expect<Equal<typeof allResult, Promise<{ a: 1; b: 1 }>>>
-  type _SettledResult = Expect<Equal<typeof settledResult, Promise<{ a: SettledResult<"ok"> }>>>
-  type _FlowResult = Expect<Equal<typeof flowResult, Promise<"done">>>
+  expectTypeOf(result).toEqualTypeOf<Promise<number | UnhandledException | CancellationError>>()
+  expectTypeOf(allResult).toEqualTypeOf<Promise<{ a: 1; b: 1 }>>()
+  expectTypeOf(settledResult).toEqualTypeOf<Promise<{ a: SettledResult<"ok"> }>>()
+  expectTypeOf(flowResult).toEqualTypeOf<Promise<"done">>()
 }
 
 // Exposes AsyncDisposer on orchestration task contexts.
@@ -177,7 +168,7 @@ class PermissionDeniedError extends Error {
     a() {
       const disposer = this.$disposer
 
-      type _AllDisposer = Expect<Equal<typeof disposer, AsyncDisposer>>
+      expectTypeOf(disposer).toEqualTypeOf<AsyncDisposer>()
 
       return 1
     },
@@ -187,7 +178,7 @@ class PermissionDeniedError extends Error {
     a() {
       const disposer = this.$disposer
 
-      type _AllSettledDisposer = Expect<Equal<typeof disposer, AsyncDisposer>>
+      expectTypeOf(disposer).toEqualTypeOf<AsyncDisposer>()
 
       return 1
     },
@@ -197,7 +188,7 @@ class PermissionDeniedError extends Error {
     a() {
       const disposer = this.$disposer
 
-      type _FlowDisposer = Expect<Equal<typeof disposer, AsyncDisposer>>
+      expectTypeOf(disposer).toEqualTypeOf<AsyncDisposer>()
 
       return this.$exit("done" as const)
     },
@@ -209,7 +200,7 @@ class PermissionDeniedError extends Error {
   const wrappedBuilder = try$.wrap((_, next) => next())
   const syncResult = wrappedBuilder.runSync(() => 1)
 
-  type _RunSyncResult = Expect<Equal<typeof syncResult, number | UnhandledException>>
+  expectTypeOf(syncResult).toEqualTypeOf<number | UnhandledException>()
 }
 
 // Narrows unknown values through the error type guards.
@@ -217,28 +208,28 @@ class PermissionDeniedError extends Error {
   const value: unknown = new Panic("FLOW_NO_EXIT")
 
   if (isPanic(value)) {
-    type _Panic = Expect<Equal<typeof value, Panic>>
-    type _PanicCode = Expect<Equal<typeof value.code, PanicCode>>
+    expectTypeOf(value).toEqualTypeOf<Panic>()
+    expectTypeOf(value.code).toEqualTypeOf<PanicCode>()
   }
 
   if (isCancellationError(value)) {
-    type _CancellationError = Expect<Equal<typeof value, CancellationError>>
+    expectTypeOf(value).toEqualTypeOf<CancellationError>()
   }
 
   if (isRetryExhaustedError(value)) {
-    type _RetryExhaustedError = Expect<Equal<typeof value, RetryExhaustedError>>
+    expectTypeOf(value).toEqualTypeOf<RetryExhaustedError>()
   }
 
   if (isUnhandledException(value)) {
-    type _UnhandledException = Expect<Equal<typeof value, UnhandledException>>
+    expectTypeOf(value).toEqualTypeOf<UnhandledException>()
   }
 
   const result = "ok" as string | TimeoutError
 
   if (isTimeoutError(result)) {
-    type _TimeoutError = Expect<Equal<typeof result, TimeoutError>>
+    expectTypeOf(result).toEqualTypeOf<TimeoutError>()
   } else {
-    type _NotTimeoutError = Expect<Equal<typeof result, string>>
+    expectTypeOf(result).toEqualTypeOf<string>()
   }
 }
 
@@ -254,14 +245,14 @@ class PermissionDeniedError extends Error {
   )
   const result = unionBuilder.run(() => 1)
 
-  type _RunResult = Expect<Equal<typeof result, Promise<number | RetryExhaustedError>>>
+  expectTypeOf(result).toEqualTypeOf<Promise<number | RetryExhaustedError>>()
 }
 
 // Unwraps an async retry result into the Promise union.
 {
   const result = try$.retry(3).run(() => Promise.resolve(42))
 
-  type _RunResult = Expect<Equal<typeof result, Promise<number | RetryExhaustedError>>>
+  expectTypeOf(result).toEqualTypeOf<Promise<number | RetryExhaustedError>>()
 }
 
 // Exposes retry attempt and limit on ctx when retry config is present.
@@ -269,8 +260,8 @@ class PermissionDeniedError extends Error {
   void try$.retry(3).run((ctx) => {
     const { retry, signal } = ctx
 
-    type _Retry = Expect<Equal<typeof retry, { attempt: number; limit: number }>>
-    type _Signal = Expect<Equal<typeof signal, AbortSignal | undefined>>
+    expectTypeOf(retry).toEqualTypeOf<{ attempt: number; limit: number }>()
+    expectTypeOf(signal).toEqualTypeOf<AbortSignal | undefined>()
 
     return retry.attempt
   })
@@ -283,9 +274,7 @@ class PermissionDeniedError extends Error {
     .timeout(5000)
     .run(() => 42)
 
-  type _RunResult = Expect<
-    Equal<typeof result, Promise<number | RetryExhaustedError | TimeoutError>>
-  >
+  expectTypeOf(result).toEqualTypeOf<Promise<number | RetryExhaustedError | TimeoutError>>()
 }
 
 // Returns a Promise union from retry() + timeout() run() with an async function.
@@ -295,9 +284,7 @@ class PermissionDeniedError extends Error {
     .timeout(5000)
     .run(() => Promise.resolve(42))
 
-  type _RunResult = Expect<
-    Equal<typeof result, Promise<number | RetryExhaustedError | TimeoutError>>
-  >
+  expectTypeOf(result).toEqualTypeOf<Promise<number | RetryExhaustedError | TimeoutError>>()
 }
 
 // Replaces RetryExhaustedError with the catch type for retry() + timeout() + signal().
@@ -309,9 +296,7 @@ class PermissionDeniedError extends Error {
     .signal(ac.signal)
     .run({ catch: () => "err" as const, try: () => 42 as const })
 
-  type _RunResult = Expect<
-    Equal<typeof result, Promise<42 | "err" | TimeoutError | CancellationError>>
-  >
+  expectTypeOf(result).toEqualTypeOf<Promise<42 | "err" | TimeoutError | CancellationError>>()
 }
 
 // Returns a Promise union for retry() + timeout() + signal() with async try and catch.
@@ -323,9 +308,7 @@ class PermissionDeniedError extends Error {
     .signal(ac.signal)
     .run({ catch: () => "err" as const, try: () => Promise.resolve(42) })
 
-  type _RunResult = Expect<
-    Equal<typeof result, Promise<number | "err" | TimeoutError | CancellationError>>
-  >
+  expectTypeOf(result).toEqualTypeOf<Promise<number | "err" | TimeoutError | CancellationError>>()
 }
 
 // Keeps retry metadata available across timeout() and signal() chains.
@@ -336,16 +319,16 @@ class PermissionDeniedError extends Error {
     .signal(new AbortController().signal)
     .run((ctx) => ctx.retry.attempt)
 
-  type _RunResult = Expect<
-    Equal<typeof result, Promise<number | RetryExhaustedError | TimeoutError | CancellationError>>
-  >
+  expectTypeOf(result).toEqualTypeOf<
+    Promise<number | RetryExhaustedError | TimeoutError | CancellationError>
+  >()
 }
 
 // Keeps run() available on wrap() builders.
 {
   const result = try$.wrap((_, next) => next()).run(() => 42)
 
-  type _RunResult = Expect<Equal<typeof result, Promise<number | UnhandledException>>>
+  expectTypeOf(result).toEqualTypeOf<Promise<number | UnhandledException>>()
 }
 
 // Exposes retry() on wrap() builders.
@@ -355,7 +338,7 @@ class PermissionDeniedError extends Error {
     .retry(3)
     .run((ctx) => ctx.retry.attempt)
 
-  type _RunResult = Expect<Equal<typeof result, Promise<number | RetryExhaustedError>>>
+  expectTypeOf(result).toEqualTypeOf<Promise<number | RetryExhaustedError>>()
 }
 
 // Exposes timeout() on wrap() builders.
@@ -365,9 +348,7 @@ class PermissionDeniedError extends Error {
     .timeout(100)
     .run(() => 1)
 
-  type _RunResult = Expect<
-    Equal<typeof result, Promise<number | UnhandledException | TimeoutError>>
-  >
+  expectTypeOf(result).toEqualTypeOf<Promise<number | UnhandledException | TimeoutError>>()
 }
 
 // Exposes signal() on wrap() builders.
@@ -377,9 +358,7 @@ class PermissionDeniedError extends Error {
     .signal(new AbortController().signal)
     .run(() => 1)
 
-  type _RunResult = Expect<
-    Equal<typeof result, Promise<number | UnhandledException | CancellationError>>
-  >
+  expectTypeOf(result).toEqualTypeOf<Promise<number | UnhandledException | CancellationError>>()
 }
 
 // Returns a sync union from gen() for sync yielded values.
@@ -389,7 +368,7 @@ class PermissionDeniedError extends Error {
     return value
   })
 
-  type _GenResult = Expect<Equal<typeof result, number | UserNotFoundError>>
+  expectTypeOf(result).toEqualTypeOf<number | UserNotFoundError>()
 }
 
 // Returns a Promise union from gen() when yielded values include a Promise.
@@ -404,9 +383,7 @@ class PermissionDeniedError extends Error {
     return project
   })
 
-  type _GenResult = Expect<
-    Equal<typeof result, Promise<string | UserNotFoundError | ProjectNotFoundError>>
-  >
+  expectTypeOf(result).toEqualTypeOf<Promise<string | UserNotFoundError | ProjectNotFoundError>>()
 }
 
 // Keeps explicit returned error values in the gen() result union.
@@ -416,7 +393,8 @@ class PermissionDeniedError extends Error {
     return Math.random() > 0.5 ? "ok" : new ProjectNotFoundError("missing")
   })
 
-  type _GenResult = Expect<Equal<typeof result, "ok" | ProjectNotFoundError>>
+  // The type form keeps "ok" literal; passing the value would widen it to string.
+  expectTypeOf<typeof result>().toEqualTypeOf<"ok" | ProjectNotFoundError>()
 }
 
 // Keeps explicit async returned error values in the gen() result union.
@@ -426,7 +404,7 @@ class PermissionDeniedError extends Error {
     return Promise.resolve(Math.random() > 0.5 ? "ok" : new ProjectNotFoundError("missing"))
   })
 
-  type _GenResult = Expect<Equal<typeof result, Promise<string | ProjectNotFoundError>>>
+  expectTypeOf(result).toEqualTypeOf<Promise<string | ProjectNotFoundError>>()
 }
 
 // Accumulates error unions when gen() composes multiple run() functions.
@@ -459,18 +437,11 @@ class PermissionDeniedError extends Error {
     return `${user.id}:${project.id}`
   })
 
-  type _GenResult = Expect<
-    Equal<
-      typeof result,
-      Promise<
-        | string
-        | UserNotFoundError
-        | PermissionDeniedError
-        | ProjectNotFoundError
-        | UnhandledException
-      >
+  expectTypeOf(result).toEqualTypeOf<
+    Promise<
+      string | UserNotFoundError | PermissionDeniedError | ProjectNotFoundError | UnhandledException
     >
-  >
+  >()
 }
 
 // Infers all() result types from task return types.
@@ -484,7 +455,7 @@ class PermissionDeniedError extends Error {
     },
   })
 
-  type _AllResult = Expect<Equal<typeof result, Promise<{ a: number; b: string }>>>
+  expectTypeOf(result).toEqualTypeOf<Promise<{ a: number; b: string }>>()
 }
 
 // Infers all() $result proxy types from non-self-referencing tasks.
@@ -497,8 +468,8 @@ class PermissionDeniedError extends Error {
       const a = this.$result.a
       const resolvedA = await this.$result.a
 
-      type _Proxy = Expect<Equal<typeof a, Promise<number>>>
-      type _Resolved = Expect<Equal<typeof resolvedA, number>>
+      expectTypeOf(a).toEqualTypeOf<Promise<number>>()
+      expectTypeOf(resolvedA).toEqualTypeOf<number>()
 
       return "hello"
     },
@@ -513,8 +484,8 @@ class PermissionDeniedError extends Error {
       const raced = this.$race(like)
       const resolved = await raced
 
-      type _AllRaced = Expect<Equal<typeof raced, Promise<number>>>
-      type _AllResolved = Expect<Equal<typeof resolved, number>>
+      expectTypeOf(raced).toEqualTypeOf<Promise<number>>()
+      expectTypeOf(resolved).toEqualTypeOf<number>()
 
       return resolved
     },
@@ -524,7 +495,7 @@ class PermissionDeniedError extends Error {
     async a() {
       const raced = this.$race(Promise.resolve("ok" as const))
 
-      type _AllSettledRaced = Expect<Equal<typeof raced, Promise<"ok">>>
+      expectTypeOf(raced).toEqualTypeOf<Promise<"ok">>()
 
       return await raced
     },
@@ -534,7 +505,7 @@ class PermissionDeniedError extends Error {
     async a() {
       const raced = this.$race(Promise.resolve(42))
 
-      type _FlowRaced = Expect<Equal<typeof raced, Promise<number>>>
+      expectTypeOf(raced).toEqualTypeOf<Promise<number>>()
 
       return this.$exit(await raced)
     },
@@ -557,7 +528,7 @@ class PermissionDeniedError extends Error {
     }
   )
 
-  type _AllResult = Expect<Equal<typeof result, Promise<{ a: number; b: string } | "mapped">>>
+  expectTypeOf(result).toEqualTypeOf<Promise<{ a: number; b: string } | "mapped">>()
 }
 
 // Infers the all() catch context.
@@ -577,9 +548,9 @@ class PermissionDeniedError extends Error {
         const partialA = ctx.partial.a
         const signal = ctx.signal
 
-        type _FailedTask = Expect<Equal<typeof failedTask, "a" | "b" | undefined>>
-        type _PartialA = Expect<Equal<typeof partialA, number | undefined>>
-        type _Signal = Expect<Equal<typeof signal, AbortSignal>>
+        expectTypeOf(failedTask).toEqualTypeOf<"a" | "b" | undefined>()
+        expectTypeOf(partialA).toEqualTypeOf<number | undefined>()
+        expectTypeOf(signal).toEqualTypeOf<AbortSignal>()
 
         return "mapped" as const
       },
@@ -594,7 +565,7 @@ class PermissionDeniedError extends Error {
       async "load-profile"() {
         const user = await this.$result["load-user"]
 
-        type _User = Expect<Equal<typeof user, { id: "user_1" }>>
+        expectTypeOf(user).toEqualTypeOf<{ id: "user_1" }>()
 
         return { displayName: "Ada" as const, userId: user.id }
       },
@@ -608,44 +579,37 @@ class PermissionDeniedError extends Error {
         const partialUser = ctx.partial["load-user"]
         const partialProfile = ctx.partial["load-profile"]
 
-        type _FailedTask = Expect<
-          Equal<typeof failedTask, "load-user" | "load-profile" | undefined>
-        >
-        type _PartialUser = Expect<Equal<typeof partialUser, { id: "user_1" } | undefined>>
-        type _PartialProfile = Expect<
-          Equal<typeof partialProfile, { userId: "user_1"; displayName: "Ada" } | undefined>
-        >
+        expectTypeOf(failedTask).toEqualTypeOf<"load-user" | "load-profile" | undefined>()
+        expectTypeOf(partialUser).toEqualTypeOf<{ id: "user_1" } | undefined>()
+        expectTypeOf(partialProfile).toEqualTypeOf<
+          { userId: "user_1"; displayName: "Ada" } | undefined
+        >()
 
         return "fallback" as const
       },
     }
   )
 
-  type _AllResult = Expect<
-    Equal<
-      typeof result,
-      Promise<
-        | {
-            "load-user": { id: "user_1" }
-            "load-profile": { userId: "user_1"; displayName: "Ada" }
-          }
-        | "fallback"
-      >
+  expectTypeOf(result).toEqualTypeOf<
+    Promise<
+      | {
+          "load-user": { id: "user_1" }
+          "load-profile": { userId: "user_1"; displayName: "Ada" }
+        }
+      | "fallback"
     >
-  >
+  >()
 }
 
 // Exports settled result types from the types entrypoint.
 {
-  type _Fulfilled = Expect<Equal<SettledFulfilled<"ok">, { status: "fulfilled"; value: "ok" }>>
-  type _Rejected = Expect<Equal<SettledRejected, { status: "rejected"; reason: unknown }>>
-  type _Settled = Expect<Equal<SettledResult<"ok">, SettledFulfilled<"ok"> | SettledRejected>>
-  type _AllSettled = Expect<
-    Equal<
-      AllSettledResult<{ a: () => Promise<number>; b: () => "ok" }>,
-      { a: SettledResult<number>; b: SettledResult<"ok"> }
-    >
-  >
+  expectTypeOf<SettledFulfilled<"ok">>().toEqualTypeOf<{ status: "fulfilled"; value: "ok" }>()
+  expectTypeOf<SettledRejected>().toEqualTypeOf<{ status: "rejected"; reason: unknown }>()
+  expectTypeOf<SettledResult<"ok">>().toEqualTypeOf<SettledFulfilled<"ok"> | SettledRejected>()
+  expectTypeOf<AllSettledResult<{ a: () => Promise<number>; b: () => "ok" }>>().toEqualTypeOf<{
+    a: SettledResult<number>
+    b: SettledResult<"ok">
+  }>()
 }
 
 // Infers allSettled() result types.
@@ -659,15 +623,12 @@ class PermissionDeniedError extends Error {
     },
   })
 
-  type _AllSettledResult = Expect<
-    Equal<
-      typeof result,
-      Promise<{
-        a: SettledResult<number>
-        b: SettledResult<string>
-      }>
-    >
-  >
+  expectTypeOf(result).toEqualTypeOf<
+    Promise<{
+      a: SettledResult<number>
+      b: SettledResult<string>
+    }>
+  >()
 }
 
 // Keeps allSettled() $result property types when awaited.
@@ -680,8 +641,8 @@ class PermissionDeniedError extends Error {
       const a = this.$result.a
       const resolvedA = await this.$result.a
 
-      type _Proxy = Expect<Equal<typeof a, Promise<42>>>
-      type _Resolved = Expect<Equal<typeof resolvedA, 42>>
+      expectTypeOf(a).toEqualTypeOf<Promise<42>>()
+      expectTypeOf(resolvedA).toEqualTypeOf<42>()
 
       return "hello"
     },
@@ -694,7 +655,7 @@ class PermissionDeniedError extends Error {
     a() {
       const exit = this.$exit("done" as const)
 
-      type _Exit = Expect<Equal<typeof exit, FlowExit<"done">>>
+      expectTypeOf(exit).toEqualTypeOf<FlowExit<"done">>()
 
       return exit
     },
@@ -716,7 +677,7 @@ class PermissionDeniedError extends Error {
     },
   })
 
-  type _FlowResult = Expect<Equal<typeof result, Promise<42 | "stop">>>
+  expectTypeOf(result).toEqualTypeOf<Promise<42 | "stop">>()
 }
 
 // Infers never from flow() when no task calls $exit().
@@ -730,7 +691,7 @@ class PermissionDeniedError extends Error {
     },
   })
 
-  type _FlowResult = Expect<Equal<typeof result, Promise<never>>>
+  expectTypeOf(result).toEqualTypeOf<Promise<never>>()
 }
 
 // Keeps the task result map for signal() + all().
@@ -744,7 +705,7 @@ class PermissionDeniedError extends Error {
     },
   })
 
-  type _AllResult = Expect<Equal<typeof result, Promise<{ a: 1; b: number }>>>
+  expectTypeOf(result).toEqualTypeOf<Promise<{ a: 1; b: number }>>()
 }
 
 // Keeps the settled map for signal() + allSettled().
@@ -758,15 +719,12 @@ class PermissionDeniedError extends Error {
     },
   })
 
-  type _AllSettledResult = Expect<
-    Equal<
-      typeof result,
-      Promise<{
-        a: SettledResult<1>
-        b: SettledResult<"ok">
-      }>
-    >
-  >
+  expectTypeOf(result).toEqualTypeOf<
+    Promise<{
+      a: SettledResult<1>
+      b: SettledResult<"ok">
+    }>
+  >()
 }
 
 // Keeps orchestration available on timeout() + signal() chains.

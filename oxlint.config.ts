@@ -15,12 +15,9 @@ export default defineConfig({
       rules: { "jsdoc/check-tag-names": ["error", { typed: false }] },
     },
     {
-      // Bare blocks scope each case's type aliases; Equal needs its identity type parameter.
+      // Bare blocks scope each type assertion case.
       files: ["src/__tests__/types.test-d.ts"],
-      rules: {
-        "no-lone-blocks": "off",
-        "typescript/no-unnecessary-type-parameters": "off",
-      },
+      rules: { "no-lone-blocks": "off" },
     },
   ],
 })
