@@ -6,7 +6,7 @@ Use ASD-STE100 / Simplified Technical English and Google developer documentation
 
 ## Documentation map
 
-- `CONTEXT.md` — the domain glossary. Use its vocabulary in code, tests, issues, and docs.
+- `GLOSSARY.md` — the domain glossary. Use its vocabulary in code, tests, issues, and docs.
 - `docs/adr/` — recorded design decisions. Read the ones touching the area you're changing; record a new one when a decision is hard to reverse, surprising without context, and the result of a real trade-off.
 - `CONTRIBUTING.md` — development workflow, code style, testing expectations, and the changesets workflow. Follow it for all changes.
 
@@ -27,7 +27,7 @@ The five default triage labels are used as-is: `needs-triage`, `needs-info`, `re
 
 ### Domain docs
 
-Single-context: one `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
 
 <!-- ADAMANTITE:START -->
 
