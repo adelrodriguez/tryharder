@@ -116,17 +116,17 @@ function checkIsError(value: unknown): value is Error {
   }
 
   return (
-    typeof value === "object" &&
-    value !== null &&
-    !(Symbol.toStringTag in value) &&
-    Object.prototype.toString.call(value) === "[object Error]"
+    typeof value === "object"
+    && value !== null
+    && !(Symbol.toStringTag in value)
+    && Object.prototype.toString.call(value) === "[object Error]"
   )
 }
 
 export function isCancellationError(error: unknown): error is CancellationError {
   return (
-    error instanceof CancellationError ||
-    (checkIsError(error) && error.name === "CancellationError")
+    error instanceof CancellationError
+    || (checkIsError(error) && error.name === "CancellationError")
   )
 }
 
@@ -136,24 +136,24 @@ export function isTimeoutError(error: unknown): error is TimeoutError {
 
 export function isRetryExhaustedError(error: unknown): error is RetryExhaustedError {
   return (
-    error instanceof RetryExhaustedError ||
-    (checkIsError(error) && error.name === "RetryExhaustedError")
+    error instanceof RetryExhaustedError
+    || (checkIsError(error) && error.name === "RetryExhaustedError")
   )
 }
 
 export function isUnhandledException(error: unknown): error is UnhandledException {
   return (
-    error instanceof UnhandledException ||
-    (checkIsError(error) && error.name === "UnhandledException")
+    error instanceof UnhandledException
+    || (checkIsError(error) && error.name === "UnhandledException")
   )
 }
 
 export function isPanic(error: unknown): error is Panic {
   return (
-    error instanceof Panic ||
-    (checkIsError(error) &&
-      error.name === "Panic" &&
-      "code" in error &&
-      typeof error.code === "string")
+    error instanceof Panic
+    || (checkIsError(error)
+      && error.name === "Panic"
+      && "code" in error
+      && typeof error.code === "string")
   )
 }

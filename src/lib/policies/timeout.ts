@@ -102,8 +102,8 @@ export class TimeoutController {
       this.signal,
       promise,
       () =>
-        this.checkDidTimeout(cause) ??
-        new TimeoutError(`Execution exceeded timeout of ${this.#timeoutMs}ms`, { cause })
+        this.checkDidTimeout(cause)
+        ?? new TimeoutError(`Execution exceeded timeout of ${this.#timeoutMs}ms`, { cause })
     )
   }
 

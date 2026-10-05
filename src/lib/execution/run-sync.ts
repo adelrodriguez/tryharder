@@ -134,10 +134,10 @@ export function executeRunSync<T, E, Ctx extends BaseTryCtx>(
   // Builder typing blocks async-only retry policies, but calling executeRunSync
   // directly and unsafe casts still need a runtime guard here.
   const isSyncSafeRetryPolicy =
-    config.retry === undefined ||
-    (config.retry.backoff === "constant" &&
-      !config.retry.jitter &&
-      (config.retry.delayMs ?? 0) <= 0)
+    config.retry === undefined
+    || (config.retry.backoff === "constant"
+      && !config.retry.jitter
+      && (config.retry.delayMs ?? 0) <= 0)
 
   invariant(isSyncSafeRetryPolicy, new Panic("RUN_SYNC_ASYNC_RETRY_POLICY"))
 
