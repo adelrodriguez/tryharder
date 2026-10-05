@@ -13,7 +13,8 @@ Use ASD-STE100 / Simplified Technical English and Google developer documentation
 ## Rules for agents
 
 - Never make a major version bump unless the user requests it. We are in v0, so breaking changes are acceptable when they simplify or improve the API — but if we are on v1.0.0 or higher, alert the user before making one.
-- Public API type changes must be covered in `src/__tests__/types.test.ts`.
+- Public API type changes must be covered in `src/__tests__/types.test-d.ts`.
+- Type assertions are enforced by `pnpm run check`, not Vitest.
 
 ## Agent skills
 
