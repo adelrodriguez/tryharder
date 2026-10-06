@@ -3,7 +3,7 @@ import analyze from "adamantite/analyze"
 
 const config: KnipConfig = {
   ...analyze,
-  entry: ["scripts/*.ts"],
+  entry: ["src/**/*.test-d.ts", "scripts/*.ts"],
   ignoreExportsUsedInFile: true,
   project: ["*.config.ts", "bench/**/*.ts", "scripts/**/*.ts", "src/**/*.ts"],
   rules: {

@@ -14,5 +14,10 @@ export default defineConfig({
       files: ["scripts/**/*.mjs"],
       rules: { "jsdoc/check-tag-names": ["error", { typed: false }] },
     },
+    {
+      // Bare blocks scope each type assertion case.
+      files: ["src/__tests__/types.test-d.ts"],
+      rules: { "no-lone-blocks": "off" },
+    },
   ],
 })
