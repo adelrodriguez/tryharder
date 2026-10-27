@@ -34,7 +34,7 @@ src/
 ├── index.ts              # Main public entry point
 ├── errors.ts             # Public error exports
 ├── types.ts              # Public types
-├── __tests__/            # Public API and integration-style tests
+├── __tests__/            # Public API tests and benchmarks (*.bench.ts)
 ├── shims/                # Runtime shims (e.g. disposer support)
 └── lib/
     ├── builder.ts        # Fluent builder implementation
@@ -101,6 +101,37 @@ pnpm run build
 pnpm run dev
 ```
 
+### Benchmarks
+
+```bash
+# Print a comparison table for each benchmark group
+pnpm run bench
+
+# Also write bench-results/vitest.json, latest.json, and summary.md
+pnpm run bench:ci
+```
+
+Benchmarks track relative performance trends. They are not a required PR gate, because microbenchmarks are noisy. The `benchmarks` workflow runs `bench:ci` every Monday and publishes the summary.
+
+Each public API has a `*.bench.ts` file next to its tests in `src/__tests__/`. Each `test()` in that file is one benchmark group. It uses the `bench` fixture and `bench.compare()`, so Vitest interleaves the cases in a group and prints one table for the group. Give every `bench()` a unique name across the suite.
+
+Follow these rules when you write a benchmark:
+
+- Import from the typed `src` entrypoint, so `check` does not depend on a prior `build`. Vite's module runner adds a small getter overhead to each import. The overhead is constant across runs, so trends stay valid.
+- Keep cases deterministic and timer-free. Do not use `sleep`, real timeout expiry, or cancellation races.
+- Set up task graphs and builders outside the measured function.
+- Pass each result to `consume()` from `test-utils.ts`, so the runtime cannot optimize the work away.
+- When you change cases or tooling so that old results are no longer comparable, increment `BENCHMARK_SUITE_VERSION` in `scripts/bench-report.ts`.
+
+Read the results like this:
+
+- Treat the suite as an overhead tracker, not as an end-to-end latency test. Compare like-for-like cases over time. The most useful regressions are usually `run/function/sync-success`, `runSync/function/success`, `run/object/mapped-error`, `all/two-independent-sync-tasks`, `allSettled/two-successful-tasks`, and `flow/immediate-exit`.
+- Prefer absolute changes in ns/iter. A +200 ns regression on a hot path means more than a percentage without context.
+- Use the direct baselines for scale only. Vitest times each iteration, which adds tens of nanoseconds. Cases under about 1 µs read higher than their real cost.
+- Read policy cases (`builder/sync`, `builder/async`) as the incremental cost of a policy that does not fire. The async cases are the ones to watch when you change `resolveWithAbort()`.
+- Read orchestration cases (`all`, `allSettled`, `flow`) as fixed framework cost for very small graphs. They are expected to be much slower than `Promise.all`. Compare the `-with-signal`, `-with-disposer`, and dependency cases with the plain cases to see where the setup cost goes.
+- Only compare runs that use the same Node.js version (see `.node-version`), machine class, and suite version.
+
 ## Making Changes
 
 ### Branch Naming
@@ -138,7 +169,7 @@ Allows flow tasks to observe external cancellation consistently.
 - Public API type changes must be covered in `src/__tests__/types.test-d.ts`
 - Type assertions are checked by `pnpm run check`, not Vitest
 - Write type assertions with `expectTypeOf` from `vitest`
-- Test files live in `src/__tests__/` and `src/lib/__tests__/`
+- Test files live in `src/__tests__/` and `src/lib/__tests__/`. Tests for repository scripts live in `scripts/__tests__/`.
 - Use `fast-check` for invariants that must hold across many inputs. Keep fixed examples for named cases and exact contracts.
 - To replay a property failure, pass the reported `seed` and `path` to `fc.assert`.
 - After you fix a property failure, add the minimized counterexample as a fixed regression test beside the property.

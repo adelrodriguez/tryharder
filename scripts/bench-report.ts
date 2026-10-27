@@ -1,40 +1,29 @@
 import { spawnSync } from "node:child_process"
-import { mkdir, writeFile } from "node:fs/promises"
+import { mkdir, readFile, writeFile } from "node:fs/promises"
+import { cpus } from "node:os"
 import { join } from "node:path"
-import { text } from "node:stream/consumers"
-import { BENCHMARK_SUITE_VERSION } from "./constants"
 
+const BENCHMARK_SUITE_VERSION = 4
 const OUTPUT_DIR = "bench-results"
+const VITEST_REPORT_PATH = join(OUTPUT_DIR, "vitest.json")
 const LATEST_REPORT_PATH = join(OUTPUT_DIR, "latest.json")
 const SUMMARY_PATH = join(OUTPUT_DIR, "summary.md")
 
-type RawMitataRun = {
-  error?: unknown
+type RawBenchmarkTask = {
+  latency?: {
+    mean?: unknown
+    samplesCount?: unknown
+  }
   name?: unknown
-  stats?: {
-    avg?: unknown
-    samples?: unknown
-  }
 }
 
-type RawMitataTrial = {
-  runs?: unknown
-}
-
-type RawMitataContext = {
-  cpu?: {
-    name?: unknown
-  }
-  version?: unknown
+type RawBenchmark = {
+  name?: unknown
+  tasks?: unknown
 }
 
 type RawBenchmarkPayload = {
-  groups?: Record<string, unknown>
-  results?: {
-    benchmarks?: unknown
-    context?: RawMitataContext
-  }
-  suiteVersion?: unknown
+  testResults?: unknown
 }
 
 export type BenchmarkCase = {
@@ -73,26 +62,20 @@ export function normalizeBenchmarkPayload(
     platform?: string
   } = {}
 ): BenchmarkArtifact {
-  const suiteVersion = normalizeSuiteVersion(payload.suiteVersion)
-  const groups = payload.groups
-  const trials = normalizeTrials(payload.results?.benchmarks)
-
-  const cases = trials.flatMap((trial) => trial.runs.map((run) => normalizeRun(run, groups)))
+  const cases = normalizeBenchmarks(payload.testResults).flatMap((benchmark) =>
+    benchmark.tasks.map((task) => normalizeTask(task, benchmark.name))
+  )
 
   return {
     cases,
     meta: {
       arch: options.arch ?? process.arch,
-      cpuModel:
-        options.cpuModel ?? normalizeOptionalString(payload.results?.context?.cpu?.name) ?? null,
+      cpuModel: options.cpuModel ?? cpus()[0]?.model ?? null,
       date: options.date ?? new Date().toISOString(),
       gitSha: options.gitSha ?? getGitSha(),
-      nodeVersion:
-        options.nodeVersion
-        ?? normalizeOptionalString(payload.results?.context?.version)
-        ?? process.version,
+      nodeVersion: options.nodeVersion ?? process.version,
       platform: options.platform ?? process.platform,
-      suiteVersion,
+      suiteVersion: BENCHMARK_SUITE_VERSION,
     },
   }
 }
@@ -144,64 +127,56 @@ export async function writeBenchmarkArtifacts(artifact: BenchmarkArtifact) {
 }
 
 if (import.meta.main) {
-  const rawInput = await text(process.stdin)
+  const rawInput = await readFile(VITEST_REPORT_PATH, "utf8")
   const artifact = normalizeBenchmarkPayload(parseRawBenchmarkPayload(rawInput))
   const result = await writeBenchmarkArtifacts(artifact)
 
   process.stdout.write(result.summary)
 }
 
-function normalizeSuiteVersion(value: unknown) {
-  if (typeof value === "number" && Number.isInteger(value) && value > 0) {
-    return value
-  }
-
-  return BENCHMARK_SUITE_VERSION
-}
-
-function normalizeTrials(value: unknown) {
+function normalizeBenchmarks(value: unknown) {
   if (!Array.isArray(value)) {
-    throw new Error("Benchmark payload is missing results.benchmarks")
+    throw new Error("Benchmark payload is missing testResults")
   }
 
-  return value.map((trial, index) => {
-    if (!isRecord(trial) || !Array.isArray(trial.runs)) {
-      throw new Error(`Benchmark trial at index ${index} is missing runs`)
+  return value.flatMap((file) => {
+    if (!isRecord(file) || !Array.isArray(file.assertionResults)) {
+      throw new Error("Benchmark test file is missing assertionResults")
     }
 
-    return trial as RawMitataTrial & { runs: RawMitataRun[] }
+    return file.assertionResults.flatMap((test) =>
+      isRecord(test) && Array.isArray(test.benchmarks)
+        ? test.benchmarks.map((benchmark: RawBenchmark) => {
+            if (!Array.isArray(benchmark.tasks)) {
+              throw new Error(`Benchmark ${describeName(benchmark.name)} is missing tasks`)
+            }
+
+            return {
+              name: normalizeRequiredString(benchmark.name, "Benchmark is missing name"),
+              tasks: benchmark.tasks as RawBenchmarkTask[],
+            }
+          })
+        : []
+    )
   })
 }
 
-function normalizeRun(run: RawMitataRun, groups: Record<string, unknown> | undefined) {
-  if (run.error !== undefined) {
-    throw new Error(`Benchmark ${describeRunName(run.name)} failed`)
-  }
-
-  const name = normalizeRequiredString(run.name, "Benchmark run is missing name")
-  const avgNs = normalizeFiniteNumber(run.stats?.avg, `Benchmark ${name} is missing stats.avg`)
-  const samplesValue = run.stats?.samples
-  const samples = Array.isArray(samplesValue)
-    ? samplesValue.length
-    : normalizeFiniteNumber(samplesValue, `Benchmark ${name} is missing stats.samples`)
+function normalizeTask(task: RawBenchmarkTask, group: string) {
+  const name = normalizeRequiredString(task.name, "Benchmark task is missing name")
+  const meanMs = normalizeFiniteNumber(task.latency?.mean, `Benchmark ${name} is missing mean`)
+  const samples = normalizeFiniteNumber(
+    task.latency?.samplesCount,
+    `Benchmark ${name} is missing samplesCount`
+  )
+  const avgNs = meanMs * 1e6
 
   return {
     avgNs,
-    group: normalizeBenchmarkGroup(name, groups),
+    group,
     hz: 1e9 / avgNs,
     name,
     samples,
   }
-}
-
-function normalizeBenchmarkGroup(name: string, groups: Record<string, unknown> | undefined) {
-  const group = groups?.[name]
-
-  if (typeof group === "string" && group.length > 0) {
-    return group
-  }
-
-  return "unknown"
 }
 
 function normalizeRequiredString(value: unknown, message: string) {
@@ -228,8 +203,8 @@ function compareBenchmarkCases(left: BenchmarkCase, right: BenchmarkCase) {
   return left.group.localeCompare(right.group) || left.name.localeCompare(right.name)
 }
 
-function describeRunName(value: unknown) {
-  return typeof value === "string" && value.length > 0 ? value : "unknown"
+function describeName(value: unknown) {
+  return normalizeOptionalString(value) ?? "unknown"
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
