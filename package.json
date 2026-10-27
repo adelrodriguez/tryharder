@@ -42,8 +42,8 @@
   },
   "scripts": {
     "analyze": "adamantite analyze",
-    "bench": "pnpm run build && node --expose-gc --import tsx bench/index.ts",
-    "bench:ci": "pnpm run build && node --expose-gc --import tsx bench/index.ts --json | node --import tsx bench/report.ts",
+    "bench": "vitest bench --run --reporter=verbose",
+    "bench:ci": "vitest bench --run --reporter=verbose --reporter=json --outputFile.json=bench-results/vitest.json && node scripts/bench-report.ts",
     "build": "tsdown",
     "build:verify": "pnpm run build && node scripts/verify-package.ts",
     "bump:deps": "pnpm update --interactive",
@@ -61,18 +61,16 @@
     "@changesets/cli": "3.0.1",
     "@clack/prompts": "1.7.0",
     "@types/node": "24.13.3",
-    "@vitest/coverage-v8": "4.1.11",
+    "@vitest/coverage-v8": "5.0.5",
     "adamantite": "0.43.0",
     "fast-check": "4.9.0",
     "knip": "6.39.0",
-    "mitata": "^1.0.34",
     "oxfmt": "0.71.0",
     "oxlint": "1.86.0",
     "oxlint-tsgolint": "7.0.2003",
     "tsdown": "0.22.14",
-    "tsx": "4.23.11",
     "typescript": "7.0.2",
-    "vitest": "4.1.11"
+    "vitest": "5.0.5"
   },
   "engines": {
     "node": ">=22"

@@ -5,7 +5,7 @@ const config: KnipConfig = {
   ...analyze,
   entry: ["src/**/*.test-d.ts", "scripts/*.ts"],
   ignoreExportsUsedInFile: true,
-  project: ["*.config.ts", "bench/**/*.ts", "scripts/**/*.ts", "src/**/*.ts"],
+  project: ["*.config.ts", "scripts/**/*.ts", "src/**/*.ts"],
   rules: {
     ...analyze.rules,
     binaries: "error",
