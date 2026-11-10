@@ -1,15 +1,12 @@
 import type { BuilderConfig } from "../builder"
-import type { NonPromise } from "../utils"
 import type { BaseTryCtx } from "./context"
 import { Panic, type UnhandledException } from "../errors"
 import { checkIsPromiseLike } from "../utils"
 import { BaseExecution, RetryDirective, type RunnerError } from "./base"
 
-export type RunTryFn<T, Ctx extends BaseTryCtx = BaseTryCtx> = (
-  ctx: Ctx
-) => NonPromise<T> | Promise<T>
+export type RunTryFn<T, Ctx extends BaseTryCtx = BaseTryCtx> = (ctx: Ctx) => T | Promise<T>
 
-type RunCatchFn<E> = (error: unknown) => NonPromise<E> | Promise<E>
+type RunCatchFn<E> = (error: unknown) => E | Promise<E>
 
 interface RunAsyncOptions<T, E, Ctx extends BaseTryCtx = BaseTryCtx> {
   try: RunTryFn<T, Ctx>
