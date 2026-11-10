@@ -103,6 +103,18 @@ class PermissionDeniedError extends Error {
   expectTypeOf(result).toEqualTypeOf<Promise<number | UserNotFoundError>>()
 }
 
+// Unwraps explicit promise type arguments in run().
+{
+  const tryOnly = try$.run<Promise<number>>(() => Promise.resolve(42))
+  const withCatch = try$.run<Promise<number>, Promise<UserNotFoundError>>({
+    catch: () => Promise.resolve(new UserNotFoundError()),
+    try: () => Promise.resolve(42),
+  })
+
+  expectTypeOf(tryOnly).toEqualTypeOf<Promise<number | UnhandledException>>()
+  expectTypeOf(withCatch).toEqualTypeOf<Promise<number | UserNotFoundError>>()
+}
+
 // Rejects a try or catch that returns a promise in runSync().
 {
   // @ts-expect-error -- runSync() rejects a try that returns a promise
