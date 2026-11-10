@@ -67,6 +67,66 @@ class PermissionDeniedError extends Error {
   expectTypeOf(result).toEqualTypeOf<Promise<number | "err">>()
 }
 
+// Infers a union from a sync try and a sync catch in run().
+{
+  const flag = Math.random() > 0.5
+  const result = try$.run({
+    catch: (error) =>
+      error instanceof TypeError ? new UserNotFoundError() : new PermissionDeniedError(),
+    try: () => (flag ? "a" : 1),
+  })
+
+  expectTypeOf(result).toEqualTypeOf<Promise<"a" | 1 | UserNotFoundError | PermissionDeniedError>>()
+}
+
+// Infers a union from an async try and an async catch in run().
+{
+  const flag = Math.random() > 0.5
+  const result = try$.run({
+    catch: (cause) =>
+      Promise.resolve(
+        cause instanceof TypeError ? new UserNotFoundError() : new PermissionDeniedError()
+      ),
+    try: () => Promise.resolve(flag ? ("a" as const) : (1 as const)),
+  })
+
+  expectTypeOf(result).toEqualTypeOf<Promise<"a" | 1 | UserNotFoundError | PermissionDeniedError>>()
+}
+
+// Unwraps a returned promise from try and catch in run().
+{
+  const result = try$.run({
+    catch: () => Promise.resolve(new UserNotFoundError()),
+    try: () => Promise.resolve(42),
+  })
+
+  expectTypeOf(result).toEqualTypeOf<Promise<number | UserNotFoundError>>()
+}
+
+// Unwraps explicit promise type arguments in run().
+{
+  const tryOnly = try$.run<Promise<number>>(() => Promise.resolve(42))
+  const withCatch = try$.run<Promise<number>, Promise<UserNotFoundError>>({
+    catch: () => Promise.resolve(new UserNotFoundError()),
+    try: () => Promise.resolve(42),
+  })
+
+  expectTypeOf(tryOnly).toEqualTypeOf<Promise<number | UnhandledException>>()
+  expectTypeOf(withCatch).toEqualTypeOf<Promise<number | UserNotFoundError>>()
+}
+
+// Rejects a try or catch that returns a promise in runSync().
+{
+  // @ts-expect-error -- runSync() rejects a try that returns a promise
+  void try$.runSync(() => Promise.resolve(42))
+
+  void try$.runSync({
+    // @ts-expect-error -- runSync() rejects a catch that returns a promise
+    catch: () => Promise.resolve(new UserNotFoundError()),
+    try: () => 42,
+  })
+}
+
 // Returns AsyncDisposer from disposer().
 {
   const disposer = try$.disposer()

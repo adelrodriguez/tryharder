@@ -185,8 +185,8 @@ export class RunBuilder<
    * Without `catch`, unmapped failures are wrapped: {@link RetryExhaustedError} when a retry policy
    * gave up, {@link UnhandledException} otherwise. The original error is available as `cause`.
    */
-  run<T>(tryFn: RunTryFn<T, TryCtxFor<HasRetry>>): Promise<T | UnmappedError<HasRetry> | E>
-  run<T, C>(options: AsyncRunInput<T, C, TryCtxFor<HasRetry>>): Promise<T | C | E>
+  run<T>(tryFn: RunTryFn<T, TryCtxFor<HasRetry>>): Promise<Awaited<T> | UnmappedError<HasRetry> | E>
+  run<T, C>(options: AsyncRunInput<T, C, TryCtxFor<HasRetry>>): Promise<Awaited<T | C> | E>
   run<T, C>(input: AsyncRunInput<T, C, TryCtxFor<HasRetry>>) {
     return executeRun(this.config, input)
   }
