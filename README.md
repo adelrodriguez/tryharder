@@ -1,3 +1,6 @@
+> [!IMPORTANT]
+> `tryharder` has moved to [`@sanely/try`](https://www.npmjs.com/package/@sanely/try). Its code now lives in [adelrodriguez/sanely](https://github.com/adelrodriguez/sanely/tree/main/packages/try). This repository is archived, and `tryharder` is deprecated on npm.
+
 <div align="center">
   <h1 align="center">🔁 tryharder</h1>
 
